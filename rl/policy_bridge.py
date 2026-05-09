@@ -157,7 +157,7 @@ class RLMovementBridge:
 
         if self.model_path and os.path.exists(self.model_path):
             try:
-                model = PPO.load(self.model_path, env=self.env)
+                model = PPO.load(self.model_path, env=self.env, device="cpu")
                 print(f"Loaded RL movement policy from {self.model_path}")
                 return model
             except Exception as exc:
@@ -169,6 +169,7 @@ class RLMovementBridge:
             n_steps=max(64, self.train_steps_per_update),
             batch_size=64,
             verbose=0,
+            device="cpu",
         )
         if self.train and self.model_path:
             try:

@@ -1,7 +1,7 @@
 personal_webhook = ""
 discord_id = ""
 super_debug = "no"
-visual_debug = "no"
+visual_debug = "yes"
 wall_stuck_debug = "no"
 cpu_or_gpu = "auto"
 directml_device_id = "auto"
