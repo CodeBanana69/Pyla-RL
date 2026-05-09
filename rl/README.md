@@ -107,6 +107,31 @@ candidates whose displacement vs. the previous frame is clearly heading
 away from the player (labeled YOLO classes always pass through and are
 gated by the tracker once they have velocity).
 
+### Enemy-origin requirement
+
+A track is only classified as a real projectile if its **first
+detection** was inside or just outside an enemy hitbox **and** not near
+the player or a teammate. This is what stops friendly shots flying past
+us, particle bursts on map decorations, and idle animations from being
+treated as incoming threats.
+
+Each new `ProjectileTrack` is tagged with a `from_enemy: Optional[bool]`
+at birth:
+
+| Value   | Meaning                                                                          | Counts as projectile? |
+| ------- | -------------------------------------------------------------------------------- | --------------------- |
+| `True`  | spawn point within `rl_projectile_enemy_origin_radius` of an enemy box          | yes                   |
+| `False` | enemies were visible but the spawn point wasn't near one (or was near a friendly) | no                    |
+| `None`  | no enemy or player/teammate boxes available at birth (we can't decide)          | yes (don't go blind in bushes) |
+
+Relevant config in `cfg/bot_config.toml`:
+
+| Key                                      | Default | Effect                                                                                                                          |
+| ---------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `rl_projectile_require_enemy_origin`     | `"yes"` | Master switch. When `"no"`, the origin tag is computed but ignored, and the old direction-only filter behaves as before.        |
+| `rl_projectile_enemy_origin_radius`      | `140`   | Pixel radius around an enemy box where a new spawn still counts as enemy-spawned. Increase if enemies fire from offsets/weapons that exceed the hitbox. |
+| `rl_projectile_friendly_origin_radius`   | `100`   | Pixel radius around the player/a teammate that suppresses classification (i.e. our own shots flying away).                      |
+
 ## Score / telemetry
 
 `RLMovementBridge` keeps running counters and prints a one-line summary

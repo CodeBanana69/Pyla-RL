@@ -129,6 +129,93 @@ class ProjectileTrackerTests(unittest.TestCase):
             )
         )
 
+    def test_track_born_near_enemy_is_marked_from_enemy(self):
+        tracker = ProjectileTracker(velocity_alpha=1.0, enemy_origin_radius=80.0)
+        tracker.update(
+            [[200, 100, 220, 120]],
+            now=0.0,
+            enemy_boxes=[[170, 70, 240, 140]],
+            friendly_boxes=[[1500, 800, 1560, 860]],
+        )
+        track = tracker.tracks[0]
+        self.assertIs(track.from_enemy, True)
+
+    def test_track_born_away_from_enemy_is_filtered_out(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            enemy_origin_radius=80.0,
+            incoming_min_alignment=-1.0,  # disable direction gate for this test
+            min_speed_px_s=0.0,
+        )
+        # Spawn point is far from the only enemy box.
+        tracker.update(
+            [[1000, 1000, 1020, 1020]],
+            now=0.0,
+            enemy_boxes=[[100, 100, 160, 160]],
+            friendly_boxes=[[500, 500, 560, 560]],
+        )
+        # Frame 2: give it any velocity.
+        tracker.update(
+            [[1020, 1000, 1040, 1020]],
+            now=0.1,
+            enemy_boxes=[[100, 100, 160, 160]],
+            friendly_boxes=[[500, 500, 560, 560]],
+        )
+        track = tracker.tracks[0]
+        self.assertIs(track.from_enemy, False)
+        # incoming_tracks must drop it even though it has velocity
+        self.assertEqual(tracker.incoming_tracks((1500, 1000)), [])
+        # is_player_hit on a player box overlapping its current pos must
+        # NOT fire because the projectile is not enemy-spawned.
+        self.assertFalse(
+            tracker.is_player_hit([1015, 995, 1045, 1025], now=0.1)
+        )
+
+    def test_track_born_near_player_is_friendly_fire(self):
+        tracker = ProjectileTracker(velocity_alpha=1.0)
+        # Spawn point is right next to the player; even though there's
+        # also an enemy nearby, the friendly proximity wins.
+        tracker.update(
+            [[510, 500, 530, 520]],
+            now=0.0,
+            enemy_boxes=[[400, 400, 460, 460]],
+            friendly_boxes=[[490, 480, 540, 530]],
+        )
+        track = tracker.tracks[0]
+        self.assertIs(track.from_enemy, False)
+
+    def test_unknown_origin_is_kept_when_no_entities_visible(self):
+        tracker = ProjectileTracker(velocity_alpha=1.0)
+        tracker.update([[100, 100, 120, 120]], now=0.0)
+        tracker.update([[140, 100, 160, 120]], now=0.1)
+        track = tracker.tracks[0]
+        self.assertIsNone(track.from_enemy)
+        # Direction gate should still let it through because the track
+        # is moving toward the (300, 100) player pos and origin is unknown.
+        self.assertEqual(len(tracker.incoming_tracks((300, 100))), 1)
+
+    def test_require_enemy_origin_can_be_disabled(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            require_enemy_origin=False,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+        )
+        tracker.update(
+            [[1000, 1000, 1020, 1020]],
+            now=0.0,
+            enemy_boxes=[[100, 100, 160, 160]],
+        )
+        tracker.update(
+            [[1020, 1000, 1040, 1020]],
+            now=0.1,
+            enemy_boxes=[[100, 100, 160, 160]],
+        )
+        # from_enemy is still recorded as False but the gate is off, so
+        # the track passes through.
+        self.assertIs(tracker.tracks[0].from_enemy, False)
+        self.assertEqual(len(tracker.incoming_tracks((1500, 1000))), 1)
+
     def test_confidence_score_combines_alignment_and_speed(self):
         tracker = ProjectileTracker(velocity_alpha=1.0)
         tracker.update([[0, 100, 20, 120]], now=0.0)

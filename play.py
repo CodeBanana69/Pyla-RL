@@ -149,6 +149,19 @@ class Movement:
         self.projectile_detection_confidence = float(
             bot_config.get("projectile_detection_confidence", 0.55)
         )
+        # Enemy-origin gate: a candidate is only classified as a real
+        # projectile if its first appearance was within
+        # ``enemy_origin_radius`` of an enemy hitbox AND not within
+        # ``friendly_origin_radius`` of the player / a teammate.
+        self.rl_projectile_require_enemy_origin = str(
+            bot_config.get("rl_projectile_require_enemy_origin", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.rl_projectile_enemy_origin_radius = float(
+            bot_config.get("rl_projectile_enemy_origin_radius", 140.0)
+        )
+        self.rl_projectile_friendly_origin_radius = float(
+            bot_config.get("rl_projectile_friendly_origin_radius", 100.0)
+        )
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -603,6 +616,9 @@ class Play(Movement):
                 incoming_min_alignment=max(
                     -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
                 ),
+                enemy_origin_radius=self.rl_projectile_enemy_origin_radius,
+                friendly_origin_radius=self.rl_projectile_friendly_origin_radius,
+                require_enemy_origin=self.rl_projectile_require_enemy_origin,
             )
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
@@ -2354,9 +2370,24 @@ class Play(Movement):
         )
         self._rl_motion_debug_boxes = motion_boxes
 
+        # Origin gate inputs: classify newly-born tracks as enemy-spawned
+        # only when they appear near an enemy hitbox (and not near a
+        # friendly one). Pass None when nothing is visible so the tracker
+        # treats classification as "unknown" instead of "not enemy".
+        enemy_boxes = list(data.get("enemy") or []) or None
+        friendly_boxes_raw = list(data.get("player") or []) + list(
+            data.get("teammate") or []
+        )
+        friendly_boxes = friendly_boxes_raw if friendly_boxes_raw else None
+
         data["projectile"] = boxes
         try:
-            tracks = self.projectile_tracker.update(boxes, now=current_time)
+            tracks = self.projectile_tracker.update(
+                boxes,
+                now=current_time,
+                enemy_boxes=enemy_boxes,
+                friendly_boxes=friendly_boxes,
+            )
         except Exception as exc:
             print(f"Projectile tracker update failed: {exc}")
             tracks = []
