@@ -171,7 +171,7 @@ Performance troubleshooting :
 - Turn off Windows Efficiency mode for the emulator if Task Manager shows it. Efficiency mode can cap emulator frame delivery and make the bot look stuck at 2-5 IPS.
 - For LDPlayer or MuMu, select the matching emulator in the hub or set `current_emulator = "LDPlayer"` / `"MuMu"` in `cfg/general_config.toml`, use 1920x1080 landscape, set emulator FPS to 60, and disable any low-FPS/eco mode.
 - Keep some free RAM. If memory is above about 85%, close Discord/browser/other games before running the bot.
-- Enable `Debug Screen` in Additional Settings to open a live vision overlay while the bot runs. It shows player, teammate, enemy, wall, fog, and range overlays.
+- Enable `Debug Screen` in Additional Settings to open a live vision overlay while the bot runs. It shows player, teammate, enemy, wall, fog, and range overlays. **Walls** only populate when `gamemode` in `cfg/bot_config.toml` is Showdown or Brawl Ball (see `should_detect_walls` in `play.py`). They are drawn with a separate limit `visual_debug_max_wall_boxes` in `cfg/general_config.toml` so gray wall boxes are not dropped when `visual_debug_max_boxes` fills up with entities.
 
 Wall model improvement :
 - The active wall/bush model is `models/tileDetector.onnx`.
