@@ -22,15 +22,6 @@ super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_cr
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
 
-# Class keys from PylaSpecificBrawlerDetectorV1 that are NOT per-brawler silhouettes (indices 0–19 and abilities).
-_MAIN_MODEL_NON_BRAWLER_CLASSES = frozenset({
-    'ammo', 'ball', 'damage_taken', 'defeat', 'draw', 'enemy_health_bar', 'enemy_position',
-    'gadget', 'gem', 'hypercharge', 'player_health_bar', 'player_position', 'respawning',
-    'shot_success', 'super', 'teammate_health bar', 'teammate_position', 'victory', 'wall',
-    'bush', 'enemy_ability', 'ally_ability',
-})
-
-
 class Movement:
 
     def __init__(self, window_controller):
@@ -1585,25 +1576,6 @@ class Play(Movement):
             print(f"[DBG] own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
         return own_box, rejected
 
-    @staticmethod
-    def _merge_named_brawler_boxes_into_players(data):
-        """Move detections keyed by brawler name (e.g. doug, shelly) into data['player'].
-
-        The main model often emits character boxes under roster class names instead of
-        player_position / enemy_position; without this, validate_game_data sees no player.
-        """
-        extra = []
-        for key in list(data.keys()):
-            if key in _MAIN_MODEL_NON_BRAWLER_CLASSES:
-                continue
-            boxes = data.pop(key, None)
-            if boxes:
-                extra.extend(boxes)
-        if not extra:
-            return
-        cur = data.get("player") or []
-        data["player"] = cur + extra
-
     def stabilize_entity_roles(self, frame, data):
         players = data.get("player") or []
         health_bars = data.get("player_health_bar") or []
@@ -1659,8 +1631,6 @@ class Play(Movement):
             data["teammate"] = data.pop("teammate_position")
         # -------------------------
 
-        self._merge_named_brawler_boxes_into_players(data)
-
         if not data.get("player") and self.entity_detection_retry_confidence < self.entity_detection_confidence:
             retry_data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_retry_confidence)
 
@@ -1670,8 +1640,6 @@ class Play(Movement):
                 retry_data["enemy"] = retry_data.pop("enemy_position")
             if "teammate_position" in retry_data:
                 retry_data["teammate"] = retry_data.pop("teammate_position")
-
-            self._merge_named_brawler_boxes_into_players(retry_data)
 
             if retry_data.get("player"):
                 if visual_debug:
