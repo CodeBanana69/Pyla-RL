@@ -52,30 +52,32 @@ combat_dodge_jitter_degrees = 18.0
 lead_shots = "yes"
 aimed_attacks = "no"
 projectile_speed_px_s = 900.0
-
-# Movement tuning
 roam_direction_hold_time = 1.5
 roam_center_bias = 0.25
 retreat_strafe_fraction = 0.5
 approach_flank_blend = 0.12
 multi_enemy_flee_weight = 0.45
 angle_smooth_factor = 0.28
-
-# RL Movement (hybrid: heuristic attacks + RL-driven movement)
-# When use_rl_movement = "yes", movement is selected by the RL policy and the
-# heuristic movement helpers (approach/retreat/strafe/roam) are bypassed for
-# the live path. Combat (attacks, supers, gadgets) always remains heuristic.
-# When enable_rl_movement_training = "yes", the bot collects rollouts and
-# periodically updates the policy weights in rl_movement_model_path.
-# When OFF, the bot only loads the pretrained policy and runs in inference mode.
 use_rl_movement = "no"
 enable_rl_movement_training = "no"
 rl_movement_model_path = "models/rl_movement_policy.zip"
-rl_combat_blend_dodge = "yes"            # let combat dodge/strafe still blend on top of the RL angle when in attack range
-rl_max_projectiles = 6                   # K nearest projectiles included in the observation
+rl_combat_blend_dodge = "yes"
+rl_max_projectiles = 6
 rl_projectile_classes = [ "projectile", "super", "bullet", "enemy_shot",]
 rl_projectile_history_seconds = 0.6
 rl_projectile_min_speed_px_s = 25.0
-rl_projectile_hit_radius_padding = 18    # extra px added to projectile half-size for hit checks
-rl_train_steps_per_update = 256          # rollout chunk before triggering a learn() call
-rl_save_every_seconds = 120              # how often to persist updated weights when training is on
+rl_projectile_hit_radius_padding = 18
+rl_projectile_max_match_distance = 120
+rl_universal_projectiles = "yes"
+rl_motion_scale_width = 480
+rl_motion_diff_threshold = 25
+rl_motion_exclude_dilate_px = 32
+rl_motion_min_area_px = 40
+rl_motion_max_area_px = 6000
+rl_motion_morph_kernel = 3
+rl_residual_max_box_area_frac = 0.02
+rl_residual_max_side_frac = 0.25
+rl_residual_iou_exclude = 0.25
+rl_projectile_merge_nms_iou = 0.35
+rl_train_steps_per_update = 256
+rl_save_every_seconds = 120

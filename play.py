@@ -131,7 +131,19 @@ class Movement:
         self.rl_projectile_hit_radius_padding = float(bot_config.get("rl_projectile_hit_radius_padding", 18))
         self.rl_train_steps_per_update = int(bot_config.get("rl_train_steps_per_update", 256))
         self.rl_save_every_seconds = float(bot_config.get("rl_save_every_seconds", 120))
-        
+        self.rl_universal_projectiles = str(bot_config.get("rl_universal_projectiles", "yes")).lower() in ("yes", "true", "1")
+        self.rl_motion_scale_width = int(bot_config.get("rl_motion_scale_width", 480))
+        self.rl_motion_diff_threshold = int(bot_config.get("rl_motion_diff_threshold", 25))
+        self.rl_motion_exclude_dilate_px = int(bot_config.get("rl_motion_exclude_dilate_px", 32))
+        self.rl_motion_min_area_px = int(bot_config.get("rl_motion_min_area_px", 40))
+        self.rl_motion_max_area_px = int(bot_config.get("rl_motion_max_area_px", 6000))
+        self.rl_motion_morph_kernel = int(bot_config.get("rl_motion_morph_kernel", 3))
+        self.rl_residual_max_box_area_frac = float(bot_config.get("rl_residual_max_box_area_frac", 0.02))
+        self.rl_residual_max_side_frac = float(bot_config.get("rl_residual_max_side_frac", 0.25))
+        self.rl_residual_iou_exclude = float(bot_config.get("rl_residual_iou_exclude", 0.25))
+        self.rl_projectile_merge_nms_iou = float(bot_config.get("rl_projectile_merge_nms_iou", 0.35))
+        self.rl_projectile_max_match_distance = float(bot_config.get("rl_projectile_max_match_distance", 120.0))
+
     @staticmethod
     def get_enemy_pos(enemy):
         return (enemy[0] + enemy[2]) / 2, (enemy[1] + enemy[3]) / 2
@@ -528,6 +540,7 @@ class Play(Movement):
         self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
         self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
         self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
+        self.visual_debug_motion_boxes = str(general_config.get("visual_debug_motion_boxes", "no")).lower() in ("yes", "true", "1")
         self._visual_debug_next_frame_at = 0.0
         self._visual_debug_next_enqueue_at = 0.0
         self._visual_debug_lock = threading.Lock()
@@ -577,10 +590,13 @@ class Play(Movement):
             self.projectile_tracker = ProjectileTracker(
                 history_seconds=self.rl_projectile_history_seconds,
                 min_speed_px_s=self.rl_projectile_min_speed_px_s,
+                max_match_distance=self.rl_projectile_max_match_distance,
             )
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
             self.projectile_tracker = None
+        self._rl_motion_prev_gray = None
+        self._rl_motion_debug_boxes = []
         self._rl_bridge = None
         self._rl_bridge_warned = False
 
@@ -740,6 +756,8 @@ class Play(Movement):
                 self.projectile_tracker.reset()
             except Exception:
                 pass
+        self._rl_motion_prev_gray = None
+        self._rl_motion_debug_boxes = []
         bridge = getattr(self, "_rl_bridge", None)
         if bridge and bridge is not False and hasattr(bridge, "on_match_reset"):
             try:
@@ -1789,6 +1807,7 @@ class Play(Movement):
                     train=self.rl_training_enabled,
                     train_steps_per_update=self.rl_train_steps_per_update,
                     save_every_seconds=self.rl_save_every_seconds,
+                    max_projectiles=self.rl_max_projectiles,
                 )
             except Exception as exc:
                 if not getattr(self, "_rl_bridge_warned", False):
@@ -2213,15 +2232,12 @@ class Play(Movement):
         return movement
 
     def update_projectile_tracker(self, data, current_time):
-        """Aggregate detector boxes that look like projectiles into
-        ``data['projectile']`` and update the tracker.
+        """Aggregate labeled, residual-detector, and motion-diff boxes into
+        ``data['projectile']`` and advance ``ProjectileTracker``.
 
-        The current vision model does not export projectile classes, so
-        ``boxes`` will usually be empty. Once the YOLO model is
-        retrained with classes such as ``projectile`` / ``super`` /
-        ``bullet``, those detections flow into the data dict and this
-        function turns them into smoothed tracks the RL observation
-        consumes.
+        With ``rl_universal_projectiles`` enabled, small moving regions
+        masked away from entities (and trusted fog) augment YOLO projectile
+        classes so RL dodge features work without a retrained main model.
         """
         if not data:
             return []
@@ -2230,7 +2246,85 @@ class Play(Movement):
             return []
 
         from rl.projectile_tracker import extract_projectile_boxes
-        boxes = extract_projectile_boxes(data, self.rl_projectile_classes)
+        from rl.universal_projectiles import (
+            collect_entity_wall_boxes,
+            extract_residual_projectile_boxes,
+            grayscale_small,
+            merge_projectile_candidates,
+            motion_blob_boxes,
+            raster_fog_roi_to_small_mask,
+        )
+
+        labeled = extract_projectile_boxes(data, self.rl_projectile_classes)
+        residual: list = []
+        motion_boxes: list = []
+
+        if self.rl_universal_projectiles:
+            exclude_keys = {"player", "teammate", "enemy", "wall"}
+            for cls_name in self.rl_projectile_classes:
+                exclude_keys.add(str(cls_name))
+            for wcls in self.tile_detector_model_classes:
+                exclude_keys.add(str(wcls))
+
+            ref_boxes = collect_entity_wall_boxes(data)
+            frame = self.current_frame
+            fw, fh = brawl_stars_width, brawl_stars_height
+            if frame is not None:
+                fh, fw = frame.shape[:2]
+            frame_wh = (fw, fh)
+
+            residual = extract_residual_projectile_boxes(
+                data,
+                exclude_keys,
+                ref_boxes,
+                frame_wh,
+                max_box_area_frac=self.rl_residual_max_box_area_frac,
+                max_side_frac=self.rl_residual_max_side_frac,
+                iou_exclude_thresh=self.rl_residual_iou_exclude,
+            )
+
+            if frame is not None:
+                curr_small = grayscale_small(frame, self.rl_motion_scale_width)
+                sh, sw = curr_small.shape[:2]
+                fog_small = None
+                if data.get("player"):
+                    px, py = self.get_player_pos(data["player"][0])
+                    built = self._build_trusted_fog_mask(
+                        frame, roi_center=(px, py), roi_radius=self.fog_flee_distance
+                    )
+                    if built is not None:
+                        fog_mask_roi, origin = built
+                        fog_small = raster_fog_roi_to_small_mask(
+                            fog_mask_roi, origin, (fh, fw), (sh, sw)
+                        )
+                dil_small = max(
+                    1, int(round(self.rl_motion_exclude_dilate_px * sw / max(1, fw)))
+                )
+                motion_boxes = motion_blob_boxes(
+                    self._rl_motion_prev_gray,
+                    curr_small,
+                    ref_boxes,
+                    frame_wh,
+                    diff_threshold=self.rl_motion_diff_threshold,
+                    exclude_dilate_px=dil_small,
+                    min_area_px=self.rl_motion_min_area_px,
+                    max_area_px=self.rl_motion_max_area_px,
+                    morph_kernel=self.rl_motion_morph_kernel,
+                    fog_exclude_small=fog_small,
+                )
+                self._rl_motion_prev_gray = curr_small.copy()
+        else:
+            self._rl_motion_prev_gray = None
+            motion_boxes = []
+
+        boxes = merge_projectile_candidates(
+            labeled,
+            residual,
+            motion_boxes,
+            self.rl_projectile_merge_nms_iou,
+        )
+        self._rl_motion_debug_boxes = motion_boxes
+
         data["projectile"] = boxes
         try:
             tracks = self.projectile_tracker.update(boxes, now=current_time)
@@ -2440,6 +2534,60 @@ class Play(Movement):
                 if key != "wall":
                     cv2.putText(img, key, sp((x1, max(y1 - 6, 0))),
                                 cv2.FONT_HERSHEY_SIMPLEX, max(0.35, 0.5 * scale), color, 1)
+                boxes_drawn += 1
+
+        projectile_tracker = getattr(self, "projectile_tracker", None)
+        if projectile_tracker is not None:
+            track_col = (255, 165, 0)
+            arrow_dt = 0.1
+            for tr in projectile_tracker.tracks:
+                x1, y1, x2, y2 = tr.expanded_box()
+                xa1, ya1, xa2, ya2 = int(x1), int(y1), int(x2), int(y2)
+                cv2.rectangle(
+                    img,
+                    sp((xa1, ya1)),
+                    sp((xa2, ya2)),
+                    track_col,
+                    max(1, s(2)),
+                )
+                cv2.putText(
+                    img,
+                    f"proj{tr.track_id}",
+                    sp((xa1, max(ya1 - 6, 0))),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.35, 0.5 * scale),
+                    track_col,
+                    1,
+                )
+                tip_x = tr.cx + tr.vx * arrow_dt
+                tip_y = tr.cy + tr.vy * arrow_dt
+                cv2.arrowedLine(
+                    img,
+                    sp((tr.cx, tr.cy)),
+                    sp((tip_x, tip_y)),
+                    track_col,
+                    max(1, s(2)),
+                    tipLength=0.25,
+                )
+
+        if getattr(self, "visual_debug_motion_boxes", False):
+            motion_col = (0, 255, 255)
+            for box in getattr(self, "_rl_motion_debug_boxes", []) or []:
+                if boxes_drawn >= self.visual_debug_max_boxes:
+                    break
+                if len(box) < 4:
+                    continue
+                x1, y1, x2, y2 = map(int, box[:4])
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), motion_col, 1)
+                cv2.putText(
+                    img,
+                    "motion",
+                    sp((x1, max(y1 - 6, 0))),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.35, 0.45 * scale),
+                    motion_col,
+                    1,
+                )
                 boxes_drawn += 1
 
         # Draw attack/super ranges around the player based on brawlers_info.json.
