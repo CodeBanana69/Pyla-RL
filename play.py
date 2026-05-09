@@ -119,6 +119,18 @@ class Movement:
         self.approach_flank_blend = float(bot_config.get("approach_flank_blend", 0.12))
         self.multi_enemy_flee_weight = float(bot_config.get("multi_enemy_flee_weight", 0.45))
         self.angle_smooth_factor = float(bot_config.get("angle_smooth_factor", 0.28))
+
+        self.use_rl_movement = str(bot_config.get("use_rl_movement", "no")).lower() in ("yes", "true", "1")
+        self.rl_training_enabled = str(bot_config.get("enable_rl_movement_training", "no")).lower() in ("yes", "true", "1")
+        self.rl_movement_model_path = str(bot_config.get("rl_movement_model_path", "models/rl_movement_policy.zip"))
+        self.rl_combat_blend_dodge = str(bot_config.get("rl_combat_blend_dodge", "yes")).lower() in ("yes", "true", "1")
+        self.rl_max_projectiles = int(bot_config.get("rl_max_projectiles", 6))
+        self.rl_projectile_classes = list(bot_config.get("rl_projectile_classes", ["projectile", "super", "bullet", "enemy_shot"]))
+        self.rl_projectile_history_seconds = float(bot_config.get("rl_projectile_history_seconds", 0.6))
+        self.rl_projectile_min_speed_px_s = float(bot_config.get("rl_projectile_min_speed_px_s", 25.0))
+        self.rl_projectile_hit_radius_padding = float(bot_config.get("rl_projectile_hit_radius_padding", 18))
+        self.rl_train_steps_per_update = int(bot_config.get("rl_train_steps_per_update", 256))
+        self.rl_save_every_seconds = float(bot_config.get("rl_save_every_seconds", 120))
         
     @staticmethod
     def get_enemy_pos(enemy):
@@ -560,6 +572,18 @@ class Play(Movement):
         self._playstyle_error_reported = False
         self.load_playstyle()
 
+        try:
+            from rl.projectile_tracker import ProjectileTracker
+            self.projectile_tracker = ProjectileTracker(
+                history_seconds=self.rl_projectile_history_seconds,
+                min_speed_px_s=self.rl_projectile_min_speed_px_s,
+            )
+        except Exception as exc:
+            print(f"Could not initialise projectile tracker: {exc}")
+            self.projectile_tracker = None
+        self._rl_bridge = None
+        self._rl_bridge_warned = False
+
     def load_playstyle(self):
         if not self.playstyle_name:
             return
@@ -711,6 +735,17 @@ class Play(Movement):
         self.time_since_last_proceeding = time.time()
         self.fix_movement_keys['toggled'] = False
         self.time_since_holding_attack = None
+        if getattr(self, "projectile_tracker", None) is not None:
+            try:
+                self.projectile_tracker.reset()
+            except Exception:
+                pass
+        bridge = getattr(self, "_rl_bridge", None)
+        if bridge and bridge is not False and hasattr(bridge, "on_match_reset"):
+            try:
+                bridge.on_match_reset()
+            except Exception as exc:
+                print(f"RL bridge match reset failed: {exc}")
 
     def load_brawler_ranges(self, brawlers_info=None):
         if not brawlers_info:
@@ -1623,8 +1658,170 @@ class Play(Movement):
 
         return self.last_movement
 
+    def run_combat(self, brawler, data, movement, current_time):
+        """Heuristic combat layer: attacks, supers, gadgets, hold-attack release.
+
+        This is split out from get_movement / get_showdown_movement so that
+        when the RL movement policy is driving movement we still get the
+        same per-brawler attack behaviour.
+
+        Returns a possibly-modified movement (combat dodge/strafe may blend
+        on top of the movement angle when the bot is in attack range and
+        rl_combat_blend_dodge is enabled).
+        """
+        if not data or not data.get("player"):
+            return movement
+
+        brawler_info = self.brawlers_info.get(brawler)
+        if not brawler_info:
+            return movement
+
+        must_brawler_hold_attack = self.must_brawler_hold_attack(brawler, self.brawlers_info)
+        if (
+            must_brawler_hold_attack
+            and self.time_since_holding_attack is not None
+            and current_time - self.time_since_holding_attack
+            >= brawler_info['hold_attack'] + self.seconds_to_hold_attack_after_reaching_max
+        ):
+            self.attack(touch_up=True, touch_down=False)
+            self.time_since_holding_attack = None
+
+        enemy_data = data.get("enemy") or []
+        walls = data.get("wall") or []
+        if not self.is_there_enemy(enemy_data):
+            return movement
+
+        player_pos = self.get_player_pos(data['player'][0])
+        enemy_coords, enemy_distance = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
+        if enemy_coords is None or enemy_distance is None:
+            return movement
+
+        safe_range, attack_range, _super_range = self.get_brawler_range(brawler)
+        direction_x = enemy_coords[0] - player_pos[0]
+        direction_y = enemy_coords[1] - player_pos[1]
+        toward_angle = self.angle_from_direction(direction_x, direction_y)
+
+        if self.lead_shots_enabled:
+            self.enemy_velocity = self.track_enemy_velocity(enemy_coords, current_time)
+        else:
+            self.enemy_velocity = (0.0, 0.0)
+            self.enemy_velocity_confidence = 0.0
+
+        self.try_use_super_on_enemy(brawler, brawler_info, player_pos, enemy_coords, enemy_distance, walls)
+
+        if enemy_distance > attack_range:
+            return movement
+
+        enemy_hittable = self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
+        if not enemy_hittable:
+            return movement
+
+        if (
+            self.rl_combat_blend_dodge
+            and self.strafe_enabled
+            and isinstance(movement, float)
+        ):
+            desired = self.apply_combat_dodge(movement, toward_angle, current_time, enemy_distance, safe_range)
+            movement = self.find_best_angle(player_pos, desired, walls)
+        elif (
+            self.rl_combat_blend_dodge
+            and self.strafe_enabled
+            and isinstance(movement, str)
+            and movement
+        ):
+            base_angle = self.angle_from_direction(*self.movement_to_vector(movement))
+            desired = self.apply_combat_dodge(base_angle, toward_angle, current_time, enemy_distance, safe_range)
+            movement = self.find_best_angle(player_pos, desired, walls)
+
+        if (
+            self.should_use_gadget
+            and self.is_gadget_ready
+            and self.time_since_holding_attack is None
+        ):
+            enemies_in_range = sum(
+                1 for enemy in enemy_data
+                if self.get_distance(self.get_enemy_pos(enemy), player_pos) <= attack_range
+            )
+            gadget_threshold = attack_range if enemies_in_range >= 2 else attack_range * 0.7
+            if enemy_distance <= gadget_threshold:
+                if self.use_gadget():
+                    self.time_since_gadget_checked = time.time()
+                    self.clear_ability_ready("gadget")
+
+        if not must_brawler_hold_attack:
+            attack_angle = toward_angle
+            if self.lead_shots_enabled and self.enemy_velocity != (0.0, 0.0):
+                attack_angle = self.lead_shot_angle(
+                    player_pos,
+                    enemy_coords,
+                    self.enemy_velocity,
+                    confidence=getattr(self, "enemy_velocity_confidence", 1.0),
+                )
+            if self.aimed_attacks_enabled:
+                self.aimed_attack(attack_angle)
+            else:
+                self.attack()
+        else:
+            if self.time_since_holding_attack is None:
+                self.time_since_holding_attack = time.time()
+                self.attack(touch_up=False, touch_down=True)
+            elif time.time() - self.time_since_holding_attack >= brawler_info['hold_attack']:
+                self.attack(touch_up=True, touch_down=False)
+                self.time_since_holding_attack = None
+
+        return movement
+
+    def compute_rl_movement(self, brawler, data, current_time):
+        """Hook used by loop() when use_rl_movement is enabled.
+
+        Returns a movement value (float angle in showdown, WASD string in 3v3)
+        produced by the RL policy bridge, or None to fall back to the
+        heuristic movement path. The actual policy lives in
+        rl/policy_bridge.py and is loaded lazily on first use.
+        """
+        bridge = getattr(self, "_rl_bridge", None)
+        if bridge is None:
+            try:
+                from rl.policy_bridge import RLMovementBridge
+                bridge = RLMovementBridge(
+                    model_path=self.rl_movement_model_path,
+                    is_showdown=self.is_showdown,
+                    train=self.rl_training_enabled,
+                    train_steps_per_update=self.rl_train_steps_per_update,
+                    save_every_seconds=self.rl_save_every_seconds,
+                )
+            except Exception as exc:
+                if not getattr(self, "_rl_bridge_warned", False):
+                    print(f"RL movement bridge unavailable, falling back to heuristic: {exc}")
+                    self._rl_bridge_warned = True
+                self._rl_bridge = False
+                return None
+            self._rl_bridge = bridge
+
+        if bridge is False:
+            return None
+
+        try:
+            movement = bridge.predict(self, data, current_time)
+        except Exception as exc:
+            if not getattr(self, "_rl_bridge_warned", False):
+                print(f"RL movement predict failed, falling back to heuristic: {exc}")
+                self._rl_bridge_warned = True
+            return None
+        return movement
+
     def loop(self, brawler, data, current_time):
-        if self.is_showdown:
+        rl_movement = None
+        if self.use_rl_movement:
+            rl_movement = self.compute_rl_movement(brawler, data, current_time)
+
+        rl_active = rl_movement is not None
+        if rl_active:
+            movement = rl_movement
+            if self.is_showdown and isinstance(movement, float):
+                movement = self._debounce_angle(movement)
+            movement = self.run_combat(brawler, data, movement, current_time)
+        elif self.is_showdown:
             movement = self.get_showdown_movement(
                 player_data=data['player'][0],
                 enemy_data=data['enemy'],
@@ -1637,7 +1834,11 @@ class Play(Movement):
         else:
             movement = self.get_movement(player_data=data['player'][0], enemy_data=data['enemy'], walls=data['wall'], brawler=brawler)
 
-        movement = self.enemy_pressure_movement_fallback(movement, data, brawler, current_time)
+        if not rl_active:
+            # The pressure fallback is a heuristic movement adjustment; with the
+            # RL policy driving movement we trust the policy and only keep
+            # safety mechanisms (wall-stuck escape, unstuck) below.
+            movement = self.enemy_pressure_movement_fallback(movement, data, brawler, current_time)
 
         current_time = time.time()
         if current_time - self.time_since_movement > self.minimum_movement_delay:
@@ -2011,6 +2212,33 @@ class Play(Movement):
 
         return movement
 
+    def update_projectile_tracker(self, data, current_time):
+        """Aggregate detector boxes that look like projectiles into
+        ``data['projectile']`` and update the tracker.
+
+        The current vision model does not export projectile classes, so
+        ``boxes`` will usually be empty. Once the YOLO model is
+        retrained with classes such as ``projectile`` / ``super`` /
+        ``bullet``, those detections flow into the data dict and this
+        function turns them into smoothed tracks the RL observation
+        consumes.
+        """
+        if not data:
+            return []
+        if self.projectile_tracker is None:
+            data["projectile"] = []
+            return []
+
+        from rl.projectile_tracker import extract_projectile_boxes
+        boxes = extract_projectile_boxes(data, self.rl_projectile_classes)
+        data["projectile"] = boxes
+        try:
+            tracks = self.projectile_tracker.update(boxes, now=current_time)
+        except Exception as exc:
+            print(f"Projectile tracker update failed: {exc}")
+            tracks = []
+        return tracks
+
     def main(self, frame, brawler, main):
         current_time = time.time()
         raw_data = self.get_main_data(frame)
@@ -2062,6 +2290,7 @@ class Play(Movement):
 
         self.current_frame = frame
         self.last_playstyle_teammate_data = data.get("teammate")
+        self.update_projectile_tracker(data, current_time)
         movement = self.loop(brawler, data, current_time)
 
         if visual_debug:
