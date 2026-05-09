@@ -2557,6 +2557,7 @@ class Play(Movement):
         elif self.keep_walls_in_memory:
             data['wall'] = self.last_walls_data
 
+        detection_snapshot = dict(data) if isinstance(data, dict) else {}
         data = self.validate_game_data(data)
         self.track_no_detections(data)
         if data:
@@ -2586,6 +2587,11 @@ class Play(Movement):
                         self.window_controller.press_key("Q")
                         self.time_since_last_no_detection_q = current_time
                     self.time_since_last_proceeding = time.time()
+            if visual_debug:
+                dbg = detection_snapshot if detection_snapshot else (
+                    raw_data if isinstance(raw_data, dict) else {}
+                )
+                self.queue_visual_debug(frame, dbg, brawler)
             return
         self.time_since_last_proceeding = time.time()
         self.refresh_ready_abilities(frame, current_time)
