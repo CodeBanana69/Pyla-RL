@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import time
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -162,6 +163,51 @@ class Movement:
         self.rl_projectile_friendly_origin_radius = float(
             bot_config.get("rl_projectile_friendly_origin_radius", 100.0)
         )
+        self.rl_universal_projectiles_mode = str(
+            bot_config.get("rl_universal_projectiles_mode", "motion")
+        ).strip().lower()
+        self.rl_motion_ego_compensate = str(bot_config.get("rl_motion_ego_compensate", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_motion_ego_min_response = float(bot_config.get("rl_motion_ego_min_response", 0.08))
+        self.rl_motion_skip_on_bad_ego = str(
+            bot_config.get("rl_motion_skip_on_bad_ego", "no")
+        ).lower() in ("yes", "true", "1")
+        self.rl_motion_use_ui_mask = str(bot_config.get("rl_motion_use_ui_mask", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        raw_ui = bot_config.get("rl_motion_ui_exclude_rects")
+        self.rl_motion_ui_exclude_rects: Optional[list] = (
+            raw_ui if isinstance(raw_ui, list) and raw_ui else None
+        )
+        self.rl_motion_full_frame_fog = str(bot_config.get("rl_motion_full_frame_fog", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_motion_fog_exclude_dilate_px = int(bot_config.get("rl_motion_fog_exclude_dilate_px", 2))
+        raw_terr = bot_config.get("rl_animated_terrain_hsv_ranges")
+        self.rl_animated_terrain_hsv_ranges: list = (
+            raw_terr if isinstance(raw_terr, list) else []
+        )
+        self.rl_projectile_min_hits_to_promote = max(
+            1, int(bot_config.get("rl_projectile_min_hits_to_promote", 1))
+        )
+        self.rl_projectile_max_speed_px_s = float(bot_config.get("rl_projectile_max_speed_px_s", 1.0e9))
+        self.rl_projectile_max_accel_px_s2 = float(bot_config.get("rl_projectile_max_accel_px_s2", 1.0e9))
+        self.rl_projectile_max_line_residual_frac = float(
+            bot_config.get("rl_projectile_max_line_residual_frac", 1.0)
+        )
+        self.rl_projectile_motion_origin_radius = float(
+            bot_config.get("rl_projectile_motion_origin_radius", 80.0)
+        )
+        self.rl_projectile_require_enemy_origin_strict = str(
+            bot_config.get("rl_projectile_require_enemy_origin_strict", "no")
+        ).lower() in ("yes", "true", "1")
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -617,8 +663,14 @@ class Play(Movement):
                     -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
                 ),
                 enemy_origin_radius=self.rl_projectile_enemy_origin_radius,
+                motion_enemy_origin_radius=self.rl_projectile_motion_origin_radius,
                 friendly_origin_radius=self.rl_projectile_friendly_origin_radius,
                 require_enemy_origin=self.rl_projectile_require_enemy_origin,
+                require_enemy_origin_strict=self.rl_projectile_require_enemy_origin_strict,
+                min_hits_to_promote=self.rl_projectile_min_hits_to_promote,
+                max_speed_px_s=self.rl_projectile_max_speed_px_s,
+                max_accel_px_s2=self.rl_projectile_max_accel_px_s2,
+                max_line_residual_frac=self.rl_projectile_max_line_residual_frac,
             )
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
@@ -2278,17 +2330,27 @@ class Play(Movement):
 
         from rl.projectile_tracker import extract_projectile_boxes
         from rl.universal_projectiles import (
+            animated_terrain_mask_small,
             collect_entity_wall_boxes,
             extract_residual_projectile_boxes,
             grayscale_small,
-            merge_projectile_candidates,
+            merge_projectile_candidates_with_sources,
             motion_blob_boxes,
+            parse_animated_terrain_hsv_ranges,
             raster_fog_roi_to_small_mask,
+            scale_ui_reference_rects,
+            trusted_fog_mask_small,
         )
 
         labeled = extract_projectile_boxes(data, self.rl_projectile_classes)
         residual: list = []
         motion_boxes: list = []
+        ui_boxes_fullres: list = []
+        motion_ran = False
+
+        univ_mode = getattr(self, "rl_universal_projectiles_mode", "motion")
+        run_residual = self.rl_universal_projectiles and univ_mode in ("motion", "residual_only")
+        run_motion = self.rl_universal_projectiles and univ_mode == "motion"
 
         if self.rl_universal_projectiles:
             exclude_keys = {"player", "teammate", "enemy", "wall"}
@@ -2304,17 +2366,28 @@ class Play(Movement):
                 fh, fw = frame.shape[:2]
             frame_wh = (fw, fh)
 
-            residual = extract_residual_projectile_boxes(
-                data,
-                exclude_keys,
-                ref_boxes,
-                frame_wh,
-                max_box_area_frac=self.rl_residual_max_box_area_frac,
-                max_side_frac=self.rl_residual_max_side_frac,
-                iou_exclude_thresh=self.rl_residual_iou_exclude,
-            )
+            if getattr(self, "rl_motion_use_ui_mask", True):
+                ui_boxes_fullres = scale_ui_reference_rects(
+                    fw,
+                    fh,
+                    definitions=self.rl_motion_ui_exclude_rects,
+                )
 
-            if frame is not None:
+            ref_motion = list(ref_boxes) + ui_boxes_fullres
+
+            if run_residual:
+                residual = extract_residual_projectile_boxes(
+                    data,
+                    exclude_keys,
+                    ref_boxes,
+                    frame_wh,
+                    max_box_area_frac=self.rl_residual_max_box_area_frac,
+                    max_side_frac=self.rl_residual_max_side_frac,
+                    iou_exclude_thresh=self.rl_residual_iou_exclude,
+                    ui_exclude_boxes=ui_boxes_fullres or None,
+                )
+
+            if run_motion and frame is not None:
                 curr_small = grayscale_small(frame, self.rl_motion_scale_width)
                 sh, sw = curr_small.shape[:2]
                 fog_small = None
@@ -2328,13 +2401,44 @@ class Play(Movement):
                         fog_small = raster_fog_roi_to_small_mask(
                             fog_mask_roi, origin, (fh, fw), (sh, sw)
                         )
+                if getattr(self, "rl_motion_full_frame_fog", True):
+                    ff_area = max(1, fh * fw)
+                    full_fog = trusted_fog_mask_small(
+                        frame,
+                        fog_hsv_low=tuple(self.fog_hsv_low),
+                        fog_hsv_high=tuple(self.fog_hsv_high),
+                        scale_width=self.rl_motion_scale_width,
+                        full_frame_area=ff_area,
+                        full_min_blob_pixels=int(self.fog_min_blob_pixels),
+                        dilate_px=int(getattr(self, "rl_motion_fog_exclude_dilate_px", 2)),
+                    )
+                    if fog_small is not None:
+                        fog_small = cv2.bitwise_or(fog_small, full_fog)
+                    else:
+                        fog_small = full_fog
+
+                terr_ranges = parse_animated_terrain_hsv_ranges(
+                    getattr(self, "rl_animated_terrain_hsv_ranges", [])
+                )
+                terrain_mask = animated_terrain_mask_small(
+                    frame,
+                    scale_width=self.rl_motion_scale_width,
+                    hsv_ranges=terr_ranges,
+                    dilate_px=2,
+                )
+                if terrain_mask is not None and cv2.countNonZero(terrain_mask) > 0:
+                    if fog_small is not None:
+                        fog_small = cv2.bitwise_or(fog_small, terrain_mask)
+                    else:
+                        fog_small = terrain_mask
+
                 dil_small = max(
                     1, int(round(self.rl_motion_exclude_dilate_px * sw / max(1, fw)))
                 )
                 motion_boxes = motion_blob_boxes(
                     self._rl_motion_prev_gray,
                     curr_small,
-                    ref_boxes,
+                    ref_motion,
                     frame_wh,
                     diff_threshold=self.rl_motion_diff_threshold,
                     exclude_dilate_px=dil_small,
@@ -2342,11 +2446,17 @@ class Play(Movement):
                     max_area_px=self.rl_motion_max_area_px,
                     morph_kernel=self.rl_motion_morph_kernel,
                     fog_exclude_small=fog_small,
+                    ego_compensate=getattr(self, "rl_motion_ego_compensate", False),
+                    ego_min_response=float(getattr(self, "rl_motion_ego_min_response", 0.08)),
+                    skip_motion_on_low_ego_response=getattr(
+                        self, "rl_motion_skip_on_bad_ego", False
+                    ),
                 )
                 self._rl_motion_prev_gray = curr_small.copy()
-        else:
+                motion_ran = True
+
+        if not motion_ran:
             self._rl_motion_prev_gray = None
-            motion_boxes = []
 
         # Direction gate: drop residual/motion candidates whose movement
         # since the previous frame is clearly heading away from the player.
@@ -2362,7 +2472,7 @@ class Play(Movement):
             player_pos=player_pos,
         )
 
-        boxes = merge_projectile_candidates(
+        boxes, box_sources = merge_projectile_candidates_with_sources(
             labeled,
             residual,
             motion_boxes,
@@ -2387,6 +2497,8 @@ class Play(Movement):
                 now=current_time,
                 enemy_boxes=enemy_boxes,
                 friendly_boxes=friendly_boxes,
+                box_sources=box_sources,
+                ui_exclude_boxes=ui_boxes_fullres or None,
             )
         except Exception as exc:
             print(f"Projectile tracker update failed: {exc}")

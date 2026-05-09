@@ -30,13 +30,46 @@ from __future__ import annotations
 
 import math
 import time
+from collections import deque
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Deque, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 
 FEATURES_PER_TRACK = 7  # dx, dy, vx, vy, half_w, half_h, age_sec
+
+
+def line_residual_ratio(points: Sequence[Tuple[float, float]]) -> float:
+    """Mean perpendicular deviation from a linear fit vs. polyline path length."""
+    if len(points) < 3:
+        return 0.0
+    pts = np.array(points, dtype=np.float64)
+    path_len = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
+    if path_len < 1e-6:
+        return 0.0
+    t = np.arange(len(pts), dtype=np.float64)
+    px = np.polyfit(t, pts[:, 0], 1)
+    py = np.polyfit(t, pts[:, 1], 1)
+    pred = np.column_stack([np.polyval(px, t), np.polyval(py, t)])
+    resid = float(np.mean(np.linalg.norm(pts - pred, axis=1)))
+    return resid / path_len
+
+
+def _center_inside_any_ui(cx: float, cy: float, rects: Optional[Sequence[Sequence[float]]]) -> bool:
+    if not rects:
+        return False
+    for r in rects:
+        if len(r) < 4:
+            continue
+        x1, y1, x2, y2 = map(float, r[:4])
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        if x1 <= cx <= x2 and y1 <= cy <= y2:
+            return True
+    return False
 
 
 @dataclass
@@ -63,6 +96,13 @@ class ProjectileTrack:
     from_enemy: Optional[bool] = None
     origin_cx: float = 0.0
     origin_cy: float = 0.0
+    source: str = "labeled"  # labeled | residual | motion
+    match_streak: int = 1
+    center_history: Deque[Tuple[float, float]] = field(
+        default_factory=lambda: deque(maxlen=12)
+    )
+    _inst_vx: float = 0.0
+    _inst_vy: float = 0.0
     _matched: bool = field(default=False, repr=False)
 
     def predict(self, now: float) -> Tuple[float, float]:
@@ -220,8 +260,14 @@ class ProjectileTracker:
         min_speed_px_s: float = 25.0,
         incoming_min_alignment: float = 0.2,
         enemy_origin_radius: float = 140.0,
+        motion_enemy_origin_radius: float = 80.0,
         friendly_origin_radius: float = 100.0,
         require_enemy_origin: bool = True,
+        require_enemy_origin_strict: bool = False,
+        min_hits_to_promote: int = 1,
+        max_speed_px_s: float = 1.0e9,
+        max_accel_px_s2: float = 1.0e9,
+        max_line_residual_frac: float = 1.0,
     ) -> None:
         self.history_seconds = float(history_seconds)
         self.velocity_alpha = float(velocity_alpha)
@@ -229,8 +275,14 @@ class ProjectileTracker:
         self.min_speed_px_s = float(min_speed_px_s)
         self.incoming_min_alignment = float(incoming_min_alignment)
         self.enemy_origin_radius = float(enemy_origin_radius)
+        self.motion_enemy_origin_radius = float(motion_enemy_origin_radius)
         self.friendly_origin_radius = float(friendly_origin_radius)
         self.require_enemy_origin = bool(require_enemy_origin)
+        self.require_enemy_origin_strict = bool(require_enemy_origin_strict)
+        self.min_hits_to_promote = max(1, int(min_hits_to_promote))
+        self.max_speed_px_s = float(max_speed_px_s)
+        self.max_accel_px_s2 = float(max_accel_px_s2)
+        self.max_line_residual_frac = float(max_line_residual_frac)
         self._tracks: List[ProjectileTrack] = []
         self._next_id = 1
 
@@ -241,22 +293,20 @@ class ProjectileTracker:
     def reset(self) -> None:
         self._tracks.clear()
 
+    def _enemy_radius_for_source(self, source: str) -> float:
+        if source in ("motion", "residual"):
+            return float(self.motion_enemy_origin_radius)
+        return float(self.enemy_origin_radius)
+
     def _classify_origin(
         self,
         cx: float,
         cy: float,
         enemy_boxes: Optional[Sequence[Sequence[float]]],
         friendly_boxes: Optional[Sequence[Sequence[float]]],
+        enemy_radius: float,
     ) -> Optional[bool]:
-        """Decide if a brand-new detection at (cx, cy) is enemy-spawned.
-
-        Returns True when the spawn point is within ``enemy_origin_radius``
-        of an enemy box AND not within ``friendly_origin_radius`` of any
-        player/teammate box. Returns False when enemies are visible but
-        the point isn't near one (or is closer to a friendly). Returns
-        None when no entity boxes are available — we can't decide, so
-        downstream filters let it pass.
-        """
+        """Decide if a brand-new detection at (cx, cy) is enemy-spawned."""
         has_enemy_info = enemy_boxes is not None
         has_friendly_info = friendly_boxes is not None
         if not has_enemy_info and not has_friendly_info:
@@ -272,13 +322,11 @@ class ProjectileTracker:
         if near_friendly:
             return False
         if not enemy_boxes:
-            # Friendlies visible but enemies are not; we can rule out
-            # friendly-fire above but otherwise we can't confirm enemy.
             return None
         for b in enemy_boxes:
             if len(b) < 4:
                 continue
-            if _dist_point_to_box(b, cx, cy) <= self.enemy_origin_radius:
+            if _dist_point_to_box(b, cx, cy) <= enemy_radius:
                 return True
         return False
 
@@ -289,6 +337,8 @@ class ProjectileTracker:
         cls: str = "projectile",
         enemy_boxes: Optional[Sequence[Sequence[float]]] = None,
         friendly_boxes: Optional[Sequence[Sequence[float]]] = None,
+        box_sources: Optional[Sequence[str]] = None,
+        ui_exclude_boxes: Optional[Sequence[Sequence[float]]] = None,
     ) -> List[ProjectileTrack]:
         """Match detections to existing tracks and return live tracks.
 
@@ -297,17 +347,23 @@ class ProjectileTracker:
         from an enemy. Tracks born away from any enemy are flagged so
         the consumer-side filters (`incoming_tracks`, `is_player_hit`)
         can drop them.
+
+        ``box_sources[i]`` labels each box as ``labeled``, ``residual``, or
+        ``motion`` so origin classification can use a tighter radius for
+        motion-born candidates and strict-origin policy can apply.
+
+        Detections whose center lies inside ``ui_exclude_boxes`` are ignored.
         """
         if now is None:
             now = time.time()
 
-        for tr in self._tracks:
-            tr._matched = False
-
         detections = []
-        for box in boxes or []:
+        for i, box in enumerate(boxes or []):
             cx, cy, hw, hh = _box_center_size(box)
-            detections.append((cx, cy, hw, hh, False))  # last bool = consumed
+            src = "labeled"
+            if box_sources is not None and i < len(box_sources):
+                src = str(box_sources[i])
+            detections.append((cx, cy, hw, hh, False, src))  # consumed + source
 
         for tr in list(self._tracks):
             best_idx = -1
@@ -324,24 +380,52 @@ class ProjectileTracker:
                     best_idx = idx
             if best_idx < 0:
                 continue
-            cx, cy, hw, hh, _ = detections[best_idx]
-            detections[best_idx] = (cx, cy, hw, hh, True)
+            cx, cy, hw, hh, _, src = detections[best_idx]
+
             dt = max(1e-3, now - tr.last_seen)
-            new_vx = (cx - tr.cx) / dt
-            new_vy = (cy - tr.cy) / dt
+            inst_vx = (cx - tr.cx) / dt
+            inst_vy = (cy - tr.cy) / dt
+            accel = math.hypot(
+                (inst_vx - tr._inst_vx) / dt,
+                (inst_vy - tr._inst_vy) / dt,
+            )
+            if accel > self.max_accel_px_s2:
+                continue
+
+            tentative_hist = deque(tr.center_history, maxlen=12)
+            tentative_hist.append((cx, cy))
+            lr = line_residual_ratio(list(tentative_hist))
+            if lr > self.max_line_residual_frac:
+                continue
+
+            detections[best_idx] = (cx, cy, hw, hh, True, src)
+
+            new_vx = inst_vx
+            new_vy = inst_vy
             tr.vx = (1 - self.velocity_alpha) * tr.vx + self.velocity_alpha * new_vx
             tr.vy = (1 - self.velocity_alpha) * tr.vy + self.velocity_alpha * new_vy
+            tr._inst_vx = inst_vx
+            tr._inst_vy = inst_vy
             tr.cx = cx
             tr.cy = cy
             tr.half_w = 0.6 * tr.half_w + 0.4 * hw
             tr.half_h = 0.6 * tr.half_h + 0.4 * hh
             tr.last_seen = now
-            tr._matched = True
+            tr.match_streak += 1
+            tr.center_history.append((cx, cy))
 
+        new_tracks: List[ProjectileTrack] = []
         for det in detections:
-            cx, cy, hw, hh, consumed = det
+            cx, cy, hw, hh, consumed, src = det
             if consumed:
                 continue
+            if _center_inside_any_ui(cx, cy, ui_exclude_boxes):
+                continue
+
+            er = self._enemy_radius_for_source(src)
+            from_enemy = self._classify_origin(cx, cy, enemy_boxes, friendly_boxes, er)
+
+            hist = deque([(cx, cy)], maxlen=12)
             track = ProjectileTrack(
                 track_id=self._next_id,
                 cx=cx,
@@ -353,13 +437,17 @@ class ProjectileTracker:
                 cls=cls,
                 origin_cx=cx,
                 origin_cy=cy,
-                from_enemy=self._classify_origin(
-                    cx, cy, enemy_boxes, friendly_boxes
-                ),
+                from_enemy=from_enemy,
+                source=src,
+                match_streak=1,
+                center_history=hist,
+                _inst_vx=0.0,
+                _inst_vy=0.0,
             )
-            track._matched = True
             self._next_id += 1
-            self._tracks.append(track)
+            new_tracks.append(track)
+
+        self._tracks.extend(new_tracks)
 
         cutoff = now - self.history_seconds
         self._tracks = [tr for tr in self._tracks if tr.last_seen >= cutoff]
@@ -369,7 +457,20 @@ class ProjectileTracker:
         """True unless the track was confirmed to NOT originate from an enemy."""
         if not self.require_enemy_origin:
             return True
+        if tr.from_enemy is False:
+            return False
+        if self.require_enemy_origin_strict and tr.source in ("motion", "residual"):
+            return tr.from_enemy is True
         return tr.from_enemy is not False
+
+    def _is_promoted(self, tr: ProjectileTrack) -> bool:
+        return tr.match_streak >= self.min_hits_to_promote
+
+    def _passes_geometry_speed(self, tr: ProjectileTrack) -> bool:
+        sp = math.hypot(tr.vx, tr.vy)
+        if sp > self.max_speed_px_s:
+            return False
+        return True
 
     def incoming_tracks(
         self,
@@ -393,9 +494,16 @@ class ProjectileTracker:
         for tr in self._tracks:
             if not self._passes_origin_gate(tr):
                 continue
+            if not self._is_promoted(tr):
+                continue
+            if not self._passes_geometry_speed(tr):
+                continue
             if math.hypot(tr.vx, tr.vy) < speed:
                 continue
             if tr.alignment_to_player(player_pos) < align:
+                continue
+            lr = line_residual_ratio(list(tr.center_history))
+            if lr > self.max_line_residual_frac:
                 continue
             out.append(tr)
         return out
@@ -412,11 +520,18 @@ class ProjectileTracker:
         if only_incoming:
             candidates = self.incoming_tracks(player_pos)
         else:
-            # Even when callers ask for "all tracks", still drop the ones
-            # we proved did not come from an enemy.
-            candidates = [
-                tr for tr in self._tracks if self._passes_origin_gate(tr)
-            ]
+            candidates = []
+            for tr in self._tracks:
+                if not self._passes_origin_gate(tr):
+                    continue
+                if not self._is_promoted(tr):
+                    continue
+                if not self._passes_geometry_speed(tr):
+                    continue
+                lr = line_residual_ratio(list(tr.center_history))
+                if lr > self.max_line_residual_frac:
+                    continue
+                candidates.append(tr)
         if not candidates:
             return []
         scored = [
@@ -493,6 +608,13 @@ class ProjectileTracker:
         player_pos = (player_cx, player_cy)
         for tr in self._tracks:
             if not self._passes_origin_gate(tr):
+                continue
+            if not self._is_promoted(tr):
+                continue
+            if not self._passes_geometry_speed(tr):
+                continue
+            lr = line_residual_ratio(list(tr.center_history))
+            if lr > self.max_line_residual_frac:
                 continue
             currently_overlapping = _boxes_overlap(
                 player_box, tr.expanded_box(padding=padding)

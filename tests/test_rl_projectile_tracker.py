@@ -226,6 +226,28 @@ class ProjectileTrackerTests(unittest.TestCase):
         self.assertGreater(toward, 0.5)
         self.assertLess(away, 0.1)
 
+    def test_birth_inside_ui_rect_skipped(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+        )
+        ui = [[0.0, 0.0, 50.0, 50.0]]
+        tracker.update([[10, 10, 20, 20]], now=0.0, ui_exclude_boxes=ui)
+        self.assertEqual(len(tracker.tracks), 0)
+
+    def test_min_hits_blocks_incoming_until_promoted(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            min_hits_to_promote=2,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+        )
+        tracker.update([[100, 100, 120, 120]], now=0.0)
+        self.assertEqual(len(tracker.incoming_tracks((300, 100))), 0)
+        tracker.update([[130, 100, 150, 120]], now=0.1)
+        self.assertEqual(len(tracker.incoming_tracks((300, 100))), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
