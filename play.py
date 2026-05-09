@@ -208,6 +208,9 @@ class Movement:
         self.rl_projectile_require_enemy_origin_strict = str(
             bot_config.get("rl_projectile_require_enemy_origin_strict", "no")
         ).lower() in ("yes", "true", "1")
+        self.rl_projectile_cluster_distance_px = float(
+            bot_config.get("rl_projectile_cluster_distance_px", 200.0)
+        )
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -2314,6 +2317,65 @@ class Play(Movement):
 
         return movement
 
+    def is_respawning_overlay(self, frame):
+        """Return True when the 'Back in:' / lightning-bolt respawn HUD is showing.
+
+        We don't run projectile detection while the player is dead — the
+        camera follows a teammate / spectator perspective and YOLO can
+        still emit detections that aren't meaningful to dodge.
+
+        Detection is purely color-based and cheap:
+          * crop a top-center band of the frame
+          * count bright-yellow pixels (lightning bolt) AND large near-white
+            pixel cluster (the "Back in:" outlined text)
+          * both must clear independent thresholds for a positive
+        """
+        if frame is None:
+            return False
+        try:
+            h, w = frame.shape[:2]
+        except Exception:
+            return False
+        if h < 80 or w < 80:
+            return False
+
+        # Reference 1920×1080 region centered horizontally near the top.
+        # The respawn overlay floats in roughly the upper third of screen.
+        ref_w, ref_h = 1920.0, 1080.0
+        x = int(w * (560.0 / ref_w))
+        y = int(h * (60.0 / ref_h))
+        cw = int(w * (800.0 / ref_w))
+        ch = int(h * (320.0 / ref_h))
+        x = max(0, min(w - 8, x))
+        y = max(0, min(h - 8, y))
+        cw = max(8, min(w - x, cw))
+        ch = max(8, min(h - y, ch))
+
+        crop = frame[y:y + ch, x:x + cw]
+        if crop.size == 0:
+            return False
+
+        try:
+            hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        except cv2.error:
+            return False
+
+        yellow_low = np.array((22, 180, 200), dtype=np.uint8)
+        yellow_high = np.array((36, 255, 255), dtype=np.uint8)
+        yellow = cv2.inRange(hsv, yellow_low, yellow_high)
+        yellow_count = int(cv2.countNonZero(yellow))
+
+        white_low = np.array((0, 0, 220), dtype=np.uint8)
+        white_high = np.array((179, 60, 255), dtype=np.uint8)
+        white = cv2.inRange(hsv, white_low, white_high)
+        white_count = int(cv2.countNonZero(white))
+
+        # Thresholds scale with crop area (resolution independent).
+        area = float(crop.shape[0] * crop.shape[1])
+        yellow_ratio = yellow_count / max(1.0, area)
+        white_ratio = white_count / max(1.0, area)
+        return yellow_ratio >= 0.0035 and white_ratio >= 0.020
+
     def update_projectile_tracker(self, data, current_time):
         """Aggregate labeled, residual-detector, and motion-diff boxes into
         ``data['projectile']`` and advance ``ProjectileTracker``.
@@ -2326,6 +2388,18 @@ class Play(Movement):
             return []
         if self.projectile_tracker is None:
             data["projectile"] = []
+            return []
+
+        # Skip detection entirely while the death/respawn overlay is up.
+        # No player to dodge for, and the spectator camera produces noise.
+        if self.is_respawning_overlay(self.current_frame):
+            data["projectile"] = []
+            self._rl_motion_prev_gray = None
+            self._rl_motion_debug_boxes = []
+            try:
+                self.projectile_tracker.reset()
+            except Exception:
+                pass
             return []
 
         from rl.projectile_tracker import extract_projectile_boxes
@@ -2786,9 +2860,21 @@ class Play(Movement):
 
         projectile_tracker = getattr(self, "projectile_tracker", None)
         if projectile_tracker is not None:
+            from rl.projectile_tracker import (
+                cluster_bounding_box,
+                cluster_tracks_by_distance,
+            )
+
             track_col = (255, 165, 0)
+            cluster_col = (255, 215, 0)  # gold for cluster bounds
             arrow_dt = 0.1
-            for tr in projectile_tracker.tracks:
+            promoted_tracks = [
+                tr
+                for tr in projectile_tracker.tracks
+                if tr.match_streak >= projectile_tracker.min_hits_to_promote
+            ]
+
+            for tr in promoted_tracks:
                 x1, y1, x2, y2 = tr.expanded_box()
                 xa1, ya1, xa2, ya2 = int(x1), int(y1), int(x2), int(y2)
                 cv2.rectangle(
@@ -2817,6 +2903,38 @@ class Play(Movement):
                     max(1, s(2)),
                     tipLength=0.25,
                 )
+
+            # Cluster bounding rectangle for dense volleys (>= 2 tracks).
+            # Only drawn for clusters of 2+; isolated projectiles keep
+            # their individual box only, so dodging stays precise.
+            if len(promoted_tracks) >= 2:
+                cluster_dist = float(
+                    getattr(self, "rl_projectile_cluster_distance_px", 200.0)
+                )
+                clusters = cluster_tracks_by_distance(promoted_tracks, cluster_dist)
+                for cluster in clusters:
+                    if len(cluster) < 2:
+                        continue
+                    bb = cluster_bounding_box(cluster, padding=4.0)
+                    if bb is None:
+                        continue
+                    bx1, by1, bx2, by2 = (int(v) for v in bb)
+                    cv2.rectangle(
+                        img,
+                        sp((bx1, by1)),
+                        sp((bx2, by2)),
+                        cluster_col,
+                        max(2, s(3)),
+                    )
+                    cv2.putText(
+                        img,
+                        f"x{len(cluster)}",
+                        sp((bx1, max(by1 - 8, 0))),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.4, 0.6 * scale),
+                        cluster_col,
+                        2,
+                    )
 
         if getattr(self, "visual_debug_motion_boxes", False):
             motion_col = (0, 255, 255)

@@ -40,6 +40,58 @@ import numpy as np
 FEATURES_PER_TRACK = 7  # dx, dy, vx, vy, half_w, half_h, age_sec
 
 
+def cluster_tracks_by_distance(
+    tracks: Sequence["ProjectileTrack"],
+    max_distance: float,
+) -> List[List["ProjectileTrack"]]:
+    """Greedy single-link clustering of tracks by center distance.
+
+    Tracks within ``max_distance`` of any other track in the same cluster
+    are grouped together. Used to summarise dense volleys (e.g. shotgun
+    spread, multiple supers) with a single bounding rectangle in debug.
+    """
+    if not tracks:
+        return []
+    remaining = list(tracks)
+    clusters: List[List["ProjectileTrack"]] = []
+    while remaining:
+        seed = remaining.pop(0)
+        group = [seed]
+        changed = True
+        while changed:
+            changed = False
+            for tr in list(remaining):
+                for member in group:
+                    d = math.hypot(tr.cx - member.cx, tr.cy - member.cy)
+                    if d <= max_distance:
+                        group.append(tr)
+                        remaining.remove(tr)
+                        changed = True
+                        break
+        clusters.append(group)
+    return clusters
+
+
+def cluster_bounding_box(
+    cluster: Sequence["ProjectileTrack"],
+    padding: float = 0.0,
+) -> Optional[Tuple[float, float, float, float]]:
+    """Tight xyxy box around a cluster's expanded track boxes."""
+    if not cluster:
+        return None
+    xs1: List[float] = []
+    ys1: List[float] = []
+    xs2: List[float] = []
+    ys2: List[float] = []
+    for tr in cluster:
+        x1, y1, x2, y2 = tr.expanded_box(padding=padding)
+        xs1.append(x1)
+        ys1.append(y1)
+        xs2.append(x2)
+        ys2.append(y2)
+    return (min(xs1), min(ys1), max(xs2), max(ys2))
+
+
 def line_residual_ratio(points: Sequence[Tuple[float, float]]) -> float:
     """Mean perpendicular deviation from a linear fit vs. polyline path length."""
     if len(points) < 3:

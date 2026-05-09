@@ -95,12 +95,15 @@ rl_motion_fog_exclude_dilate_px = 2
 # rl_motion_ui_exclude_rects = [ ["joystick", 220, 870, 280, 280], ]
 # Animated map tiles (water/lava); each entry is [[H,S,V low], [H,S,V high]]
 rl_animated_terrain_hsv_ranges = []
-rl_projectile_min_hits_to_promote = 1
+# Hits required before a track is reported as a real projectile.
+# 2 = drop one-frame ghosts (joystick clicks, popups, single-frame flicker).
+rl_projectile_min_hits_to_promote = 2
 # Raise max_speed / max_line_residual toward 1e9 / 1.0 if legitimate shots are filtered out.
-rl_projectile_max_speed_px_s = 10000
-rl_projectile_max_accel_px_s2 = 50000
-rl_projectile_max_line_residual_frac = 1.0
+rl_projectile_max_speed_px_s = 2500
+rl_projectile_max_accel_px_s2 = 8000
+rl_projectile_max_line_residual_frac = 0.40
 rl_projectile_motion_origin_radius = 80
 rl_projectile_require_enemy_origin_strict = "no"
+rl_projectile_cluster_distance_px = 200
 rl_train_steps_per_update = 256
 rl_save_every_seconds = 120

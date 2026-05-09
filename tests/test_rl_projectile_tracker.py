@@ -6,6 +6,8 @@ import numpy as np
 from rl.projectile_tracker import (
     FEATURES_PER_TRACK,
     ProjectileTracker,
+    cluster_bounding_box,
+    cluster_tracks_by_distance,
     extract_projectile_boxes,
 )
 
@@ -235,6 +237,29 @@ class ProjectileTrackerTests(unittest.TestCase):
         ui = [[0.0, 0.0, 50.0, 50.0]]
         tracker.update([[10, 10, 20, 20]], now=0.0, ui_exclude_boxes=ui)
         self.assertEqual(len(tracker.tracks), 0)
+
+    def test_cluster_tracks_groups_close_and_separates_far(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+        )
+        tracker.update(
+            [
+                [100, 100, 110, 110],
+                [120, 100, 130, 110],
+                [800, 800, 810, 810],
+            ],
+            now=0.0,
+        )
+        clusters = cluster_tracks_by_distance(tracker.tracks, max_distance=50.0)
+        sizes = sorted(len(c) for c in clusters)
+        self.assertEqual(sizes, [1, 2])
+        bigger = next(c for c in clusters if len(c) == 2)
+        bb = cluster_bounding_box(bigger)
+        self.assertIsNotNone(bb)
+        self.assertLess(bb[0], 130)
+        self.assertGreater(bb[2], 110)
 
     def test_min_hits_blocks_incoming_until_promoted(self):
         tracker = ProjectileTracker(
