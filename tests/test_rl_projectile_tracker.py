@@ -3,8 +3,11 @@ import unittest
 
 import numpy as np
 
+from collections import deque
+
 from rl.projectile_tracker import (
     FEATURES_PER_TRACK,
+    ProjectileTrack,
     ProjectileTracker,
     cluster_bounding_box,
     cluster_tracks_by_distance,
@@ -272,6 +275,93 @@ class ProjectileTrackerTests(unittest.TestCase):
         self.assertEqual(len(tracker.incoming_tracks((300, 100))), 0)
         tracker.update([[130, 100, 150, 120]], now=0.1)
         self.assertEqual(len(tracker.incoming_tracks((300, 100))), 1)
+
+    def test_purge_unconfirmed_recent_drops_young_motion_track(self):
+        tracker = ProjectileTracker(
+            min_hits_to_promote=1,
+            require_enemy_origin=False,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+            max_line_residual_frac=1.0,
+        )
+        now = 1000.0
+        tr = ProjectileTrack(
+            track_id=990,
+            cx=50.0,
+            cy=50.0,
+            half_w=10.0,
+            half_h=10.0,
+            vx=0.0,
+            vy=0.0,
+            last_seen=now,
+            born_at=now,
+            from_enemy=False,
+            source="motion",
+            match_streak=3,
+            center_history=deque([(50.0, 50.0)], maxlen=12),
+            confidence_confirmed=False,
+        )
+        tracker._tracks.append(tr)
+        tracker.purge_unconfirmed_recent_tracks(now + 0.05, since_seconds=0.5)
+        self.assertEqual(len(tracker._tracks), 0)
+
+    def test_purge_keeps_confirmed_track(self):
+        tracker = ProjectileTracker(
+            min_hits_to_promote=1,
+            require_enemy_origin=False,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+            max_line_residual_frac=1.0,
+        )
+        now = 2000.0
+        tr = ProjectileTrack(
+            track_id=991,
+            cx=50.0,
+            cy=50.0,
+            half_w=10.0,
+            half_h=10.0,
+            vx=0.0,
+            vy=0.0,
+            last_seen=now,
+            born_at=now,
+            from_enemy=False,
+            source="motion",
+            match_streak=3,
+            center_history=deque([(50.0, 50.0)], maxlen=12),
+            confidence_confirmed=True,
+        )
+        tracker._tracks.append(tr)
+        tracker.purge_unconfirmed_recent_tracks(now + 0.05, since_seconds=0.5)
+        self.assertEqual(len(tracker._tracks), 1)
+
+    def test_purge_keeps_enemy_origin_motion(self):
+        tracker = ProjectileTracker(
+            min_hits_to_promote=1,
+            require_enemy_origin=False,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=0.0,
+            max_line_residual_frac=1.0,
+        )
+        now = 3000.0
+        tr = ProjectileTrack(
+            track_id=992,
+            cx=50.0,
+            cy=50.0,
+            half_w=10.0,
+            half_h=10.0,
+            vx=0.0,
+            vy=0.0,
+            last_seen=now,
+            born_at=now,
+            from_enemy=True,
+            source="motion",
+            match_streak=3,
+            center_history=deque([(50.0, 50.0)], maxlen=12),
+            confidence_confirmed=False,
+        )
+        tracker._tracks.append(tr)
+        tracker.purge_unconfirmed_recent_tracks(now + 0.05, since_seconds=0.5)
+        self.assertEqual(len(tracker._tracks), 1)
 
 
 if __name__ == "__main__":

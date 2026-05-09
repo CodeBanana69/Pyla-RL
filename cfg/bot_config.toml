@@ -107,3 +107,16 @@ rl_projectile_require_enemy_origin_strict = "no"
 rl_projectile_cluster_distance_px = 200
 rl_train_steps_per_update = 256
 rl_save_every_seconds = 120
+
+# HP bar (HSV) + optional OCR; damage events cross-reference projectile tracks
+health_bar_band_offset_px = 8
+health_bar_band_height_px = 14
+health_bar_min_total_pixels = 40
+health_ocr_enabled = "yes"
+health_ocr_interval_seconds = 0.5
+damage_hp_drop_threshold_pct = 0.015
+damage_confirm_window_seconds = 0.5
+red_flash_detect_enabled = "yes"
+red_flash_red_dom_threshold = 1.40
+red_flash_baseline_alpha = 0.1
+cross_reference_projectile_hits = "yes"

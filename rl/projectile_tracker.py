@@ -155,6 +155,8 @@ class ProjectileTrack:
     )
     _inst_vx: float = 0.0
     _inst_vy: float = 0.0
+    # Set True when an HP-drop event corroborates this track touching the player.
+    confidence_confirmed: bool = False
     _matched: bool = field(default=False, repr=False)
 
     def predict(self, now: float) -> Tuple[float, float]:
@@ -495,6 +497,7 @@ class ProjectileTracker:
                 center_history=hist,
                 _inst_vx=0.0,
                 _inst_vy=0.0,
+                confidence_confirmed=False,
             )
             self._next_id += 1
             new_tracks.append(track)
@@ -504,6 +507,47 @@ class ProjectileTracker:
         cutoff = now - self.history_seconds
         self._tracks = [tr for tr in self._tracks if tr.last_seen >= cutoff]
         return self._tracks
+
+    def confirm_tracks_touching_player(
+        self,
+        player_box: Sequence[float],
+        now: Optional[float] = None,
+        padding: float = 0.0,
+        lookahead_seconds: float = 0.15,
+        require_incoming: bool = True,
+    ) -> None:
+        """Mark tracks that overlap the player (or lookahead hit) as HP-corroborated."""
+        if now is None:
+            now = time.time()
+        player_cx = (float(player_box[0]) + float(player_box[2])) * 0.5
+        player_cy = (float(player_box[1]) + float(player_box[3])) * 0.5
+        player_pos = (player_cx, player_cy)
+        for tr in self._tracks:
+            if self._track_counts_as_hit(
+                tr,
+                player_box,
+                player_pos,
+                padding=padding,
+                lookahead_seconds=lookahead_seconds,
+                require_incoming=require_incoming,
+            ):
+                tr.confidence_confirmed = True
+
+    def purge_unconfirmed_recent_tracks(self, now: float, since_seconds: float) -> None:
+        """Drop young motion/residual tracks that never matched an HP drop."""
+
+        def drop(tr: ProjectileTrack) -> bool:
+            if now - tr.born_at > float(since_seconds):
+                return False
+            if tr.confidence_confirmed:
+                return False
+            if tr.source not in ("motion", "residual"):
+                return False
+            if tr.from_enemy is True:
+                return False
+            return True
+
+        self._tracks = [tr for tr in self._tracks if not drop(tr)]
 
     def _passes_origin_gate(self, tr: ProjectileTrack) -> bool:
         """True unless the track was confirmed to NOT originate from an enemy."""
@@ -631,6 +675,61 @@ class ProjectileTracker:
             out[i, 6] = max(0.0, min(1.0, age))
         return out.reshape(-1)
 
+    def _track_counts_as_hit(
+        self,
+        tr: ProjectileTrack,
+        player_box: Sequence[float],
+        player_pos: Tuple[float, float],
+        *,
+        padding: float,
+        lookahead_seconds: float,
+        require_incoming: bool,
+    ) -> bool:
+        """Same geometry as ``is_player_hit`` for a single track."""
+        if not self._passes_origin_gate(tr):
+            return False
+        if not self._is_promoted(tr):
+            return False
+        if not self._passes_geometry_speed(tr):
+            return False
+        lr = line_residual_ratio(list(tr.center_history))
+        if lr > self.max_line_residual_frac:
+            return False
+        currently_overlapping = _boxes_overlap(
+            player_box, tr.expanded_box(padding=padding)
+        )
+        if currently_overlapping and not require_incoming:
+            return True
+        if require_incoming and not tr.is_incoming(
+            player_pos,
+            min_alignment=self.incoming_min_alignment,
+            min_speed_px_s=self.min_speed_px_s,
+        ):
+            return False
+        if currently_overlapping:
+            return True
+        if lookahead_seconds <= 0:
+            return False
+        speed = math.hypot(tr.vx, tr.vy)
+        if speed < self.min_speed_px_s:
+            return False
+        dt_total = max(0.0, lookahead_seconds)
+        steps = max(1, int(dt_total / 0.05))
+        step_dt = dt_total / steps
+        cx, cy = tr.cx, tr.cy
+        for _ in range(steps):
+            cx += tr.vx * step_dt
+            cy += tr.vy * step_dt
+            projected = (
+                cx - tr.half_w - padding,
+                cy - tr.half_h - padding,
+                cx + tr.half_w + padding,
+                cy + tr.half_h + padding,
+            )
+            if _boxes_overlap(player_box, projected):
+                return True
+        return False
+
     def is_player_hit(
         self,
         player_box: Sequence[float],
@@ -659,46 +758,13 @@ class ProjectileTracker:
         player_cy = (float(player_box[1]) + float(player_box[3])) * 0.5
         player_pos = (player_cx, player_cy)
         for tr in self._tracks:
-            if not self._passes_origin_gate(tr):
-                continue
-            if not self._is_promoted(tr):
-                continue
-            if not self._passes_geometry_speed(tr):
-                continue
-            lr = line_residual_ratio(list(tr.center_history))
-            if lr > self.max_line_residual_frac:
-                continue
-            currently_overlapping = _boxes_overlap(
-                player_box, tr.expanded_box(padding=padding)
-            )
-            if currently_overlapping and not require_incoming:
-                return True
-            if require_incoming and not tr.is_incoming(
+            if self._track_counts_as_hit(
+                tr,
+                player_box,
                 player_pos,
-                min_alignment=self.incoming_min_alignment,
-                min_speed_px_s=self.min_speed_px_s,
+                padding=padding,
+                lookahead_seconds=lookahead_seconds,
+                require_incoming=require_incoming,
             ):
-                continue
-            if currently_overlapping:
                 return True
-            if lookahead_seconds <= 0:
-                continue
-            speed = math.hypot(tr.vx, tr.vy)
-            if speed < self.min_speed_px_s:
-                continue
-            dt_total = max(0.0, lookahead_seconds)
-            steps = max(1, int(dt_total / 0.05))
-            step_dt = dt_total / steps
-            cx, cy = tr.cx, tr.cy
-            for _ in range(steps):
-                cx += tr.vx * step_dt
-                cy += tr.vy * step_dt
-                projected = (
-                    cx - tr.half_w - padding,
-                    cy - tr.half_h - padding,
-                    cx + tr.half_w + padding,
-                    cy + tr.half_h + padding,
-                )
-                if _boxes_overlap(player_box, projected):
-                    return True
         return False

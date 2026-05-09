@@ -211,6 +211,28 @@ class Movement:
         self.rl_projectile_cluster_distance_px = float(
             bot_config.get("rl_projectile_cluster_distance_px", 200.0)
         )
+        # Health bar + damage cross-reference (RL / visual debug)
+        self.health_bar_band_offset_px = float(bot_config.get("health_bar_band_offset_px", 8.0))
+        self.health_bar_band_height_px = float(bot_config.get("health_bar_band_height_px", 14.0))
+        self.health_bar_min_total_pixels = int(bot_config.get("health_bar_min_total_pixels", 40))
+        self.health_ocr_enabled = str(bot_config.get("health_ocr_enabled", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.health_ocr_interval_seconds = float(bot_config.get("health_ocr_interval_seconds", 0.5))
+        self.damage_hp_drop_threshold_pct = float(bot_config.get("damage_hp_drop_threshold_pct", 0.015))
+        self.damage_confirm_window_seconds = float(bot_config.get("damage_confirm_window_seconds", 0.5))
+        self.red_flash_detect_enabled = str(bot_config.get("red_flash_detect_enabled", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.red_flash_red_dom_threshold = float(bot_config.get("red_flash_red_dom_threshold", 1.40))
+        self.red_flash_baseline_alpha = float(bot_config.get("red_flash_baseline_alpha", 0.1))
+        self.cross_reference_projectile_hits = str(
+            bot_config.get("cross_reference_projectile_hits", "yes")
+        ).lower() in ("yes", "true", "1")
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -678,6 +700,31 @@ class Play(Movement):
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
             self.projectile_tracker = None
+
+        try:
+            from rl.health_monitor import HealthMonitor
+            from rl.red_flash import RedFlashDetector
+
+            self.health_monitor = HealthMonitor(
+                band_offset_px=self.health_bar_band_offset_px,
+                band_height_px=self.health_bar_band_height_px,
+                min_total_pixels=self.health_bar_min_total_pixels,
+                damage_drop_threshold=self.damage_hp_drop_threshold_pct,
+                prior_window_seconds=0.4,
+                history_seconds=2.0,
+                ocr_enabled=self.health_ocr_enabled,
+                ocr_interval_seconds=self.health_ocr_interval_seconds,
+            )
+            self.red_flash_detector = RedFlashDetector(
+                threshold=self.red_flash_red_dom_threshold,
+                baseline_alpha=self.red_flash_baseline_alpha,
+            )
+        except Exception as exc:
+            print(f"Could not initialise health / red-flash monitors: {exc}")
+            self.health_monitor = None
+            self.red_flash_detector = None
+
+        self._visual_debug_red_flash = False
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
         # Previous-frame motion/residual centers used to gate candidates
@@ -840,6 +887,16 @@ class Play(Movement):
         if getattr(self, "projectile_tracker", None) is not None:
             try:
                 self.projectile_tracker.reset()
+            except Exception:
+                pass
+        if getattr(self, "health_monitor", None) is not None:
+            try:
+                self.health_monitor.reset_match()
+            except Exception:
+                pass
+        if getattr(self, "red_flash_detector", None) is not None:
+            try:
+                self.red_flash_detector.reset()
             except Exception:
                 pass
         self._rl_motion_prev_gray = None
@@ -2386,6 +2443,35 @@ class Play(Movement):
         """
         if not data:
             return []
+
+        self._preserve_rl_motion_prev_gray = False
+        scale = self.window_controller.scale_factor
+        hm_early = getattr(self, "health_monitor", None)
+        frame_early = self.current_frame
+        if hm_early is not None and frame_early is not None and data.get("player"):
+            try:
+                hm_early.update(
+                    current_time,
+                    frame_early,
+                    data["player"][0],
+                    scale,
+                    lambda: self.is_respawning_overlay(frame_early),
+                )
+            except Exception:
+                pass
+
+        flashing = False
+        if (
+            getattr(self, "red_flash_detect_enabled", True)
+            and getattr(self, "red_flash_detector", None) is not None
+            and frame_early is not None
+        ):
+            try:
+                flashing = bool(self.red_flash_detector.update(frame_early))
+            except Exception:
+                flashing = False
+        self._visual_debug_red_flash = flashing
+
         if self.projectile_tracker is None:
             data["projectile"] = []
             return []
@@ -2425,6 +2511,11 @@ class Play(Movement):
         univ_mode = getattr(self, "rl_universal_projectiles_mode", "motion")
         run_residual = self.rl_universal_projectiles and univ_mode in ("motion", "residual_only")
         run_motion = self.rl_universal_projectiles and univ_mode == "motion"
+
+        if flashing:
+            run_residual = False
+            run_motion = False
+            self._preserve_rl_motion_prev_gray = True
 
         if self.rl_universal_projectiles:
             exclude_keys = {"player", "teammate", "enemy", "wall"}
@@ -2529,7 +2620,7 @@ class Play(Movement):
                 self._rl_motion_prev_gray = curr_small.copy()
                 motion_ran = True
 
-        if not motion_ran:
+        if not motion_ran and not getattr(self, "_preserve_rl_motion_prev_gray", False):
             self._rl_motion_prev_gray = None
 
         # Direction gate: drop residual/motion candidates whose movement
@@ -2577,6 +2668,25 @@ class Play(Movement):
         except Exception as exc:
             print(f"Projectile tracker update failed: {exc}")
             tracks = []
+
+        pt = self.projectile_tracker
+        win = float(getattr(self, "damage_confirm_window_seconds", 0.5))
+        hm = getattr(self, "health_monitor", None)
+        if pt is not None and data.get("player"):
+            player_box = data["player"][0]
+            try:
+                if hm is not None and not flashing:
+                    if hm.recent_damage_event(current_time, win) is not None:
+                        pt.confirm_tracks_touching_player(
+                            player_box,
+                            now=current_time,
+                            padding=self.rl_projectile_hit_radius_padding,
+                            lookahead_seconds=0.15,
+                        )
+                pt.purge_unconfirmed_recent_tracks(current_time, win)
+            except Exception as exc:
+                print(f"Projectile tracker HP cross-reference failed: {exc}")
+
         return tracks
 
     def _filter_candidates_toward_player(
@@ -2796,6 +2906,63 @@ class Play(Movement):
         def sp(point):
             return s(point[0]), s(point[1])
 
+        if getattr(self, "_visual_debug_red_flash", False):
+            bar_h = max(4, s(26))
+            cv2.rectangle(img, (0, 0), (img.shape[1], bar_h), (220, 40, 40), -1)
+            cv2.putText(
+                img,
+                "RED FLASH",
+                (s(8), max(s(18), bar_h - s(6))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.45, 0.65 * scale),
+                (255, 255, 255),
+                max(1, s(2)),
+            )
+
+        hm_dbg = getattr(self, "health_monitor", None)
+        if hm_dbg is not None and data.get("player"):
+            pb = data["player"][0]
+            if len(pb) >= 4:
+                x1, y1, x2, y2 = map(float, pb[:4])
+                sf = float(self.window_controller.scale_factor)
+                off = max(2.0, getattr(self, "health_bar_band_offset_px", 8.0) * sf)
+                bh = max(4.0, getattr(self, "health_bar_band_height_px", 14.0) * sf)
+                bar_w = max(8, int(abs(x2 - x1)))
+                bar_left = int(min(x1, x2))
+                bar_top = int(min(y1, y2) - off - bh)
+                hp_pct = hm_dbg.last_hp_pct if hm_dbg.last_hp_ok else None
+                if hp_pct is not None:
+                    fill_w = max(0, int(bar_w * hp_pct))
+                    cv2.rectangle(
+                        img,
+                        sp((bar_left, bar_top)),
+                        sp((bar_left + bar_w, bar_top + int(bh))),
+                        (90, 90, 90),
+                        max(1, s(1)),
+                    )
+                    cv2.rectangle(
+                        img,
+                        sp((bar_left, bar_top)),
+                        sp((bar_left + fill_w, bar_top + int(bh))),
+                        (40, 200, 80),
+                        -1,
+                    )
+                hp_label = ""
+                if hm_dbg.hp_value is not None and hm_dbg.observed_max_hp > 0:
+                    hp_label = f"HP {hm_dbg.hp_value}/{hm_dbg.observed_max_hp}"
+                elif hp_pct is not None:
+                    hp_label = f"HP {hp_pct * 100:.0f}%"
+                if hp_label:
+                    cv2.putText(
+                        img,
+                        hp_label,
+                        sp((bar_left, bar_top - s(6))),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.35, 0.5 * scale),
+                        (255, 255, 255),
+                        max(1, s(1)),
+                    )
+
         # --- Fog overlay ---
         # Only draw the fog tint + centroid arrow when a fog threat is strong
         # enough to trigger evasion (same thresholds as detect_fog_threat):
@@ -2884,9 +3051,10 @@ class Play(Movement):
                     track_col,
                     max(1, s(2)),
                 )
+                suffix = "*" if getattr(tr, "confidence_confirmed", False) else ""
                 cv2.putText(
                     img,
-                    f"proj{tr.track_id}",
+                    f"proj{tr.track_id}{suffix}",
                     sp((xa1, max(ya1 - 6, 0))),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     max(0.35, 0.5 * scale),
