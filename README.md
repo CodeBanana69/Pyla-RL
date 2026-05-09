@@ -42,6 +42,7 @@ For normal users, you only need `setup.exe`.
    - install Python 3.11.9 if Python 3.11 64-bit is missing
    - install all required Python packages
    - install the best available ONNX Runtime option for your PC, including GPU acceleration when possible
+   - on **AMD RDNA3 / gfx110x-class** GPUs (detected via WMI), **automatically** install self-contained **TheRock ROCm PyTorch** wheels when using `setup.exe` one-click mode (`PYLAAI_SETUP_AUTO`). To force **CPU PyTorch only**, set `PYLAAI_SKIP_AMD_ROCM_PYTORCH=1` in the environment before running `setup.exe`.
 5. Start your Android emulator.
 6. Open Brawl Stars in the emulator.
 7. Set the emulator resolution to `1920x1080` for best results.
@@ -52,6 +53,18 @@ Manual developer setup:
 - Install Python 3.11 and Git.
 - Run `python setup.py --pyla-install`.
 - Run `python main.py`.
+
+### Building `setup.exe` (maintainers)
+
+The Windows **`setup.exe`** helper is produced by freezing [`tools/setup_bootstrap.py`](tools/setup_bootstrap.py) (for example with PyInstaller). After changing the bootstrap script, rebuild and ship the new `setup.exe` next to `setup.py` and `main.py`:
+
+```bat
+pyinstaller --onefile --name setup tools\setup_bootstrap.py
+```
+
+### AMD auto ROCm wheels
+
+Pinned wheel URLs live in [`setup_amd_rocm.py`](setup_amd_rocm.py) (TheRock release tag). Bump them deliberately when upgrading ROCm/PyTorch. Optional details: [`requirements-rocm-windows.txt`](requirements-rocm-windows.txt).
 
 Brawl Stars API trophy autofill :
 - Create a developer account at https://developer.brawlstars.com/

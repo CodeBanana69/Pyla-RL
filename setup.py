@@ -71,6 +71,18 @@ def ask_user(prompt_text):
     return response in ['y', 'yes']
 
 def setup_pyla():
+    try:
+        from setup_amd_rocm import (
+            should_offer_amd_rocm_the_rock,
+            try_install_amd_rocm_pytorch_the_rock,
+        )
+    except ImportError:
+        def should_offer_amd_rocm_the_rock():  # type: ignore[misc]
+            return False
+
+        def try_install_amd_rocm_pytorch_the_rock(_fn):  # type: ignore[misc]
+            return False
+
     print("\n" + "="*50 + "\n   PylaAi-XXZ - Windows Setup   \n" + "="*50)
     
     # installing must have Pytorch CPU
@@ -141,6 +153,11 @@ def setup_pyla():
     # AMD BRANCH (DirectML)
     elif "amd" in target:
         print(f"\n AMD: {name} detected.")
+        if os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes"):
+            print(
+                "\nAuto setup: installing DirectML ONNX acceleration for AMD Windows "
+                "(PyTorch stays CPU unless RDNA3 TheRock ROCm step succeeds)."
+            )
         if ask_user("Install AMD DirectML acceleration?"):
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
@@ -152,6 +169,14 @@ def setup_pyla():
         onnx_installed = True
         status_pytorch = "DirectML Edition"
         status_accel = "DirectML"
+
+    # setup.exe auto + RDNA3-class AMD: optional TheRock ROCm PyTorch (Python 3.11 cp311)
+    if target == "amd_windows" and should_offer_amd_rocm_the_rock():
+        if try_install_amd_rocm_pytorch_the_rock(force_install):
+            status_pytorch = "ROCm (TheRock)"
+        else:
+            print("\nRestoring CPU PyTorch after failed ROCm wheel install...")
+            force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
 
     # FALLBACK BRANCH (If user skipped acceleration or has a generic CPU)
     if not onnx_installed:

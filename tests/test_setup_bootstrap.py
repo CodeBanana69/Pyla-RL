@@ -9,6 +9,12 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn('"--pyla-install"', source)
         self.assertNotIn('["setup.py", "install"]', source)
 
+    def test_run_bat_sets_miopen_env_for_amd_rocm_workaround(self):
+        source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("MIOPEN_FIND_MODE", source)
+        self.assertIn("MIOPEN_DEBUG_DISABLE_FIND_DB", source)
+
     def test_setup_py_supports_direct_pyla_install_mode(self):
         source = Path("setup.py").read_text(encoding="utf-8")
 
