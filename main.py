@@ -26,6 +26,7 @@ from stage_manager import StageManager
 from state_finder import get_state, get_starr_nova_got_it_button_center, is_starr_nova_info_screen
 from time_management import TimeManagement
 from utils import (
+    _config_bool,
     api_base_url,
     async_notify_user,
     check_version,
@@ -140,6 +141,9 @@ def pyla_main(data):
             self.last_ignored_star_drop_state_time = 0.0
             general_config = load_toml_as_dict("cfg/general_config.toml")
             self.max_ips = parse_max_ips(general_config.get('max_ips', 0))
+            self.pause_menu_ips_tracker = _config_bool(
+                general_config.get("pause_menu_ips_tracker", "yes"), True
+            )
             print(
                 "Performance config:",
                 f"max_ips={self.max_ips if self.max_ips is not None else 'unlimited'}",
@@ -289,6 +293,8 @@ def pyla_main(data):
             self.low_feed_since = None
             self.slow_feed_recovery_attempts = 0
             self.ips_ema = None
+            if self.pause_menu_ips_tracker:
+                self.control_window.publish_ips(None)
             if recovered:
                 self.low_ips_recovery_attempts = 0
 
@@ -809,6 +815,8 @@ def pyla_main(data):
                     if elapsed > 0 and not self.visual_debug:
                         current_ips = c / elapsed
                         self.ips_ema = current_ips if self.ips_ema is None else (self.ips_ema * 0.75 + current_ips * 0.25)
+                        if self.pause_menu_ips_tracker:
+                            self.control_window.publish_ips(self.ips_ema)
                         print(f"{self.ips_ema:.2f} IPS")
                         if self.recover_low_ips(self.ips_ema):
                             s_time = time.time()

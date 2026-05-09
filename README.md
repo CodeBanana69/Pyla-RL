@@ -77,7 +77,7 @@ Recovery features :
 - If Brawl Stars closes or another app is in front, the bot can relaunch Brawl Stars.
 - If the Brawl Stars Idle Disconnect / Reload dialog appears, the bot presses Reload.
 - If the scrcpy video feed freezes, the bot restarts the scrcpy feed instead of repeatedly restarting Brawl Stars.
-- While the bot is running, a small `PylaAi-XXZ Control` window lets you pause and resume movement safely.
+- While the bot is running, a small `PylaAi-XXZ Control` window lets you pause and resume movement safely. By default it also shows a live IPS readout (bot iterations per second, smoothed) and a small green graph above a red threshold line, so you can spot performance issues at a glance. Turn it off with the `Pause Window IPS Tracker` toggle in the hub (or `pause_menu_ips_tracker = "no"` in `cfg/general_config.toml`); changes apply on the next bot start.
 
 Discord webhook and remote control :
 - Open `cfg/discord_config.toml`.

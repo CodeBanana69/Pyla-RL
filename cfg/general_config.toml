@@ -15,6 +15,7 @@ pyla_version = "0.8.1"
 long_press_star_drop = "no"
 terminal_logging = "no"
 capture_bad_vision_frames = "no"
+pause_menu_ips_tracker = "yes"
 bad_vision_capture_dir = "debug_frames/vision"
 bad_vision_capture_interval = 2.0
 bad_vision_capture_max = 500

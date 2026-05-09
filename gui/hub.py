@@ -109,6 +109,7 @@ class Hub:
         self.general_config.setdefault("visual_debug_max_boxes", 120)
         self.general_config.setdefault("visual_debug_motion_boxes", "no")
         self.general_config.setdefault("capture_bad_vision_frames", "no")
+        self.general_config.setdefault("pause_menu_ips_tracker", "yes")
 
         self.webhook_config.setdefault("webhook_url", self.general_config.get("personal_webhook", ""))
         self.webhook_config.setdefault("discord_id", self.general_config.get("discord_id", ""))
@@ -1073,6 +1074,32 @@ class Hub:
         self.attach_tooltip(
             capture_vision_cb,
             "Saves bad vision frames for model training when the player is lost or wall-stuck. Takes effect on next bot start."
+        )
+        row_idx += 1
+
+        lbl_ips_tracker = ctk.CTkLabel(container, text="Pause Window IPS Tracker:", font=theme.ui_font(S(18)))
+        lbl_ips_tracker.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        ips_tracker_var = tk.BooleanVar(
+            value=(str(self.general_config["pause_menu_ips_tracker"]).lower() in ["yes", "true"])
+        )
+
+        def toggle_ips_tracker():
+            self.general_config["pause_menu_ips_tracker"] = "yes" if ips_tracker_var.get() else "no"
+            save_dict_as_toml(self.general_config, self.general_config_path)
+
+        ips_tracker_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=ips_tracker_var,
+            command=toggle_ips_tracker,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        ips_tracker_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            ips_tracker_cb,
+            "Adds a live IPS readout (bot iterations per second) and a small green graph to the floating pause window. Takes effect on next bot start."
         )
         row_idx += 1
 
