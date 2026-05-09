@@ -22,15 +22,6 @@ super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_cr
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
 
-# Class keys from PylaSpecificBrawlerDetectorV1 that are NOT per-brawler silhouettes (indices 0–19 and abilities).
-_MAIN_MODEL_NON_BRAWLER_CLASSES = frozenset({
-    'ammo', 'ball', 'damage_taken', 'defeat', 'draw', 'enemy_health_bar', 'enemy_position',
-    'gadget', 'gem', 'hypercharge', 'player_health_bar', 'player_position', 'respawning',
-    'shot_success', 'super', 'teammate_health bar', 'teammate_position', 'victory', 'wall',
-    'bush', 'enemy_ability', 'ally_ability',
-})
-
-
 class Movement:
 
     def __init__(self, window_controller):
@@ -494,23 +485,7 @@ class Play(Movement):
         bot_config = load_toml_as_dict("cfg/bot_config.toml")
         time_config = load_toml_as_dict("cfg/time_tresholds.toml")
 
-        self.Detect_main_info = Detect(
-            main_info_model,
-            classes=[
-                'ammo', 'ball', 'damage_taken', 'defeat', 'draw', 'enemy_health_bar',
-                'enemy_position', 'gadget', 'gem', 'hypercharge', 'player_health_bar',
-                'player_position', 'respawning', 'shot_success', 'super', 'teammate_health bar',
-                'teammate_position', 'victory', 'wall', 'bush', '8bit', 'amber', 'ash', 'barley',
-                'bea', 'belle', 'bibi', 'bo', 'bonnie', 'brock', 'bull', 'buster', 'buzz', 'byron',
-                'carl', 'charlie', 'chester', 'chuck', 'colette', 'colt', 'cordelious', 'crow',
-                'darryl', 'doug', 'dynamike', 'edgar', 'primo', 'emz', 'eve', 'fang', 'frank',
-                'gale', 'gene', 'grom', 'gray', 'griff', 'gus', 'hank', 'jacky', 'janet', 'jessie',
-                'kit', 'larry_lawrie', 'leon', 'lola', 'lou', 'mandy', 'maisie', 'max', 'meg',
-                'melodie', 'mico', 'mortis', 'mrp', 'nani', 'nita', 'otis', 'pam', 'penny', 'piper',
-                'poco', 'rico', 'rosa', 'rt', 'ruffs', 'sam', 'sandy', 'shelly', 'spike', 'sprout',
-                'stu', 'squeak', 'surge', 'tara', 'tick', 'willow', 'lily', 'enemy_ability', 'ally_ability'
-            ]
-        )
+        self.Detect_main_info = Detect(main_info_model, classes=['enemy', 'teammate', 'player'])
         self.tile_detector_model_classes = bot_config["wall_model_classes"]
         self.Detect_tile_detector = Detect(
             tile_detector_model,
@@ -1538,29 +1513,21 @@ class Play(Movement):
     def _entity_team_color_scores(self, frame, box):
         h, w = frame.shape[:2]
         x1, y1, x2, y2 = map(int, self.normalize_box(box))
-
-        # Shift the ROI up to specifically target the health bar area above the brawler
-        pad_x = max(20, int((x2 - x1) * 0.5))
-        pad_y_up = max(45, int((y2 - y1) * 1.1))
-
+        pad_x = max(18, int((x2 - x1) * 0.45))
+        pad_y = max(24, int((y2 - y1) * 0.75))
         rx1 = max(0, x1 - pad_x)
-        ry1 = max(0, y1 - pad_y_up)
+        ry1 = max(0, y1 - pad_y)
         rx2 = min(w, x2 + pad_x)
-        ry2 = min(h, y1 + int((y2 - y1) * 0.2))  # Only include the top of the brawler
-
+        ry2 = min(h, y2 + pad_y)
         roi = frame[ry1:ry2, rx1:rx2]
         if roi.size == 0:
             return 0, 0
-
         hsv = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
-
-        # Exact HSV range for the bright neon green player health bar
-        green = self._count_mask_pixels(hsv, (40, 140, 150), (80, 255, 255))
-
-        # Exact HSV range for the red enemy health bar
+        # Friendly self/teammate overlays are bright green; enemy HP/name UI is red/orange.
+        green = self._count_mask_pixels(hsv, (35, 80, 80), (85, 255, 255))
         red = (
-            self._count_mask_pixels(hsv, (0, 140, 150), (10, 255, 255))
-            + self._count_mask_pixels(hsv, (170, 140, 150), (179, 255, 255))
+            self._count_mask_pixels(hsv, (0, 80, 80), (14, 255, 255))
+            + self._count_mask_pixels(hsv, (170, 80, 80), (179, 255, 255))
         )
         return green, red
 
@@ -1585,98 +1552,27 @@ class Play(Movement):
             print(f"[DBG] own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
         return own_box, rejected
 
-    @staticmethod
-    def _merge_named_brawler_boxes_into_players(data):
-        """Move detections keyed by brawler name (e.g. doug, shelly) into data['player'].
-
-        The main model often emits character boxes under roster class names instead of
-        player_position / enemy_position; without this, validate_game_data sees no player.
-        """
-        extra = []
-        for key in list(data.keys()):
-            if key in _MAIN_MODEL_NON_BRAWLER_CLASSES:
-                continue
-            boxes = data.pop(key, None)
-            if boxes:
-                extra.extend(boxes)
-        if not extra:
-            return
-        cur = data.get("player") or []
-        data["player"] = cur + extra
-
     def stabilize_entity_roles(self, frame, data):
         players = data.get("player") or []
-        health_bars = data.get("player_health_bar") or []
-
-        own_box = None
-        rejected_players = []
-
-        # 1. Primary Method: Use the AI model's health bar detection
-        if health_bars and players:
-            best_player = None
-            best_dist = float('inf')
-
-            hx1, hy1, hx2, hy2 = health_bars[0][:4]
-            hcx = (hx1 + hx2) * 0.5
-            hcy = (hy1 + hy2) * 0.5
-
-            for box in players:
-                px1, py1, px2, py2 = box[:4]
-                pcx = (px1 + px2) * 0.5
-                pcy = (py1 + py2) * 0.5
-                # Find the player box closest to the green health bar
-                dist = math.hypot(pcx - hcx, pcy - hcy)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_player = box
-
-            if best_player is not None:
-                own_box = best_player
-                rejected_players = [p for p in players if p is not own_box]
-
-        # 2. Fallback Method: Pixel color scanning (if AI missed the health bar)
-        if own_box is None:
-            own_box, rejected_players = self.select_own_player_box(frame, players)
-
+        own_box, rejected_players = self.select_own_player_box(frame, players)
         if own_box is not None:
             data["player"] = [own_box]
         if rejected_players:
             data.setdefault("enemy", [])
             data["enemy"].extend(rejected_players)
-
         return data
 
     def get_main_data(self, frame):
         data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
-
-        # --- MODEL KEY MAPPING ---
-        if "player_position" in data:
-            data["player"] = data.pop("player_position")
-        if "enemy_position" in data:
-            data["enemy"] = data.pop("enemy_position")
-        if "teammate_position" in data:
-            data["teammate"] = data.pop("teammate_position")
-        # -------------------------
-
-        self._merge_named_brawler_boxes_into_players(data)
-
         if not data.get("player") and self.entity_detection_retry_confidence < self.entity_detection_confidence:
             retry_data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_retry_confidence)
-
-            if "player_position" in retry_data:
-                retry_data["player"] = retry_data.pop("player_position")
-            if "enemy_position" in retry_data:
-                retry_data["enemy"] = retry_data.pop("enemy_position")
-            if "teammate_position" in retry_data:
-                retry_data["teammate"] = retry_data.pop("teammate_position")
-
-            self._merge_named_brawler_boxes_into_players(retry_data)
-
             if retry_data.get("player"):
                 if visual_debug:
-                    print(f"[DBG] player recovered with lower threshold {self.entity_detection_retry_confidence:.2f}")
+                    print(
+                        "[DBG] player recovered with lower entity threshold "
+                        f"{self.entity_detection_retry_confidence:.2f}"
+                    )
                 data = retry_data
-
         return self.stabilize_entity_roles(frame, data)
 
     def is_path_blocked(self, player_pos, move_direction, walls, distance=None):  # Increased distance
@@ -2589,7 +2485,6 @@ class Play(Movement):
         elif self.keep_walls_in_memory:
             data['wall'] = self.last_walls_data
 
-        detection_snapshot = dict(data) if isinstance(data, dict) else {}
         data = self.validate_game_data(data)
         self.track_no_detections(data)
         if data:
@@ -2619,11 +2514,6 @@ class Play(Movement):
                         self.window_controller.press_key("Q")
                         self.time_since_last_no_detection_q = current_time
                     self.time_since_last_proceeding = time.time()
-            if visual_debug:
-                dbg = detection_snapshot if detection_snapshot else (
-                    raw_data if isinstance(raw_data, dict) else {}
-                )
-                self.queue_visual_debug(frame, dbg, brawler)
             return
         self.time_since_last_proceeding = time.time()
         self.refresh_ready_abilities(frame, current_time)
