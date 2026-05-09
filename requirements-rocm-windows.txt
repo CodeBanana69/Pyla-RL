@@ -1,0 +1,16 @@
+# Optional: AMD GPU on Windows (gfx1100 / RDNA3 / RX 7000 series)
+#
+# Standard PyTorch ROCm wheels have a known HIPRTC/MIOpen JIT bug on Windows
+# (missing C++ stdlib for kernel JIT). This repo sets MIOPEN_FIND_MODE=5 at
+# startup (see amd_windows_env.py) to reduce JIT use; for full GPU support you
+# may still prefer a self-contained PyTorch build.
+#
+# Do NOT merge these lines into the main setup path — use only if you run PyTorch
+# with ROCm on Windows.
+#
+# Example workflow (adjust wheel URL to match your GPU family / release):
+#   pip uninstall torch torchvision torchaudio -y
+#   pip install <wheel URL from https://github.com/scottt/rocm-TheRock/releases >
+#
+# Pick the release matching your architecture (e.g. gfx110x for RX 7000).
+# Then run normally — no HIP SDK installation required for those wheels.

@@ -3,6 +3,10 @@ import gc
 import os
 import platform
 import sys
+
+from amd_windows_env import configure_amd_windows
+
+configure_amd_windows()
 import time
 import traceback
 from pathlib import Path
