@@ -154,6 +154,9 @@ def create_run_file(project_dir, python_command):
     run_bat.write_text(
         "@echo off\n"
         "cd /d %~dp0\n"
+        "REM MIOpen: reduce HIPRTC JIT failures on Windows+AMD (README; requirements-rocm-windows.txt)\n"
+        "set MIOPEN_FIND_MODE=5\n"
+        "set MIOPEN_DEBUG_DISABLE_FIND_DB=0\n"
         "set OMP_NUM_THREADS=2\n"
         "set OPENBLAS_NUM_THREADS=2\n"
         "set MKL_NUM_THREADS=2\n"
