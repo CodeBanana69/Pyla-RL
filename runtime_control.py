@@ -82,6 +82,7 @@ def process_is_alive(pid):
 def run_window(state_path):
     import tkinter as tk
     import customtkinter as ctk
+    from gui import theme
 
     ctk.set_appearance_mode("dark")
 
@@ -90,6 +91,7 @@ def run_window(state_path):
     root.geometry("280x170")
     root.resizable(False, False)
     root.attributes("-topmost", True)
+    root.configure(fg_color=theme.BG)
     owner_pid = None
     try:
         owner_pid = int(Path(state_path).stem.rsplit("_", 1)[1])
@@ -99,22 +101,28 @@ def run_window(state_path):
     status_var = tk.StringVar(value="Running")
     button_var = tk.StringVar(value="Pause Bot")
 
-    card = ctk.CTkFrame(root, fg_color="#242424", corner_radius=8)
+    card = ctk.CTkFrame(
+        root,
+        fg_color=theme.CARD,
+        corner_radius=14,
+        border_width=1,
+        border_color=theme.CARD_BORDER,
+    )
     card.pack(fill="both", expand=True, padx=12, pady=12)
 
     title = ctk.CTkLabel(
         card,
         text="PylaAi-XXZ Bot Control",
-        text_color="#FFFFFF",
-        font=("Arial", 17, "bold"),
+        text_color=theme.TEXT_PRIMARY,
+        font=theme.ui_font(17, "bold"),
     )
     title.pack(pady=(14, 2))
 
     status_label = ctk.CTkLabel(
         card,
         textvariable=status_var,
-        text_color="#2FCE66",
-        font=("Arial", 14, "bold"),
+        text_color=theme.SUCCESS,
+        font=theme.ui_font(14, "bold"),
     )
     status_label.pack(pady=(0, 12))
 
@@ -125,10 +133,10 @@ def run_window(state_path):
         paused = read_state(state_path) == PAUSED
         status_var.set("Paused" if paused else "Running")
         button_var.set("Resume Bot" if paused else "Pause Bot")
-        status_label.configure(text_color="#FFB23F" if paused else "#2FCE66")
+        status_label.configure(text_color=theme.WARN if paused else theme.SUCCESS)
         pause_button.configure(
-            fg_color="#2F8F4E" if paused else "#AA2A2A",
-            hover_color="#3DAF62" if paused else "#BB3A3A",
+            fg_color=theme.TEAL if paused else theme.ACCENT,
+            hover_color=theme.SKY if paused else theme.ACCENT_HOVER,
         )
 
     def root_exists():
@@ -158,19 +166,19 @@ def run_window(state_path):
         command=toggle_pause,
         width=170,
         height=40,
-        corner_radius=8,
-        fg_color="#AA2A2A",
-        hover_color="#BB3A3A",
-        text_color="#FFFFFF",
-        font=("Arial", 15, "bold"),
+        corner_radius=10,
+        fg_color=theme.ACCENT,
+        hover_color=theme.ACCENT_HOVER,
+        text_color=theme.TEXT_PRIMARY,
+        font=theme.ui_font(15, "bold"),
     )
     pause_button.pack(pady=(0, 8))
 
     hint = ctk.CTkLabel(
         card,
         text="Movement stops instantly while paused.",
-        text_color="#BEBEBE",
-        font=("Arial", 11),
+        text_color=theme.TEXT_SECONDARY,
+        font=theme.ui_font(11),
     )
     hint.pack()
 
