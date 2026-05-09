@@ -1648,7 +1648,6 @@ class Play(Movement):
 
     def get_main_data(self, frame):
         data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
-        print("RAW DETECTIONS: " + str(list(data.keys())))
 
         # --- MODEL KEY MAPPING ---
         if "player_position" in data:
