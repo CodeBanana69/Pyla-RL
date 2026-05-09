@@ -812,19 +812,20 @@ def pyla_main(data):
 
                 if abs(s_time - time.time()) > 1:
                     elapsed = time.time() - s_time
-                    if elapsed > 0 and not self.visual_debug:
+                    if elapsed > 0:
                         current_ips = c / elapsed
                         self.ips_ema = current_ips if self.ips_ema is None else (self.ips_ema * 0.75 + current_ips * 0.25)
                         if self.pause_menu_ips_tracker:
                             self.control_window.publish_ips(self.ips_ema)
-                        print(f"{self.ips_ema:.2f} IPS")
-                        if self.recover_low_ips(self.ips_ema):
-                            s_time = time.time()
-                            c = 0
-                            continue
-                        if self.ips_ema is not None and self.ips_ema < 3 and time.time() - self.low_frame_fps_warning_time > 20:
-                            self.print_low_ips_detail(self.ips_ema)
-                            self.low_frame_fps_warning_time = time.time()
+                        if not self.visual_debug:
+                            print(f"{self.ips_ema:.2f} IPS")
+                            if self.recover_low_ips(self.ips_ema):
+                                s_time = time.time()
+                                c = 0
+                                continue
+                            if self.ips_ema is not None and self.ips_ema < 3 and time.time() - self.low_frame_fps_warning_time > 20:
+                                self.print_low_ips_detail(self.ips_ema)
+                                self.low_frame_fps_warning_time = time.time()
                     s_time = time.time()
                     c = 0
 
