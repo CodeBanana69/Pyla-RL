@@ -71,6 +71,7 @@ class Hub:
         self.bot_config.setdefault("minimum_movement_delay", 0.4)
         self.bot_config.setdefault("wall_detection_confidence", 0.9)
         self.bot_config.setdefault("entity_detection_confidence", 0.6)
+        self.bot_config.setdefault("projectile_detection_confidence", 0.55)
         self.bot_config.setdefault("unstuck_movement_delay", 3.0)
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
         self.bot_config.setdefault("play_again_on_win", "no")
@@ -838,6 +839,15 @@ class Hub:
             convert_func=float,
             use_general_config=False,
             tooltip_text="On a scale between 0 and 1, how sure must the bot be to detect the player/enemies/allies. (lower means it can detect more things but increases false detections and mistakes)."
+        )
+
+        # Projectile Detection Confidence (bot_config) — RL fork
+        create_labeled_entry(
+            label_text="Projectile Detection Confidence:",
+            config_key="projectile_detection_confidence",
+            convert_func=float,
+            use_general_config=False,
+            tooltip_text="On a scale between 0 and 1, how strict the RL projectile filter is. Higher values only count projectiles clearly moving toward you. Lower lets in more candidates (more reactions but more false dodges)."
         )
 
         # 7) Unstuck Movement Delay (bot_config)

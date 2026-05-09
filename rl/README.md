@@ -1,10 +1,20 @@
-# Hybrid heuristic combat + RL movement
+# Reinforcement learning movement (this fork's headline feature)
 
-Pyla-RL keeps every brawler-specific attack, super, and gadget rule
-exactly as it was. The only thing the RL policy controls is **movement**
-(approach / retreat / strafe / dodge). Combat is run by
-`Play.run_combat()` after the movement choice is made, so attack timing
-and aiming are unchanged regardless of which mode is active.
+**Pyla-RL** is a reinforcement-learning fork of PylaAi-XXZ. It keeps
+every brawler-specific attack, super, and gadget rule exactly as it was.
+The only thing the RL policy controls is **movement** (approach /
+retreat / strafe / dodge). Combat is run by `Play.run_combat()` after
+the movement choice is made, so attack timing and aiming are unchanged
+regardless of which mode is active.
+
+Why this fork exists:
+
+- Heuristic movement is brittle and brawler-specific. PPO learns
+  positioning that generalises across brawlers from live frames.
+- Projectile dodging is the single biggest source of damage — the
+  tracker + reward shaping in this folder is built for that.
+- All of this runs *on top of* the existing bot, so attacks/supers
+  remain stable while movement is learned online.
 
 ## Settings (`cfg/bot_config.toml`)
 
@@ -67,6 +77,53 @@ normal Gym env from the trainer's perspective.
 There is **no health/HP detection**. As you specified, the only damage
 proxy is "projectile (or super) collides with the player box". This
 matches `is_player_hit`'s definition.
+
+## Projectile direction gate
+
+Vision detectors and the residual/motion blob fallback both produce a
+lot of false positives — friendly shots flying away, particles, idle
+map animations. The tracker now applies a **direction gate** so only
+tracks whose smoothed velocity is heading at the player are counted by
+`is_player_hit` and shown to the policy through `observation_features`.
+
+The gate is a single dot product
+`cos = (velocity · (player − projectile)) / (|velocity| · |player − projectile|)`
+that must be `>= incoming_min_alignment` (and the track must move at
+least `min_speed_px_s`). The hub's **Projectile Detection Confidence**
+slider (`projectile_detection_confidence` in `cfg/bot_config.toml`,
+default `0.55`) maps `0..1` to a cosine threshold via
+`align = 2*conf - 1`, so:
+
+| Confidence | Cosine threshold | Approx half-angle |
+| ---------- | ---------------- | ----------------- |
+| `0.50`     | `0.0`            | `±90°`            |
+| `0.65`     | `0.3`            | `±73°`            |
+| `0.75`     | `0.5`            | `±60°`            |
+| `0.90`     | `0.8`            | `±37°`            |
+
+The same threshold is also applied at the merge step in
+`Play._filter_candidates_toward_player`, which drops residual/motion
+candidates whose displacement vs. the previous frame is clearly heading
+away from the player (labeled YOLO classes always pass through and are
+gated by the tracker once they have velocity).
+
+## Score / telemetry
+
+`RLMovementBridge` keeps running counters and prints a one-line summary
+every ~3 seconds (and on every match reset). All `print` output is
+mirrored into `logs/pyla_<timestamp>.log` by `logger_setup.py`, so the
+RL score is on disk for every run with no extra setup.
+
+Format:
+
+```
+[RL] step=12345 ep_steps=812 ep_reward=+5.273 reward/step=+0.006 mean100ep=+3.84 projectile_hit=False
+[RL] episode_end ep_reward=+5.273 ep_len=812 mean100ep=+3.84
+```
+
+`mean100ep` is the trailing average of the last 100 episode returns —
+useful when training to see whether the policy is improving without
+having to load TensorBoard.
 
 ## Running with no projectile model yet
 

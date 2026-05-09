@@ -1,6 +1,18 @@
-﻿# PylaAi-XXZ
+﻿# Pyla-RL — Reinforcement Learning fork of PylaAi-XXZ
 
-This fork focuses on **Showdown** (trio). Other game modes still run off the upstream logic, but development effort and tuning here go into making Showdown play well end-to-end.
+**Pyla-RL** is a reinforcement-learning fork of PylaAi-XXZ. It keeps every brawler-specific attack/super/gadget rule from the upstream bot and replaces only the **movement** layer with a Stable-Baselines3 PPO policy that learns to position, dodge, and rotate from live gameplay.
+
+What's different in this fork:
+
+- **PPO movement policy.** When `use_rl_movement = "yes"` in `cfg/bot_config.toml`, every approach / retreat / strafe / dodge call is produced by a neural policy instead of the heuristic movement code. Combat (attacks, supers, gadgets) is unchanged.
+- **Online training on live frames.** With `enable_rl_movement_training = "yes"` the bridge submits one transition per frame to a Gym env and runs `model.learn()` on a worker thread, so the game loop never blocks on gradient steps. Weights are persisted to `models/rl_movement_policy.zip`.
+- **Direction-gated projectile tracker.** A lightweight EMA tracker fuses YOLO projectile classes with residual detector keys and masked motion blobs, then keeps only tracks whose velocity is heading at the player. The strictness is exposed as the **Projectile Detection Confidence** slider in the hub (sits next to wall and entity confidence).
+- **Live RL score in the terminal and in `logs/`.** The bridge prints a periodic `[RL] step=... ep_reward=... mean100ep=...` line; `logger_setup.py` mirrors all stdout to `logs/pyla_<timestamp>.log` so every score line is on disk.
+- **Showdown-first focus.** The fork is tuned end-to-end for Showdown trio (analog joystick movement, teammate hysteresis, fog avoidance, wall-stuck escape, place-based trophy tracking).
+
+See [`rl/README.md`](rl/README.md) for the full RL architecture, observation/action layout, reward shaping, and training tips.
+
+---
 
 What the bot does in Showdown:
 

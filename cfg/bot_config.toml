@@ -30,6 +30,7 @@ idle_pixels_minimum = 3000.0
 wall_detection_confidence = 0.8
 entity_detection_confidence = 0.55
 entity_detection_retry_confidence = 0.35
+projectile_detection_confidence = 0.55
 player_center_bias_radius = 420
 player_green_pixel_weight = 0.03
 player_red_pixel_penalty = 0.05
