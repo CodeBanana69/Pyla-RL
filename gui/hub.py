@@ -75,6 +75,9 @@ class Hub:
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
         self.bot_config.setdefault("play_again_on_win", "no")
         self.bot_config.setdefault("current_playstyle", "default.pyla")
+        self.bot_config.setdefault("use_rl_movement", "no")
+        self.bot_config.setdefault("enable_rl_movement_training", "no")
+        self.bot_config.setdefault("rl_movement_model_path", "models/rl_movement_policy.zip")
 
 
         # Time thresholds defaults
@@ -929,6 +932,58 @@ class Hub:
         self.attach_tooltip(
             play_again_cb,
             "If enabled, the bot presses 'Play Again' after a win instead of returning to the lobby."
+        )
+        row_idx += 1
+
+        lbl_rl_movement = ctk.CTkLabel(container, text="Use RL Movement:", font=theme.ui_font(S(18)))
+        lbl_rl_movement.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        rl_movement_var = tk.BooleanVar(
+            value=(str(self.bot_config["use_rl_movement"]).lower() in ["yes", "true"])
+        )
+
+        def toggle_rl_movement():
+            self.bot_config["use_rl_movement"] = "yes" if rl_movement_var.get() else "no"
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        rl_movement_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=rl_movement_var,
+            command=toggle_rl_movement,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        rl_movement_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            rl_movement_cb,
+            "If enabled, movement is driven by the RL policy. Heuristic attacks/supers/gadgets stay on. Takes effect on next bot start."
+        )
+        row_idx += 1
+
+        lbl_rl_train = ctk.CTkLabel(container, text="Enable RL Movement Training:", font=theme.ui_font(S(18)))
+        lbl_rl_train.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        rl_train_var = tk.BooleanVar(
+            value=(str(self.bot_config["enable_rl_movement_training"]).lower() in ["yes", "true"])
+        )
+
+        def toggle_rl_training():
+            self.bot_config["enable_rl_movement_training"] = "yes" if rl_train_var.get() else "no"
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        rl_train_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=rl_train_var,
+            command=toggle_rl_training,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        rl_train_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            rl_train_cb,
+            "ON: collect rollouts and update RL movement weights. OFF: load pretrained policy for inference only. Requires Use RL Movement to be ON. Takes effect on next bot start."
         )
         row_idx += 1
 
