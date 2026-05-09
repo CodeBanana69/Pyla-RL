@@ -23,6 +23,7 @@ import math
 import os
 import threading
 import time
+from collections import deque
 from typing import Optional, Tuple
 
 import numpy as np
@@ -147,6 +148,16 @@ class RLMovementBridge:
         self._train_lock = threading.Lock()
         self._train_busy = False
 
+        # Score telemetry: live in stdout (mirrored into logs/ by
+        # logger_setup.py) so training/inference progress is visible.
+        self._episode_steps = 0
+        self._episode_reward = 0.0
+        self._total_steps = 0
+        self._total_reward = 0.0
+        self._recent_rewards: deque = deque(maxlen=100)
+        self._last_score_print = time.time()
+        self._score_print_interval = 3.0
+
         print(
             f"RL movement bridge ready (showdown={self.is_showdown}, train={self.train}, "
             f"model={self.model_path}, max_projectiles={self.max_projectiles})."
@@ -181,16 +192,54 @@ class RLMovementBridge:
         return model
 
     def on_match_reset(self) -> None:
-        if self._last_obs is None:
-            return
-        transition = MovementTransition(
-            obs=self._last_obs.copy(),
-            reward=self.reward_cfg.survival_episode_bonus if self.train else 0.0,
-            done=True,
-            info={"reason": "match_reset"},
-        )
-        self.env.submit_transition(transition)
+        end_bonus = self.reward_cfg.survival_episode_bonus if self.train else 0.0
+        if self._last_obs is not None:
+            transition = MovementTransition(
+                obs=self._last_obs.copy(),
+                reward=end_bonus,
+                done=True,
+                info={"reason": "match_reset"},
+            )
+            self.env.submit_transition(transition)
         self._steps_since_update = 0
+        ep_reward = self._episode_reward + end_bonus
+        ep_len = self._episode_steps
+        self._recent_rewards.append(ep_reward)
+        self._total_reward += end_bonus
+        mean100 = (
+            sum(self._recent_rewards) / len(self._recent_rewards)
+            if self._recent_rewards
+            else 0.0
+        )
+        print(
+            f"[RL] episode_end ep_reward={ep_reward:+.3f} "
+            f"ep_len={ep_len} mean100ep={mean100:+.3f}"
+        )
+        self._episode_reward = 0.0
+        self._episode_steps = 0
+        self._last_score_print = time.time()
+
+    def _maybe_print_score(self, projectile_hit: bool, force: bool = False) -> None:
+        now = time.time()
+        if not force and now - self._last_score_print < self._score_print_interval:
+            return
+        self._last_score_print = now
+        mean100 = (
+            sum(self._recent_rewards) / len(self._recent_rewards)
+            if self._recent_rewards
+            else 0.0
+        )
+        reward_per_step = (
+            self._episode_reward / self._episode_steps
+            if self._episode_steps
+            else 0.0
+        )
+        mode = "train" if self.train else "infer"
+        print(
+            f"[RL] {mode} step={self._total_steps} ep_steps={self._episode_steps} "
+            f"ep_reward={self._episode_reward:+.3f} reward/step={reward_per_step:+.4f} "
+            f"mean100ep={mean100:+.3f} projectile_hit={projectile_hit}"
+        )
 
     def _build_observation(self, play, data) -> Tuple[np.ndarray, Optional[Tuple[float, float, float, float]]]:
         player_box = _player_box_from_data(data)
@@ -266,11 +315,7 @@ class RLMovementBridge:
         obs, player_box = self._build_observation(play, data)
 
         projectile_hit = False
-        if (
-            self.train
-            and player_box is not None
-            and play.projectile_tracker is not None
-        ):
+        if player_box is not None and play.projectile_tracker is not None:
             projectile_hit = play.projectile_tracker.is_player_hit(
                 player_box,
                 now=current_time,
@@ -278,13 +323,16 @@ class RLMovementBridge:
                 lookahead_seconds=0.15,
             )
 
+        # Compute reward in both training and inference so the score line
+        # reflects what the policy is doing right now.
+        reward = compute_reward(
+            obs,
+            projectile_hit=projectile_hit,
+            cfg=self.reward_cfg,
+            done=False,
+        )
+
         if self.train and self._last_obs is not None:
-            reward = compute_reward(
-                obs,
-                projectile_hit=projectile_hit,
-                cfg=self.reward_cfg,
-                done=False,
-            )
             transition = MovementTransition(
                 obs=obs,
                 reward=reward,
@@ -294,6 +342,13 @@ class RLMovementBridge:
             self.env.submit_transition(transition)
             self._steps_since_update += 1
             self._maybe_kick_training()
+
+        if self._last_obs is not None:
+            self._episode_reward += float(reward)
+            self._episode_steps += 1
+            self._total_reward += float(reward)
+            self._total_steps += 1
+            self._maybe_print_score(projectile_hit=projectile_hit)
 
         action, _ = self.model.predict(obs, deterministic=not self.train)
         action = np.asarray(action, dtype=np.float32).reshape(-1)

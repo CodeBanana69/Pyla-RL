@@ -68,6 +68,52 @@ class ProjectileTrack:
             self.cy + self.half_h + padding,
         )
 
+    def alignment_to_player(self, player_pos: Tuple[float, float]) -> float:
+        """Cosine of the angle between velocity and (player - projectile).
+
+        Returns 0.0 when either vector has near-zero magnitude. A value of
+        +1 means the projectile is heading straight at the player; -1 means
+        it is moving directly away.
+        """
+        speed = math.hypot(self.vx, self.vy)
+        if speed <= 1e-6:
+            return 0.0
+        dx = player_pos[0] - self.cx
+        dy = player_pos[1] - self.cy
+        dist = math.hypot(dx, dy)
+        if dist <= 1e-6:
+            return 0.0
+        return (self.vx * dx + self.vy * dy) / (speed * dist)
+
+    def is_incoming(
+        self,
+        player_pos: Tuple[float, float],
+        min_alignment: float = 0.2,
+        min_speed_px_s: float = 25.0,
+    ) -> bool:
+        """True when the track is moving fast enough and aimed at the player."""
+        if math.hypot(self.vx, self.vy) < float(min_speed_px_s):
+            return False
+        return self.alignment_to_player(player_pos) >= float(min_alignment)
+
+    def confidence_score(
+        self,
+        player_pos: Tuple[float, float],
+        ref_speed_px_s: float = 600.0,
+    ) -> float:
+        """0..1 score combining directional alignment and speed magnitude.
+
+        Alignment is mapped from [-1, 1] to [0, 1]; speed is clipped to
+        ``ref_speed_px_s`` and normalised to [0, 1]. The geometric mean of
+        the two keeps both signals important — a fast but sideways blob
+        scores lower than a slower one heading right at the player.
+        """
+        alignment = self.alignment_to_player(player_pos)
+        align_norm = max(0.0, (alignment + 1.0) * 0.5)
+        speed = math.hypot(self.vx, self.vy)
+        speed_norm = max(0.0, min(1.0, speed / max(1.0, float(ref_speed_px_s))))
+        return math.sqrt(align_norm * speed_norm)
+
 
 def _box_center_size(box: Sequence[float]) -> Tuple[float, float, float, float]:
     x1, y1, x2, y2 = box[:4]
@@ -146,11 +192,13 @@ class ProjectileTracker:
         velocity_alpha: float = 0.45,
         max_match_distance: float = 120.0,
         min_speed_px_s: float = 25.0,
+        incoming_min_alignment: float = 0.2,
     ) -> None:
         self.history_seconds = float(history_seconds)
         self.velocity_alpha = float(velocity_alpha)
         self.max_match_distance = float(max_match_distance)
         self.min_speed_px_s = float(min_speed_px_s)
+        self.incoming_min_alignment = float(incoming_min_alignment)
         self._tracks: List[ProjectileTrack] = []
         self._next_id = 1
 
@@ -230,17 +278,50 @@ class ProjectileTracker:
         self._tracks = [tr for tr in self._tracks if tr.last_seen >= cutoff]
         return self._tracks
 
+    def incoming_tracks(
+        self,
+        player_pos: Tuple[float, float],
+        min_alignment: Optional[float] = None,
+        min_speed_px_s: Optional[float] = None,
+    ) -> List[ProjectileTrack]:
+        """Tracks whose velocity actually heads at the player.
+
+        Brand-new tracks (one frame of evidence, no smoothed velocity yet)
+        are kept in the candidate set so the first-frame observation isn't
+        always empty; once they have a velocity the gate filters them.
+        """
+        if not self._tracks:
+            return []
+        align = self.incoming_min_alignment if min_alignment is None else float(min_alignment)
+        speed = self.min_speed_px_s if min_speed_px_s is None else float(min_speed_px_s)
+        out: List[ProjectileTrack] = []
+        for tr in self._tracks:
+            if math.hypot(tr.vx, tr.vy) < speed:
+                continue
+            if tr.alignment_to_player(player_pos) < align:
+                continue
+            out.append(tr)
+        return out
+
     def nearest_tracks(
         self,
         player_pos: Tuple[float, float],
         k: int,
+        only_incoming: bool = True,
     ) -> List[ProjectileTrack]:
         if k <= 0 or not self._tracks:
             return []
         px, py = player_pos
+        candidates = (
+            self.incoming_tracks(player_pos)
+            if only_incoming
+            else list(self._tracks)
+        )
+        if not candidates:
+            return []
         scored = [
             (math.hypot(tr.cx - px, tr.cy - py), tr)
-            for tr in self._tracks
+            for tr in candidates
         ]
         scored.sort(key=lambda t: t[0])
         return [tr for _, tr in scored[:k]]
@@ -289,6 +370,7 @@ class ProjectileTracker:
         now: Optional[float] = None,
         padding: float = 0.0,
         lookahead_seconds: float = 0.0,
+        require_incoming: bool = True,
     ) -> bool:
         """Return True if any tracked projectile overlaps the player box.
 
@@ -296,13 +378,32 @@ class ProjectileTracker:
         `lookahead_seconds > 0`, fast projectiles that will overlap the
         player within that horizon also count as a hit (cheap forward
         Euler step using the smoothed velocity).
+
+        With ``require_incoming=True`` (default) tracks whose velocity is
+        not pointed at the player are ignored — this prevents spurious
+        penalties from particles, friendly shots flying away, and idle
+        background animations.
         """
         if now is None:
             now = time.time()
         if not self._tracks:
             return False
+        player_cx = (float(player_box[0]) + float(player_box[2])) * 0.5
+        player_cy = (float(player_box[1]) + float(player_box[3])) * 0.5
+        player_pos = (player_cx, player_cy)
         for tr in self._tracks:
-            if _boxes_overlap(player_box, tr.expanded_box(padding=padding)):
+            currently_overlapping = _boxes_overlap(
+                player_box, tr.expanded_box(padding=padding)
+            )
+            if currently_overlapping and not require_incoming:
+                return True
+            if require_incoming and not tr.is_incoming(
+                player_pos,
+                min_alignment=self.incoming_min_alignment,
+                min_speed_px_s=self.min_speed_px_s,
+            ):
+                continue
+            if currently_overlapping:
                 return True
             if lookahead_seconds <= 0:
                 continue

@@ -143,6 +143,12 @@ class Movement:
         self.rl_residual_iou_exclude = float(bot_config.get("rl_residual_iou_exclude", 0.25))
         self.rl_projectile_merge_nms_iou = float(bot_config.get("rl_projectile_merge_nms_iou", 0.35))
         self.rl_projectile_max_match_distance = float(bot_config.get("rl_projectile_max_match_distance", 120.0))
+        # Single 0..1 knob (also exposed in the hub UI) controlling how
+        # strictly the projectile pipeline rejects boxes that are not
+        # heading toward the player. Higher = fewer false positives.
+        self.projectile_detection_confidence = float(
+            bot_config.get("projectile_detection_confidence", 0.55)
+        )
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -591,12 +597,21 @@ class Play(Movement):
                 history_seconds=self.rl_projectile_history_seconds,
                 min_speed_px_s=self.rl_projectile_min_speed_px_s,
                 max_match_distance=self.rl_projectile_max_match_distance,
+                # Map 0..1 confidence to a cosine alignment threshold so the
+                # tracker only counts tracks heading at the player.
+                # 0.5 -> 0 (±90°), 0.75 -> 0.5 (±60°), 0.9 -> 0.8 (±37°).
+                incoming_min_alignment=max(
+                    -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
+                ),
             )
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
             self.projectile_tracker = None
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
+        # Previous-frame motion/residual centers used to gate candidates
+        # by direction-of-travel-toward-player.
+        self._rl_prev_motion_centers: list = []
         self._rl_bridge = None
         self._rl_bridge_warned = False
 
@@ -2317,6 +2332,20 @@ class Play(Movement):
             self._rl_motion_prev_gray = None
             motion_boxes = []
 
+        # Direction gate: drop residual/motion candidates whose movement
+        # since the previous frame is clearly heading away from the player.
+        # YOLO-labeled projectiles bypass this — the tracker's own
+        # alignment check will filter those once they have a velocity.
+        player_pos = None
+        if data.get("player"):
+            player_pos = self.get_player_pos(data["player"][0])
+
+        residual, motion_boxes = self._filter_candidates_toward_player(
+            residual_boxes=residual,
+            motion_boxes=motion_boxes,
+            player_pos=player_pos,
+        )
+
         boxes = merge_projectile_candidates(
             labeled,
             residual,
@@ -2332,6 +2361,82 @@ class Play(Movement):
             print(f"Projectile tracker update failed: {exc}")
             tracks = []
         return tracks
+
+    def _filter_candidates_toward_player(
+        self,
+        residual_boxes,
+        motion_boxes,
+        player_pos,
+    ):
+        """Drop residual/motion candidates that visibly move away from player.
+
+        For each new candidate, find the nearest previous-frame center
+        within ``rl_projectile_max_match_distance``. If the displacement
+        vector exceeds a small minimum and points away from the player
+        (cosine < threshold), reject it. Candidates without a nearby
+        previous match are kept — there is no evidence yet, and the
+        tracker's own gate filters them once they have velocity.
+        """
+        prev_centers = list(getattr(self, "_rl_prev_motion_centers", []) or [])
+        kept_residual: list = []
+        kept_motion: list = []
+        new_centers: list = []
+
+        # Same 0..1 -> cosine mapping used for the tracker, so the UI
+        # confidence affects motion/residual gating identically.
+        align_thresh = max(
+            -1.0,
+            min(1.0, 2.0 * float(self.projectile_detection_confidence) - 1.0),
+        )
+        # Movement smaller than this is treated as "no evidence yet".
+        min_displacement_px = 6.0
+
+        def _keep(box):
+            if player_pos is None or not prev_centers:
+                return True
+            cx = (float(box[0]) + float(box[2])) * 0.5
+            cy = (float(box[1]) + float(box[3])) * 0.5
+            best_idx = -1
+            best_d = float(self.rl_projectile_max_match_distance)
+            for i, (pcx, pcy) in enumerate(prev_centers):
+                d = math.hypot(cx - pcx, cy - pcy)
+                if d < best_d:
+                    best_d = d
+                    best_idx = i
+            if best_idx < 0:
+                return True
+            pcx, pcy = prev_centers[best_idx]
+            dvx, dvy = cx - pcx, cy - pcy
+            disp = math.hypot(dvx, dvy)
+            if disp < min_displacement_px:
+                return True
+            tx, ty = player_pos[0] - cx, player_pos[1] - cy
+            tnorm = math.hypot(tx, ty)
+            if tnorm < 1e-3:
+                return True
+            cos = (dvx * tx + dvy * ty) / (disp * tnorm)
+            return cos >= align_thresh
+
+        for box in residual_boxes or []:
+            if len(box) < 4:
+                continue
+            cx = (float(box[0]) + float(box[2])) * 0.5
+            cy = (float(box[1]) + float(box[3])) * 0.5
+            new_centers.append((cx, cy))
+            if _keep(box):
+                kept_residual.append(box)
+
+        for box in motion_boxes or []:
+            if len(box) < 4:
+                continue
+            cx = (float(box[0]) + float(box[2])) * 0.5
+            cy = (float(box[1]) + float(box[3])) * 0.5
+            new_centers.append((cx, cy))
+            if _keep(box):
+                kept_motion.append(box)
+
+        self._rl_prev_motion_centers = new_centers
+        return kept_residual, kept_motion
 
     def main(self, frame, brawler, main):
         current_time = time.time()
