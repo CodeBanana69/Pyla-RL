@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import time
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -162,6 +163,76 @@ class Movement:
         self.rl_projectile_friendly_origin_radius = float(
             bot_config.get("rl_projectile_friendly_origin_radius", 100.0)
         )
+        self.rl_universal_projectiles_mode = str(
+            bot_config.get("rl_universal_projectiles_mode", "motion")
+        ).strip().lower()
+        self.rl_motion_ego_compensate = str(bot_config.get("rl_motion_ego_compensate", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_motion_ego_min_response = float(bot_config.get("rl_motion_ego_min_response", 0.08))
+        self.rl_motion_skip_on_bad_ego = str(
+            bot_config.get("rl_motion_skip_on_bad_ego", "no")
+        ).lower() in ("yes", "true", "1")
+        self.rl_motion_use_ui_mask = str(bot_config.get("rl_motion_use_ui_mask", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        raw_ui = bot_config.get("rl_motion_ui_exclude_rects")
+        self.rl_motion_ui_exclude_rects: Optional[list] = (
+            raw_ui if isinstance(raw_ui, list) and raw_ui else None
+        )
+        self.rl_motion_full_frame_fog = str(bot_config.get("rl_motion_full_frame_fog", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_motion_fog_exclude_dilate_px = int(bot_config.get("rl_motion_fog_exclude_dilate_px", 2))
+        raw_terr = bot_config.get("rl_animated_terrain_hsv_ranges")
+        self.rl_animated_terrain_hsv_ranges: list = (
+            raw_terr if isinstance(raw_terr, list) else []
+        )
+        self.rl_projectile_min_hits_to_promote = max(
+            1, int(bot_config.get("rl_projectile_min_hits_to_promote", 1))
+        )
+        self.rl_projectile_max_speed_px_s = float(bot_config.get("rl_projectile_max_speed_px_s", 1.0e9))
+        self.rl_projectile_max_accel_px_s2 = float(bot_config.get("rl_projectile_max_accel_px_s2", 1.0e9))
+        self.rl_projectile_max_line_residual_frac = float(
+            bot_config.get("rl_projectile_max_line_residual_frac", 1.0)
+        )
+        self.rl_projectile_motion_origin_radius = float(
+            bot_config.get("rl_projectile_motion_origin_radius", 80.0)
+        )
+        self.rl_projectile_require_enemy_origin_strict = str(
+            bot_config.get("rl_projectile_require_enemy_origin_strict", "no")
+        ).lower() in ("yes", "true", "1")
+        self.rl_projectile_cluster_distance_px = float(
+            bot_config.get("rl_projectile_cluster_distance_px", 200.0)
+        )
+        # Health bar + damage cross-reference (RL / visual debug)
+        self.health_bar_band_offset_px = float(bot_config.get("health_bar_band_offset_px", 8.0))
+        self.health_bar_band_height_px = float(bot_config.get("health_bar_band_height_px", 14.0))
+        self.health_bar_min_total_pixels = int(bot_config.get("health_bar_min_total_pixels", 40))
+        self.health_ocr_enabled = str(bot_config.get("health_ocr_enabled", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.health_ocr_interval_seconds = float(bot_config.get("health_ocr_interval_seconds", 0.5))
+        self.damage_hp_drop_threshold_pct = float(bot_config.get("damage_hp_drop_threshold_pct", 0.015))
+        self.damage_confirm_window_seconds = float(bot_config.get("damage_confirm_window_seconds", 0.5))
+        self.red_flash_detect_enabled = str(bot_config.get("red_flash_detect_enabled", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.red_flash_red_dom_threshold = float(bot_config.get("red_flash_red_dom_threshold", 1.40))
+        self.red_flash_baseline_alpha = float(bot_config.get("red_flash_baseline_alpha", 0.1))
+        self.cross_reference_projectile_hits = str(
+            bot_config.get("cross_reference_projectile_hits", "yes")
+        ).lower() in ("yes", "true", "1")
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -617,12 +688,43 @@ class Play(Movement):
                     -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
                 ),
                 enemy_origin_radius=self.rl_projectile_enemy_origin_radius,
+                motion_enemy_origin_radius=self.rl_projectile_motion_origin_radius,
                 friendly_origin_radius=self.rl_projectile_friendly_origin_radius,
                 require_enemy_origin=self.rl_projectile_require_enemy_origin,
+                require_enemy_origin_strict=self.rl_projectile_require_enemy_origin_strict,
+                min_hits_to_promote=self.rl_projectile_min_hits_to_promote,
+                max_speed_px_s=self.rl_projectile_max_speed_px_s,
+                max_accel_px_s2=self.rl_projectile_max_accel_px_s2,
+                max_line_residual_frac=self.rl_projectile_max_line_residual_frac,
             )
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
             self.projectile_tracker = None
+
+        try:
+            from rl.health_monitor import HealthMonitor
+            from rl.red_flash import RedFlashDetector
+
+            self.health_monitor = HealthMonitor(
+                band_offset_px=self.health_bar_band_offset_px,
+                band_height_px=self.health_bar_band_height_px,
+                min_total_pixels=self.health_bar_min_total_pixels,
+                damage_drop_threshold=self.damage_hp_drop_threshold_pct,
+                prior_window_seconds=0.4,
+                history_seconds=2.0,
+                ocr_enabled=self.health_ocr_enabled,
+                ocr_interval_seconds=self.health_ocr_interval_seconds,
+            )
+            self.red_flash_detector = RedFlashDetector(
+                threshold=self.red_flash_red_dom_threshold,
+                baseline_alpha=self.red_flash_baseline_alpha,
+            )
+        except Exception as exc:
+            print(f"Could not initialise health / red-flash monitors: {exc}")
+            self.health_monitor = None
+            self.red_flash_detector = None
+
+        self._visual_debug_red_flash = False
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
         # Previous-frame motion/residual centers used to gate candidates
@@ -785,6 +887,16 @@ class Play(Movement):
         if getattr(self, "projectile_tracker", None) is not None:
             try:
                 self.projectile_tracker.reset()
+            except Exception:
+                pass
+        if getattr(self, "health_monitor", None) is not None:
+            try:
+                self.health_monitor.reset_match()
+            except Exception:
+                pass
+        if getattr(self, "red_flash_detector", None) is not None:
+            try:
+                self.red_flash_detector.reset()
             except Exception:
                 pass
         self._rl_motion_prev_gray = None
@@ -2262,6 +2374,65 @@ class Play(Movement):
 
         return movement
 
+    def is_respawning_overlay(self, frame):
+        """Return True when the 'Back in:' / lightning-bolt respawn HUD is showing.
+
+        We don't run projectile detection while the player is dead — the
+        camera follows a teammate / spectator perspective and YOLO can
+        still emit detections that aren't meaningful to dodge.
+
+        Detection is purely color-based and cheap:
+          * crop a top-center band of the frame
+          * count bright-yellow pixels (lightning bolt) AND large near-white
+            pixel cluster (the "Back in:" outlined text)
+          * both must clear independent thresholds for a positive
+        """
+        if frame is None:
+            return False
+        try:
+            h, w = frame.shape[:2]
+        except Exception:
+            return False
+        if h < 80 or w < 80:
+            return False
+
+        # Reference 1920×1080 region centered horizontally near the top.
+        # The respawn overlay floats in roughly the upper third of screen.
+        ref_w, ref_h = 1920.0, 1080.0
+        x = int(w * (560.0 / ref_w))
+        y = int(h * (60.0 / ref_h))
+        cw = int(w * (800.0 / ref_w))
+        ch = int(h * (320.0 / ref_h))
+        x = max(0, min(w - 8, x))
+        y = max(0, min(h - 8, y))
+        cw = max(8, min(w - x, cw))
+        ch = max(8, min(h - y, ch))
+
+        crop = frame[y:y + ch, x:x + cw]
+        if crop.size == 0:
+            return False
+
+        try:
+            hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        except cv2.error:
+            return False
+
+        yellow_low = np.array((22, 180, 200), dtype=np.uint8)
+        yellow_high = np.array((36, 255, 255), dtype=np.uint8)
+        yellow = cv2.inRange(hsv, yellow_low, yellow_high)
+        yellow_count = int(cv2.countNonZero(yellow))
+
+        white_low = np.array((0, 0, 220), dtype=np.uint8)
+        white_high = np.array((179, 60, 255), dtype=np.uint8)
+        white = cv2.inRange(hsv, white_low, white_high)
+        white_count = int(cv2.countNonZero(white))
+
+        # Thresholds scale with crop area (resolution independent).
+        area = float(crop.shape[0] * crop.shape[1])
+        yellow_ratio = yellow_count / max(1.0, area)
+        white_ratio = white_count / max(1.0, area)
+        return yellow_ratio >= 0.0035 and white_ratio >= 0.020
+
     def update_projectile_tracker(self, data, current_time):
         """Aggregate labeled, residual-detector, and motion-diff boxes into
         ``data['projectile']`` and advance ``ProjectileTracker``.
@@ -2272,23 +2443,79 @@ class Play(Movement):
         """
         if not data:
             return []
+
+        self._preserve_rl_motion_prev_gray = False
+        scale = self.window_controller.scale_factor
+        hm_early = getattr(self, "health_monitor", None)
+        frame_early = self.current_frame
+        if hm_early is not None and frame_early is not None and data.get("player"):
+            try:
+                hm_early.update(
+                    current_time,
+                    frame_early,
+                    data["player"][0],
+                    scale,
+                    lambda: self.is_respawning_overlay(frame_early),
+                )
+            except Exception:
+                pass
+
+        flashing = False
+        if (
+            getattr(self, "red_flash_detect_enabled", True)
+            and getattr(self, "red_flash_detector", None) is not None
+            and frame_early is not None
+        ):
+            try:
+                flashing = bool(self.red_flash_detector.update(frame_early))
+            except Exception:
+                flashing = False
+        self._visual_debug_red_flash = flashing
+
         if self.projectile_tracker is None:
             data["projectile"] = []
             return []
 
+        # Skip detection entirely while the death/respawn overlay is up.
+        # No player to dodge for, and the spectator camera produces noise.
+        if self.is_respawning_overlay(self.current_frame):
+            data["projectile"] = []
+            self._rl_motion_prev_gray = None
+            self._rl_motion_debug_boxes = []
+            try:
+                self.projectile_tracker.reset()
+            except Exception:
+                pass
+            return []
+
         from rl.projectile_tracker import extract_projectile_boxes
         from rl.universal_projectiles import (
+            animated_terrain_mask_small,
             collect_entity_wall_boxes,
             extract_residual_projectile_boxes,
             grayscale_small,
-            merge_projectile_candidates,
+            merge_projectile_candidates_with_sources,
             motion_blob_boxes,
+            parse_animated_terrain_hsv_ranges,
             raster_fog_roi_to_small_mask,
+            scale_ui_reference_rects,
+            trusted_fog_mask_small,
         )
 
         labeled = extract_projectile_boxes(data, self.rl_projectile_classes)
         residual: list = []
         motion_boxes: list = []
+        ui_boxes_fullres: list = []
+        motion_ran = False
+
+        univ_mode = getattr(self, "rl_universal_projectiles_mode", "motion")
+        run_residual = self.rl_universal_projectiles and univ_mode in ("motion", "residual_only")
+        run_motion = self.rl_universal_projectiles and univ_mode == "motion"
+
+        if flashing:
+            run_residual = False
+            run_motion = False
+            self._preserve_rl_motion_prev_gray = True
 
         if self.rl_universal_projectiles:
             exclude_keys = {"player", "teammate", "enemy", "wall"}
@@ -2304,17 +2531,28 @@ class Play(Movement):
                 fh, fw = frame.shape[:2]
             frame_wh = (fw, fh)
 
-            residual = extract_residual_projectile_boxes(
-                data,
-                exclude_keys,
-                ref_boxes,
-                frame_wh,
-                max_box_area_frac=self.rl_residual_max_box_area_frac,
-                max_side_frac=self.rl_residual_max_side_frac,
-                iou_exclude_thresh=self.rl_residual_iou_exclude,
-            )
+            if getattr(self, "rl_motion_use_ui_mask", True):
+                ui_boxes_fullres = scale_ui_reference_rects(
+                    fw,
+                    fh,
+                    definitions=self.rl_motion_ui_exclude_rects,
+                )
 
-            if frame is not None:
+            ref_motion = list(ref_boxes) + ui_boxes_fullres
+
+            if run_residual:
+                residual = extract_residual_projectile_boxes(
+                    data,
+                    exclude_keys,
+                    ref_boxes,
+                    frame_wh,
+                    max_box_area_frac=self.rl_residual_max_box_area_frac,
+                    max_side_frac=self.rl_residual_max_side_frac,
+                    iou_exclude_thresh=self.rl_residual_iou_exclude,
+                    ui_exclude_boxes=ui_boxes_fullres or None,
+                )
+
+            if run_motion and frame is not None:
                 curr_small = grayscale_small(frame, self.rl_motion_scale_width)
                 sh, sw = curr_small.shape[:2]
                 fog_small = None
@@ -2328,13 +2566,44 @@ class Play(Movement):
                         fog_small = raster_fog_roi_to_small_mask(
                             fog_mask_roi, origin, (fh, fw), (sh, sw)
                         )
+                if getattr(self, "rl_motion_full_frame_fog", True):
+                    ff_area = max(1, fh * fw)
+                    full_fog = trusted_fog_mask_small(
+                        frame,
+                        fog_hsv_low=tuple(self.fog_hsv_low),
+                        fog_hsv_high=tuple(self.fog_hsv_high),
+                        scale_width=self.rl_motion_scale_width,
+                        full_frame_area=ff_area,
+                        full_min_blob_pixels=int(self.fog_min_blob_pixels),
+                        dilate_px=int(getattr(self, "rl_motion_fog_exclude_dilate_px", 2)),
+                    )
+                    if fog_small is not None:
+                        fog_small = cv2.bitwise_or(fog_small, full_fog)
+                    else:
+                        fog_small = full_fog
+
+                terr_ranges = parse_animated_terrain_hsv_ranges(
+                    getattr(self, "rl_animated_terrain_hsv_ranges", [])
+                )
+                terrain_mask = animated_terrain_mask_small(
+                    frame,
+                    scale_width=self.rl_motion_scale_width,
+                    hsv_ranges=terr_ranges,
+                    dilate_px=2,
+                )
+                if terrain_mask is not None and cv2.countNonZero(terrain_mask) > 0:
+                    if fog_small is not None:
+                        fog_small = cv2.bitwise_or(fog_small, terrain_mask)
+                    else:
+                        fog_small = terrain_mask
+
                 dil_small = max(
                     1, int(round(self.rl_motion_exclude_dilate_px * sw / max(1, fw)))
                 )
                 motion_boxes = motion_blob_boxes(
                     self._rl_motion_prev_gray,
                     curr_small,
-                    ref_boxes,
+                    ref_motion,
                     frame_wh,
                     diff_threshold=self.rl_motion_diff_threshold,
                     exclude_dilate_px=dil_small,
@@ -2342,11 +2611,17 @@ class Play(Movement):
                     max_area_px=self.rl_motion_max_area_px,
                     morph_kernel=self.rl_motion_morph_kernel,
                     fog_exclude_small=fog_small,
+                    ego_compensate=getattr(self, "rl_motion_ego_compensate", False),
+                    ego_min_response=float(getattr(self, "rl_motion_ego_min_response", 0.08)),
+                    skip_motion_on_low_ego_response=getattr(
+                        self, "rl_motion_skip_on_bad_ego", False
+                    ),
                 )
                 self._rl_motion_prev_gray = curr_small.copy()
-        else:
+                motion_ran = True
+
+        if not motion_ran and not getattr(self, "_preserve_rl_motion_prev_gray", False):
             self._rl_motion_prev_gray = None
-            motion_boxes = []
 
         # Direction gate: drop residual/motion candidates whose movement
         # since the previous frame is clearly heading away from the player.
@@ -2362,7 +2637,7 @@ class Play(Movement):
             player_pos=player_pos,
         )
 
-        boxes = merge_projectile_candidates(
+        boxes, box_sources = merge_projectile_candidates_with_sources(
             labeled,
             residual,
             motion_boxes,
@@ -2387,10 +2662,31 @@ class Play(Movement):
                 now=current_time,
                 enemy_boxes=enemy_boxes,
                 friendly_boxes=friendly_boxes,
+                box_sources=box_sources,
+                ui_exclude_boxes=ui_boxes_fullres or None,
             )
         except Exception as exc:
             print(f"Projectile tracker update failed: {exc}")
             tracks = []
+
+        pt = self.projectile_tracker
+        win = float(getattr(self, "damage_confirm_window_seconds", 0.5))
+        hm = getattr(self, "health_monitor", None)
+        if pt is not None and data.get("player"):
+            player_box = data["player"][0]
+            try:
+                if hm is not None and not flashing:
+                    if hm.recent_damage_event(current_time, win) is not None:
+                        pt.confirm_tracks_touching_player(
+                            player_box,
+                            now=current_time,
+                            padding=self.rl_projectile_hit_radius_padding,
+                            lookahead_seconds=0.15,
+                        )
+                pt.purge_unconfirmed_recent_tracks(current_time, win)
+            except Exception as exc:
+                print(f"Projectile tracker HP cross-reference failed: {exc}")
+
         return tracks
 
     def _filter_candidates_toward_player(
@@ -2610,6 +2906,63 @@ class Play(Movement):
         def sp(point):
             return s(point[0]), s(point[1])
 
+        if getattr(self, "_visual_debug_red_flash", False):
+            bar_h = max(4, s(26))
+            cv2.rectangle(img, (0, 0), (img.shape[1], bar_h), (220, 40, 40), -1)
+            cv2.putText(
+                img,
+                "RED FLASH",
+                (s(8), max(s(18), bar_h - s(6))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.45, 0.65 * scale),
+                (255, 255, 255),
+                max(1, s(2)),
+            )
+
+        hm_dbg = getattr(self, "health_monitor", None)
+        if hm_dbg is not None and data.get("player"):
+            pb = data["player"][0]
+            if len(pb) >= 4:
+                x1, y1, x2, y2 = map(float, pb[:4])
+                sf = float(self.window_controller.scale_factor)
+                off = max(2.0, getattr(self, "health_bar_band_offset_px", 8.0) * sf)
+                bh = max(4.0, getattr(self, "health_bar_band_height_px", 14.0) * sf)
+                bar_w = max(8, int(abs(x2 - x1)))
+                bar_left = int(min(x1, x2))
+                bar_top = int(min(y1, y2) - off - bh)
+                hp_pct = hm_dbg.last_hp_pct if hm_dbg.last_hp_ok else None
+                if hp_pct is not None:
+                    fill_w = max(0, int(bar_w * hp_pct))
+                    cv2.rectangle(
+                        img,
+                        sp((bar_left, bar_top)),
+                        sp((bar_left + bar_w, bar_top + int(bh))),
+                        (90, 90, 90),
+                        max(1, s(1)),
+                    )
+                    cv2.rectangle(
+                        img,
+                        sp((bar_left, bar_top)),
+                        sp((bar_left + fill_w, bar_top + int(bh))),
+                        (40, 200, 80),
+                        -1,
+                    )
+                hp_label = ""
+                if hm_dbg.hp_value is not None and hm_dbg.observed_max_hp > 0:
+                    hp_label = f"HP {hm_dbg.hp_value}/{hm_dbg.observed_max_hp}"
+                elif hp_pct is not None:
+                    hp_label = f"HP {hp_pct * 100:.0f}%"
+                if hp_label:
+                    cv2.putText(
+                        img,
+                        hp_label,
+                        sp((bar_left, bar_top - s(6))),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.35, 0.5 * scale),
+                        (255, 255, 255),
+                        max(1, s(1)),
+                    )
+
         # --- Fog overlay ---
         # Only draw the fog tint + centroid arrow when a fog threat is strong
         # enough to trigger evasion (same thresholds as detect_fog_threat):
@@ -2674,9 +3027,21 @@ class Play(Movement):
 
         projectile_tracker = getattr(self, "projectile_tracker", None)
         if projectile_tracker is not None:
+            from rl.projectile_tracker import (
+                cluster_bounding_box,
+                cluster_tracks_by_distance,
+            )
+
             track_col = (255, 165, 0)
+            cluster_col = (255, 215, 0)  # gold for cluster bounds
             arrow_dt = 0.1
-            for tr in projectile_tracker.tracks:
+            promoted_tracks = [
+                tr
+                for tr in projectile_tracker.tracks
+                if tr.match_streak >= projectile_tracker.min_hits_to_promote
+            ]
+
+            for tr in promoted_tracks:
                 x1, y1, x2, y2 = tr.expanded_box()
                 xa1, ya1, xa2, ya2 = int(x1), int(y1), int(x2), int(y2)
                 cv2.rectangle(
@@ -2686,9 +3051,10 @@ class Play(Movement):
                     track_col,
                     max(1, s(2)),
                 )
+                suffix = "*" if getattr(tr, "confidence_confirmed", False) else ""
                 cv2.putText(
                     img,
-                    f"proj{tr.track_id}",
+                    f"proj{tr.track_id}{suffix}",
                     sp((xa1, max(ya1 - 6, 0))),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     max(0.35, 0.5 * scale),
@@ -2705,6 +3071,38 @@ class Play(Movement):
                     max(1, s(2)),
                     tipLength=0.25,
                 )
+
+            # Cluster bounding rectangle for dense volleys (>= 2 tracks).
+            # Only drawn for clusters of 2+; isolated projectiles keep
+            # their individual box only, so dodging stays precise.
+            if len(promoted_tracks) >= 2:
+                cluster_dist = float(
+                    getattr(self, "rl_projectile_cluster_distance_px", 200.0)
+                )
+                clusters = cluster_tracks_by_distance(promoted_tracks, cluster_dist)
+                for cluster in clusters:
+                    if len(cluster) < 2:
+                        continue
+                    bb = cluster_bounding_box(cluster, padding=4.0)
+                    if bb is None:
+                        continue
+                    bx1, by1, bx2, by2 = (int(v) for v in bb)
+                    cv2.rectangle(
+                        img,
+                        sp((bx1, by1)),
+                        sp((bx2, by2)),
+                        cluster_col,
+                        max(2, s(3)),
+                    )
+                    cv2.putText(
+                        img,
+                        f"x{len(cluster)}",
+                        sp((bx1, max(by1 - 8, 0))),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.4, 0.6 * scale),
+                        cluster_col,
+                        2,
+                    )
 
         if getattr(self, "visual_debug_motion_boxes", False):
             motion_col = (0, 255, 255)

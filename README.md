@@ -113,6 +113,22 @@ Discord webhook and remote control :
   4. Filling this makes slash commands appear faster because they sync to that server only.
 - Restart PylaAi-XXZ after changing the Discord bot token or remote-control settings.
 
+## AMD GPU on Windows (RX 7000 series / gfx1100)
+
+Standard PyTorch ROCm wheels have a known issue on Windows where MIOpen’s JIT compiler fails to find C++ standard library headers, spamming errors such as `HIPRTC_ERROR_COMPILATION` or `fatal error: 'type_traits' file not found`.
+
+**Quick fix:** before starting the bot, set:
+
+```bat
+set MIOPEN_FIND_MODE=5
+```
+
+This repository calls `configure_amd_windows()` from [`main.py`](main.py) before any ML stack loads PyTorch, which applies the same setting via `os.environ.setdefault` so you normally do not need to set it manually (shell overrides still win if you export a different value).
+
+**Better fix for PyTorch-on-ROCm on Windows:** use the self-contained **TheRock** wheels (no HIP SDK install). Choose the release matching your GPU family, e.g. [rocm-TheRock releases](https://github.com/scottt/rocm-TheRock/releases) (look for tags such as `v6.5.0rc-pytorch-gfx110x` for RDNA3).
+
+See [`requirements-rocm-windows.txt`](requirements-rocm-windows.txt) for optional pip notes. Your gameplay / RL code does not need changes — `torch.device("cuda")` still maps to ROCm when using the ROCm build.
+
 Performance troubleshooting :
 - Run `python tools/performance_check.py`.
 - If it says `CPUExecutionProvider`, run `setup.exe` again or set `cfg/general_config.toml` `cpu_or_gpu = "directml"`.

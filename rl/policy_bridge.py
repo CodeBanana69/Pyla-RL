@@ -314,14 +314,23 @@ class RLMovementBridge:
     def predict(self, play, data, current_time):
         obs, player_box = self._build_observation(play, data)
 
-        projectile_hit = False
+        tracker_hit = False
         if player_box is not None and play.projectile_tracker is not None:
-            projectile_hit = play.projectile_tracker.is_player_hit(
+            tracker_hit = play.projectile_tracker.is_player_hit(
                 player_box,
                 now=current_time,
                 padding=play.rl_projectile_hit_radius_padding,
                 lookahead_seconds=0.15,
             )
+
+        dmg_hit = False
+        hm = getattr(play, "health_monitor", None)
+        if hm is not None:
+            win = float(getattr(play, "damage_confirm_window_seconds", 0.5))
+            dmg_hit = hm.recent_damage_event(current_time, win) is not None
+
+        cross = getattr(play, "cross_reference_projectile_hits", True)
+        projectile_hit = (tracker_hit and dmg_hit) if cross else tracker_hit
 
         # Compute reward in both training and inference so the score line
         # reflects what the policy is doing right now.

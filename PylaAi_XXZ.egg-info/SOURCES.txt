@@ -31,6 +31,7 @@ tests/test_rl_action_mapping.py
 tests/test_rl_movement_env.py
 tests/test_rl_projectile_tracker.py
 tests/test_rl_training_smoke.py
+tests/test_runtime_control_ips.py
 tests/test_setup_bootstrap.py
 tests/test_star_drop_handling.py
 tests/test_state_transition_guard.py
