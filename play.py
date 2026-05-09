@@ -630,6 +630,7 @@ class Play(Movement):
         self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
         self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
         self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
+        self.visual_debug_max_wall_boxes = max(0, int(general_config.get("visual_debug_max_wall_boxes", 250)))
         self.visual_debug_motion_boxes = str(general_config.get("visual_debug_motion_boxes", "no")).lower() in ("yes", "true", "1")
         self._visual_debug_next_frame_at = 0.0
         self._visual_debug_next_enqueue_at = 0.0
@@ -2769,17 +2770,18 @@ class Play(Movement):
         current_time = time.time()
         raw_data = self.get_main_data(frame)
         data = raw_data
-        if self.should_detect_walls and current_time - self.time_since_walls_checked > self.walls_treshold:
-
-            tile_data = self.get_tile_data(frame)
-
-            walls = self.process_tile_data(tile_data)
-
-            self.time_since_walls_checked = current_time
-            self.last_walls_data = walls
-            data['wall'] = walls
+        # Always attach cached walls when this gamemode runs the tile detector; otherwise
+        # data['wall'] is missing between refreshes if wall_detection interval > 1s
+        # (keep_walls_in_memory is false) and debug/movement see an empty list.
+        if self.should_detect_walls:
+            if current_time - self.time_since_walls_checked > self.walls_treshold:
+                tile_data = self.get_tile_data(frame)
+                walls = self.process_tile_data(tile_data)
+                self.time_since_walls_checked = current_time
+                self.last_walls_data = walls
+            data["wall"] = self.last_walls_data
         elif self.keep_walls_in_memory:
-            data['wall'] = self.last_walls_data
+            data["wall"] = self.last_walls_data
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)
@@ -3003,12 +3005,21 @@ class Play(Movement):
                         cv2.arrowedLine(img, sp((px, py)), sp((fog_cx, fog_cy)),
                                         (255, 0, 255), 2, tipLength=0.15)
 
+        # Walls first with their own cap so they are not starved when
+        # visual_debug_max_boxes is exhausted by player/enemy/teammate.
+        wall_col = (128, 128, 128)
+        max_walls_dbg = int(getattr(self, "visual_debug_max_wall_boxes", 250))
+        for box in (data.get("wall") or [])[: max(0, max_walls_dbg)]:
+            if len(box) < 4:
+                continue
+            x1, y1, x2, y2 = map(int, box)
+            cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), wall_col, max(1, s(2)))
+
         # Colors in RGB (frame is kept in RGB; converted to BGR only for imshow).
         colors = {
-            "player":   (0, 255, 0),    # green
-            "teammate": (0, 0, 255),    # blue
-            "enemy":    (255, 0, 0),    # red
-            "wall":     (128, 128, 128),  # gray
+            "player": (0, 255, 0),
+            "teammate": (0, 0, 255),
+            "enemy": (255, 0, 0),
         }
         boxes_drawn = 0
         for key, color in colors.items():
@@ -3020,9 +3031,15 @@ class Play(Movement):
                     break
                 x1, y1, x2, y2 = map(int, box)
                 cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
-                if key != "wall":
-                    cv2.putText(img, key, sp((x1, max(y1 - 6, 0))),
-                                cv2.FONT_HERSHEY_SIMPLEX, max(0.35, 0.5 * scale), color, 1)
+                cv2.putText(
+                    img,
+                    key,
+                    sp((x1, max(y1 - 6, 0))),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.35, 0.5 * scale),
+                    color,
+                    1,
+                )
                 boxes_drawn += 1
 
         projectile_tracker = getattr(self, "projectile_tracker", None)
