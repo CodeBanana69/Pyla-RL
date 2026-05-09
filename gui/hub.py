@@ -106,6 +106,7 @@ class Hub:
         self.general_config.setdefault("visual_debug_scale", 0.6)
         self.general_config.setdefault("visual_debug_max_fps", 30)
         self.general_config.setdefault("visual_debug_max_boxes", 120)
+        self.general_config.setdefault("visual_debug_motion_boxes", "no")
         self.general_config.setdefault("capture_bad_vision_frames", "no")
 
         self.webhook_config.setdefault("webhook_url", self.general_config.get("personal_webhook", ""))

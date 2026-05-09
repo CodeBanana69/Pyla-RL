@@ -21,6 +21,7 @@ bad_vision_capture_max = 500
 visual_debug_scale = 0.6
 visual_debug_max_fps = 30
 visual_debug_max_boxes = 120
+visual_debug_motion_boxes = "no"
 ocr_scale_down_factor = 0.5
 trophies_multiplier = 1
 run_for_minutes = 0
