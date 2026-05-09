@@ -6,9 +6,11 @@ PylaAi_XXZ.egg-info/SOURCES.txt
 PylaAi_XXZ.egg-info/dependency_links.txt
 PylaAi_XXZ.egg-info/top_level.txt
 rl/__init__.py
+rl/health_monitor.py
 rl/movement_env.py
 rl/policy_bridge.py
 rl/projectile_tracker.py
+rl/red_flash.py
 rl/universal_projectiles.py
 tests/__init__.py
 tests/test_adaptive_brain.py
@@ -17,6 +19,7 @@ tests/test_combat_adaptation.py
 tests/test_discord_control.py
 tests/test_discord_notifier.py
 tests/test_emulator_profile_mapping.py
+tests/test_health_monitor.py
 tests/test_lobby_state_fallback.py
 tests/test_long_run_watchdogs.py
 tests/test_lowest_trophy_slot.py
@@ -26,12 +29,15 @@ tests/test_poison_gas_avoidance.py
 tests/test_prestige_reward.py
 tests/test_push_all_1k_selection.py
 tests/test_push_all_target_switch.py
+tests/test_red_flash.py
+tests/test_respawn_overlay.py
 tests/test_reward_unlock.py
 tests/test_rl_action_mapping.py
 tests/test_rl_movement_env.py
 tests/test_rl_projectile_tracker.py
 tests/test_rl_training_smoke.py
 tests/test_runtime_control_ips.py
+tests/test_setup_amd_rocm.py
 tests/test_setup_bootstrap.py
 tests/test_star_drop_handling.py
 tests/test_state_transition_guard.py
