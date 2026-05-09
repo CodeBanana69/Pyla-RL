@@ -7,10 +7,13 @@ What's different in this fork:
 - **PPO movement policy.** When `use_rl_movement = "yes"` in `cfg/bot_config.toml`, every approach / retreat / strafe / dodge call is produced by a neural policy instead of the heuristic movement code. Combat (attacks, supers, gadgets) is unchanged.
 - **Online training on live frames.** With `enable_rl_movement_training = "yes"` the bridge submits one transition per frame to a Gym env and runs `model.learn()` on a worker thread, so the game loop never blocks on gradient steps. Weights are persisted to `models/rl_movement_policy.zip`.
 - **Direction-gated projectile tracker.** A lightweight EMA tracker fuses YOLO projectile classes with residual detector keys and masked motion blobs, then keeps only tracks whose velocity is heading at the player. The strictness is exposed as the **Projectile Detection Confidence** slider in the hub (sits next to wall and entity confidence).
+- **HP-aware projectile verification.** The bot reads the on-screen HP strip above the player (HSV green vs red fill, optional EasyOCR digits), detects sharp HP drops as damage events, cross-references them with tracker “hits,” marks corroborated tracks (`confidence_confirmed`), and purges young unconfirmed motion/residual tracks that never saw an HP drop. RL rewards can require **both** a tracker hit and a recent damage event when `cross_reference_projectile_hits = "yes"` (see [`rl/README.md`](rl/README.md)).
+- **Red-flash gating.** A full-frame red-dominance detector spots the damage screen tint and **skips motion/residual** projectile candidates for that frame (YOLO-labeled boxes still apply), reducing phantom tracks when frame differencing spikes.
+- **AMD Windows quality-of-life.** [`main.py`](main.py) calls [`configure_amd_windows()`](amd_windows_env.py) before heavy ML imports (`MIOPEN_FIND_MODE=5`). **`Run PylaAi-XXZ.bat`** (created by setup) sets the same vars. **`setup.exe`** one-click can install **TheRock ROCm PyTorch** on detected RDNA3-class GPUs; see below.
 - **Live RL score in the terminal and in `logs/`.** The bridge prints a periodic `[RL] step=... ep_reward=... mean100ep=...` line; `logger_setup.py` mirrors all stdout to `logs/pyla_<timestamp>.log` so every score line is on disk.
 - **Showdown-first focus.** The fork is tuned end-to-end for Showdown trio (analog joystick movement, teammate hysteresis, fog avoidance, wall-stuck escape, place-based trophy tracking).
 
-See [`rl/README.md`](rl/README.md) for the full RL architecture, observation/action layout, reward shaping, and training tips.
+See [`rl/README.md`](rl/README.md) for RL architecture, observation/action layout, reward shaping, health/red-flash/cross-reference details, and training tips.
 
 ---
 
@@ -46,12 +49,12 @@ For normal users, you only need `setup.exe`.
 5. Start your Android emulator.
 6. Open Brawl Stars in the emulator.
 7. Set the emulator resolution to `1920x1080` for best results.
-8. Double-click the generated `Run PylaAi-XXZ.bat` file or run `python main.py`.
+8. Double-click the generated **`Run PylaAi-XXZ.bat`** file or run `python main.py`. The batch file sets `MIOPEN_FIND_MODE` / `MIOPEN_DEBUG_DISABLE_FIND_DB` for AMD ROCm stability (same intent as [`amd_windows_env.py`](amd_windows_env.py) used when launching via `python main.py`).
 9. In the hub, choose your emulator, select your brawler setup, then press Start.
 
 Manual developer setup:
 - Install Python 3.11 and Git.
-- Run `python setup.py --pyla-install`.
+- Run `python setup.py --pyla-install` (does **not** set `PYLAAI_SETUP_AUTO` unless you export it — see AMD section below).
 - Run `python main.py`.
 
 ### Building `setup.exe` (maintainers)
@@ -61,10 +64,6 @@ The Windows **`setup.exe`** helper is produced by freezing [`tools/setup_bootstr
 ```bat
 pyinstaller --onefile --name setup tools\setup_bootstrap.py
 ```
-
-### AMD auto ROCm wheels
-
-Pinned wheel URLs live in [`setup_amd_rocm.py`](setup_amd_rocm.py) (TheRock release tag). Bump them deliberately when upgrading ROCm/PyTorch. Optional details: [`requirements-rocm-windows.txt`](requirements-rocm-windows.txt).
 
 Brawl Stars API trophy autofill :
 - Create a developer account at https://developer.brawlstars.com/
@@ -126,21 +125,42 @@ Discord webhook and remote control :
   4. Filling this makes slash commands appear faster because they sync to that server only.
 - Restart PylaAi-XXZ after changing the Discord bot token or remote-control settings.
 
-## AMD GPU on Windows (RX 7000 series / gfx1100)
+## AMD GPU on Windows (setup, ROCm, MIOpen)
 
-Standard PyTorch ROCm wheels have a known issue on Windows where MIOpen’s JIT compiler fails to find C++ standard library headers, spamming errors such as `HIPRTC_ERROR_COMPILATION` or `fatal error: 'type_traits' file not found`.
+This fork tries to avoid the worst ROCm-on-Windows footguns for **RX 7000 / RDNA3–class** (`gfx110x`) users.
 
-**Quick fix:** before starting the bot, set:
+### One-click (`setup.exe`)
+
+When you run **`setup.exe`**, the bootstrap sets **`PYLAAI_SETUP_AUTO=1`** and runs [`setup.py --pyla-install`](setup.py). On Windows **Python 3.11** with an **AMD RDNA3-class** GPU (detected via WMI PCI device IDs / GPU name — see [`setup_amd_rocm.py`](setup_amd_rocm.py)), setup may **automatically** install pinned **TheRock** ROCm PyTorch wheels (`torch`, `torchvision`, `torchaudio`) after the normal dependency pass.
+
+| Environment variable | Effect |
+| -------------------- | ------ |
+| `PYLAAI_SETUP_AUTO` | Set by `setup.exe` only. Enables non-interactive “yes” answers and allows the optional TheRock ROCm step when hardware matches. |
+| `PYLAAI_SKIP_AMD_ROCM_PYTORCH=1` | Before running **`setup.exe`**: skip TheRock install and keep **CPU** PyTorch from the standard setup path. |
+
+Pinned wheel URLs and release tag live in [**`setup_amd_rocm.py`**](setup_amd_rocm.py); bump them intentionally when upgrading. Extra pip notes and context: [**`requirements-rocm-windows.txt`**](requirements-rocm-windows.txt).
+
+### Runtime (MIOpen JIT spam)
+
+Stock PyTorch ROCm builds on Windows can trigger MIOpen **HIPRTC** JIT failures (`type_traits` not found, `HIPRTC_ERROR_COMPILATION`, repeated BatchNorm compile errors).
+
+**Mitigations already wired in this repo:**
+
+1. **[`main.py`](main.py)** calls **`configure_amd_windows()`** from [`amd_windows_env.py`](amd_windows_env.py) **before** importing stacks that pull in PyTorch — sets `MIOPEN_FIND_MODE=5` and `MIOPEN_DEBUG_DISABLE_FIND_DB=0` via `os.environ.setdefault` (you can override from the shell).
+2. **`Run PylaAi-XXZ.bat`** (generated by [`tools/setup_bootstrap.py`](tools/setup_bootstrap.py)) sets the same **`MIOPEN_*`** variables so behavior matches when users double-click the launcher.
+
+**Manual override** if you launch Python some other way:
 
 ```bat
 set MIOPEN_FIND_MODE=5
+set MIOPEN_DEBUG_DISABLE_FIND_DB=0
 ```
 
-This repository calls `configure_amd_windows()` from [`main.py`](main.py) before any ML stack loads PyTorch, which applies the same setting via `os.environ.setdefault` so you normally do not need to set it manually (shell overrides still win if you export a different value).
+**Alternative PyTorch builds:** self-contained [**TheRock**](https://github.com/scottt/rocm-TheRock/releases) wheels (e.g. tag `v6.5.0rc-pytorch-gfx110x` for RDNA3). Gameplay and RL code stay unchanged; `torch.device("cuda")` still maps to ROCm when using a ROCm build.
 
-**Better fix for PyTorch-on-ROCm on Windows:** use the self-contained **TheRock** wheels (no HIP SDK install). Choose the release matching your GPU family, e.g. [rocm-TheRock releases](https://github.com/scottt/rocm-TheRock/releases) (look for tags such as `v6.5.0rc-pytorch-gfx110x` for RDNA3).
+### Fork-specific RL / vision config
 
-See [`requirements-rocm-windows.txt`](requirements-rocm-windows.txt) for optional pip notes. Your gameplay / RL code does not need changes — `torch.device("cuda")` still maps to ROCm when using the ROCm build.
+Health bar, red-flash detector, damage windows, and **`cross_reference_projectile_hits`** are documented in [`cfg/bot_config.toml`](cfg/bot_config.toml) (keys prefixed `health_`, `damage_`, `red_flash_`, `cross_reference_`) and in detail in [**`rl/README.md`**](rl/README.md).
 
 Performance troubleshooting :
 - Run `python tools/performance_check.py`.

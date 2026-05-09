@@ -28,6 +28,25 @@ Why this fork exists:
 | `rl_projectile_classes`       | `["projectile","super","bullet","enemy_shot"]` | Detector class names that the projectile tracker treats as incoming hazards. Add/remove names here to match the names the YOLO model emits.                                                                                                                                                      |
 | `rl_combat_blend_dodge`       | `"yes"`                                        | When in attack range, still blend the existing `apply_combat_dodge` strafe on top of the RL angle so attacks look natural.                                                                                                                                                                       |
 
+### Health bar, damage events, red flash, cross-reference (`cfg/bot_config.toml`)
+
+These tighten projectile **perception** and the RL **hit signal** when motion/residual layers hallucinate hits during damage flashes or UI tint.
+
+| Key | Default | Effect |
+| --- | ------- | ------ |
+| `health_bar_band_offset_px` | `8` | Vertical offset from player box top to HP strip (scaled by window scale factor). |
+| `health_bar_band_height_px` | `14` | Height of HSV strip used for green vs red fill ratio. |
+| `health_bar_min_total_pixels` | `40` | Minimum green+red pixels for a valid HP reading. |
+| `health_ocr_enabled` | `"yes"` | Optional EasyOCR read of numeric HP (throttled); drives `hp_value` / `observed_max_hp` for debug. |
+| `health_ocr_interval_seconds` | `0.5` | Minimum time between OCR passes. |
+| `damage_hp_drop_threshold_pct` | `0.015` | Emit a damage event when valid HP% drops more than this vs rolling max in the prior ~0.4 s window. |
+| `damage_confirm_window_seconds` | `0.5` | Lookback for “recent damage” when confirming tracks and when gating RL hits. |
+| `red_flash_detect_enabled` | `"yes"` | Enable full-frame red-dominance spike detector (`rl/red_flash.py`). |
+| `red_flash_red_dom_threshold` | `1.40` | Flash when `mean(R) / (0.5*(mean(G)+mean(B)))` exceeds baseline × this factor. |
+| `red_flash_baseline_alpha` | `0.1` | EMA smoothing for the baseline when not flashing. |
+| `cross_reference_projectile_hits` | `"yes"` | If `"yes"`, RL `projectile_hit` reward requires **both** `ProjectileTracker.is_player_hit` **and** a recent `HealthMonitor` damage event within `damage_confirm_window_seconds`. |
+
+Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); reward glue in [`rl/policy_bridge.py`](../rl/policy_bridge.py).
 
 The same toggles are exposed as checkboxes in `gui/hub.py` (`Use RL Movement`, `Enable RL Movement Training`).
 
@@ -36,8 +55,16 @@ The same toggles are exposed as checkboxes in `gui/hub.py` (`Use RL Movement`, `
 ```
 frame ─► Detect ─► data{player,enemy,teammate,wall,[projectile,super,...]}
                               │
+              ┌────────────────┴────────────────┐
+              │ RedFlashDetector (optional)      │
+              │ HealthMonitor.update (HP % / OCR) │
+              └────────────────┬────────────────┘
+                              │
                               ▼
                        update_projectile_tracker()
+                         (skip motion/residual if flashing;
+                          after tracker.update: confirm tracks on damage,
+                          purge unconfirmed young motion/residual)
                               │
                               ▼
        ┌──────────── Play.loop ────────────┐
@@ -70,13 +97,30 @@ normal Gym env from the trainer's perspective.
 | Survival                   | `+0.01` per step                                                       | Continuous bonus for staying alive.                                                                                                                                                                                                                    |
 | Safe band vs nearest enemy | `+0.02` when enemy distance is in `[0.35, 0.75] * frame_diagonal/2`    | Encourages "in attack range, out of danger" positioning.                                                                                                                                                                                               |
 | Teammate proximity         | `+0.01` when teammate distance is in `[0.05, 0.30] * frame_diagonal/2` | Encourages staying near teammates as the user requested.                                                                                                                                                                                               |
-| Projectile hit             | `-1.0`                                                                 | Triggered by `ProjectileTracker.is_player_hit` — overlap of any tracked projectile/super box with the player's detection box (with configurable padding and short forward look-ahead so a fast projectile that *will* hit also penalizes immediately). |
+| Projectile hit             | `-1.0`                                                                 | With **`cross_reference_projectile_hits = "yes"`** (default): penalty only when **`is_player_hit`** is true **and** [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) is non-null inside **`damage_confirm_window_seconds`**. With **`"no"`**, behavior matches the legacy proxy: penalty whenever `is_player_hit` is true (tracker overlap + lookahead). |
 | Episode end survival bonus | `+0.5`                                                                 | Added on `done` when the match resets.                                                                                                                                                                                                                 |
 
+## Health bar and damage events
 
-There is **no health/HP detection**. As you specified, the only damage
-proxy is "projectile (or super) collides with the player box". This
-matches `is_player_hit`'s definition.
+[`HealthMonitor`](../rl/health_monitor.py) crops a band **above** the player detection box, measures **green vs red** HSV pixels for HP fill ratio, and maintains a short history. A **`DamageEvent`** is emitted when the latest valid reading drops sharply versus the rolling maximum in the prior window (and not during the respawn overlay — [`Play.is_respawning_overlay`](../play.py)).
+
+Optional **EasyOCR** (throttled) reads numeric HP for overlay/debug and tracks **`observed_max_hp`**. Percent-based logic drives damage detection.
+
+## Red-flash frame gating
+
+[`RedFlashDetector`](../rl/red_flash.py) flags frames where the full-frame mean red channel dominates green/blue (damage vignette). When active, **`update_projectile_tracker`** clears **motion** and **residual** candidate lists for that frame and **does not advance** the motion grayscale baseline, while **labeled** YOLO projectile boxes still feed the tracker. Damage-driven **track confirmation** is skipped for that frame so the tint does not corroborate phantom hits.
+
+## Tracker confirmation and purge
+
+Each [`ProjectileTrack`](../rl/projectile_tracker.py) carries **`confidence_confirmed`**. After a tracker update, if a recent damage event exists, **`confirm_tracks_touching_player`** marks overlapping / short-lookahead incoming tracks (same geometry as **`is_player_hit`**). **`purge_unconfirmed_recent_tracks`** removes young **`motion`** / **`residual`** tracks with **`from_enemy != True`** that were never confirmed — trimming ghosts born from flashes or noise.
+
+## Visual debug
+
+With visual debug enabled in [`cfg/general_config.toml`](../cfg/general_config.toml), [`Play.show_visual_debug`](../play.py) can draw:
+
+- An **HP bar** strip and OCR-derived **`HP cur/max`** when available.
+- A top **RED FLASH** banner while the red-flash detector is active.
+- Projectile labels **`proj{id}*`** when **`confidence_confirmed`** is true.
 
 ## Projectile direction gate
 
@@ -178,20 +222,23 @@ collisions automatically.
 
 ## Tests
 
-Unit tests live in `tests/test_rl_*.py`:
+Unit tests live in `tests/test_rl_*.py` and related setup tests:
 
 - `test_rl_projectile_tracker.py`: matching, velocity estimation,
 history pruning, hit detection (with and without lookahead),
-observation feature shape and ordering.
+observation feature shape and ordering, **`purge_unconfirmed_recent_tracks` / confirmed tracks**.
 - `test_rl_movement_env.py`: observation layout / clipping / size and
 reward components (penalty, episode bonus).
 - `test_rl_action_mapping.py`: 2D action → showdown angle / WASD string
 mapping.
+- `test_health_monitor.py`: HSV band ratios, insufficient-pixel guard, sharp drop vs gradual drift damage events.
+- `test_red_flash.py`: red spike after green baseline vs steady frames.
+- `test_setup_amd_rocm.py` / `test_setup_bootstrap.py`: AMD ROCm helper parsing and bootstrap batch contents (see root [`README.md`](../README.md)).
 
 Run them in isolation with:
 
 ```
-python -m unittest tests.test_rl_projectile_tracker tests.test_rl_movement_env tests.test_rl_action_mapping
+python -m unittest tests.test_rl_projectile_tracker tests.test_rl_movement_env tests.test_rl_action_mapping tests.test_health_monitor tests.test_red_flash
 ```
 
 These tests do **not** require `stable-baselines3`; they only exercise
@@ -201,6 +248,8 @@ and `gymnasium` (added to `setup.py`).
 
 ## Known gaps / follow-ups
 
+- HP bar geometry assumes the default **1920×1080**-style HUD; extreme resolutions or skins may need tuning `health_bar_*` keys.
+- OCR depends on **EasyOCR** cold start and CPU/GPU load; it is throttled and optional (`health_ocr_enabled`).
 - Without retrained vision, projectile tracks are always empty and the
 `projectile_hit_penalty` term never fires. The policy will still
 optimize survival shaping, but the dodging signal it learns from is

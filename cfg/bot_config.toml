@@ -59,8 +59,8 @@ retreat_strafe_fraction = 0.5
 approach_flank_blend = 0.12
 multi_enemy_flee_weight = 0.45
 angle_smooth_factor = 0.28
-use_rl_movement = "yes"
-enable_rl_movement_training = "yes"
+use_rl_movement = "no"
+enable_rl_movement_training = "no"
 rl_movement_model_path = "models/rl_movement_policy.zip"
 rl_combat_blend_dodge = "yes"
 rl_max_projectiles = 6
@@ -83,7 +83,6 @@ rl_residual_max_box_area_frac = 0.02
 rl_residual_max_side_frac = 0.25
 rl_residual_iou_exclude = 0.25
 rl_projectile_merge_nms_iou = 0.35
-# Universal projectile pipeline: off | residual_only | motion
 rl_universal_projectiles_mode = "motion"
 rl_motion_ego_compensate = "yes"
 rl_motion_ego_min_response = 0.08
@@ -91,24 +90,16 @@ rl_motion_skip_on_bad_ego = "no"
 rl_motion_use_ui_mask = "yes"
 rl_motion_full_frame_fog = "yes"
 rl_motion_fog_exclude_dilate_px = 2
-# Optional override — omit to use built-in 1920×1080 UI rects
-# rl_motion_ui_exclude_rects = [ ["joystick", 220, 870, 280, 280], ]
-# Animated map tiles (water/lava); each entry is [[H,S,V low], [H,S,V high]]
 rl_animated_terrain_hsv_ranges = []
-# Hits required before a track is reported as a real projectile.
-# 2 = drop one-frame ghosts (joystick clicks, popups, single-frame flicker).
 rl_projectile_min_hits_to_promote = 2
-# Raise max_speed / max_line_residual toward 1e9 / 1.0 if legitimate shots are filtered out.
 rl_projectile_max_speed_px_s = 2500
 rl_projectile_max_accel_px_s2 = 8000
-rl_projectile_max_line_residual_frac = 0.40
+rl_projectile_max_line_residual_frac = 0.4
 rl_projectile_motion_origin_radius = 80
 rl_projectile_require_enemy_origin_strict = "no"
 rl_projectile_cluster_distance_px = 200
 rl_train_steps_per_update = 256
 rl_save_every_seconds = 120
-
-# HP bar (HSV) + optional OCR; damage events cross-reference projectile tracks
 health_bar_band_offset_px = 8
 health_bar_band_height_px = 14
 health_bar_min_total_pixels = 40
@@ -117,6 +108,6 @@ health_ocr_interval_seconds = 0.5
 damage_hp_drop_threshold_pct = 0.015
 damage_confirm_window_seconds = 0.5
 red_flash_detect_enabled = "yes"
-red_flash_red_dom_threshold = 1.40
+red_flash_red_dom_threshold = 1.4
 red_flash_baseline_alpha = 0.1
 cross_reference_projectile_hits = "yes"

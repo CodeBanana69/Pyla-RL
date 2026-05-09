@@ -1,9 +1,13 @@
 # Optional: AMD GPU on Windows (gfx1100 / RDNA3 / RX 7000 series)
 #
+# Full narrative: README.md -> "AMD GPU on Windows (setup, ROCm, MIOpen)".
+# One-click pinned wheels: setup_amd_rocm.py (used by setup.exe when PYLAAI_SETUP_AUTO is set).
+# Skip ROCm PyTorch during setup.exe: set PYLAAI_SKIP_AMD_ROCM_PYTORCH=1 in the environment.
+#
 # Standard PyTorch ROCm wheels have a known HIPRTC/MIOpen JIT bug on Windows
 # (missing C++ stdlib for kernel JIT). This repo sets MIOPEN_FIND_MODE=5 at
-# startup (see amd_windows_env.py) to reduce JIT use; for full GPU support you
-# may still prefer a self-contained PyTorch build.
+# startup (see amd_windows_env.py) and in Run PylaAi-XXZ.bat to reduce JIT use;
+# for full GPU support you may still prefer a self-contained PyTorch build.
 #
 # Do NOT merge these lines into the main setup path — use only if you run PyTorch
 # with ROCm on Windows.
