@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Pause-window IPS tracker: the floating control window now shows a live `XX.X IPS` readout and a compact green sparkline with a dashed red line at the low-IPS recovery threshold. Toggle it from the hub (`Pause Window IPS Tracker`) or via `pause_menu_ips_tracker` in `cfg/general_config.toml`; default is on.
+
 ## v1.1.5 — 2026-04-20
 
 ### Added
