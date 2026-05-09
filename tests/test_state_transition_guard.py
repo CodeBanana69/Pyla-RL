@@ -128,13 +128,14 @@ class StateTransitionGuardTests(unittest.TestCase):
             "end_1st",
         )
 
-    def test_daily_star_drop_can_open_from_match_but_not_after_start_pressed(self):
+    def test_daily_star_drop_is_blocked_in_match_without_post_match_result(self):
         self.assertEqual(
             normalize_detected_state(
                 "daily_star_drop",
                 previous_state="match",
+                match_result_seen=False,
             ),
-            "daily_star_drop",
+            "match",
         )
         self.assertEqual(
             normalize_detected_state(
@@ -143,6 +144,24 @@ class StateTransitionGuardTests(unittest.TestCase):
                 match_launch_pending=True,
             ),
             "match",
+        )
+
+    def test_daily_star_drop_is_allowed_after_post_match_result(self):
+        self.assertEqual(
+            normalize_detected_state(
+                "daily_star_drop",
+                previous_state="end_1st",
+                match_result_seen=True,
+            ),
+            "daily_star_drop",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "daily_star_drop",
+                previous_state="match",
+                match_result_seen=True,
+            ),
+            "daily_star_drop",
         )
 
     def test_lobby_after_match_depends_on_stable_lobby_state_not_vision_quietness(self):

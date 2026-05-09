@@ -86,13 +86,12 @@ def normalize_detected_state(
         match_result_seen=False,
 ):
     if detected_state in STAR_DROP_STATES:
-        if detected_state == "daily_star_drop" and not match_launch_pending:
-            return detected_state
         if (
                 previous_state in MATCH_RESULT_STATES
                 or previous_state in OUT_OF_MATCH_REWARD_STATES
                 or previous_state in TROPHY_REWARD_FOLLOWUP_STATES
                 or previous_state in STAR_DROP_STATES
+                or match_result_seen
         ) and not match_launch_pending:
             return detected_state
         return previous_state or "match"
