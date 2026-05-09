@@ -11,6 +11,7 @@ from utils import load_toml_as_dict, save_dict_as_toml, get_discord_link, get_dp
 from packaging import version
 from performance_profile import apply_performance_profile
 from discord_notifier import async_send_test_notification
+from gui import theme
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -136,8 +137,9 @@ class Hub:
         # -----------------------------------------------------------------------------------------
         self.app = ctk.CTk()
         self.app.title(f"PylaAi-XXZ Hub – {self.version_str}")
-        self.app.geometry(f"{S(1000)}x{S(750)}")
+        self.app.geometry(f"{S(1180)}x{S(780)}")
         self.app.resizable(False, False)
+        self.app.configure(fg_color=theme.BG)
 
         # Hide tooltip on "global" interactions (tab switch, clicks, scroll, key press, focus loss, etc.)
         for seq in ("<ButtonPress>", "<MouseWheel>", "<KeyPress>", "<FocusOut>"):
@@ -145,28 +147,58 @@ class Hub:
         self.app.bind("<Configure>", self._hide_tooltip, add="+")  # window move/resize
 
         # -----------------------------------------------------------------------------------------
-        # Main TabView
+        # Header + main TabView
         # -----------------------------------------------------------------------------------------
-        self.tabview = ctk.CTkTabview(
-            self.app,
-            width=S(980),
-            height=S(730),
-            corner_radius=S(10)
-        )
-        self.tabview.pack(pady=S(10), padx=S(10), fill="x", expand=False)
+        main_area = ctk.CTkFrame(self.app, fg_color="transparent")
+        main_area.pack(fill="both", expand=True, padx=S(12), pady=S(12))
 
-        # Enlarge the segmented tab buttons
+        header = ctk.CTkFrame(main_area, fg_color="transparent")
+        header.pack(fill="x", pady=(0, S(8)))
+
+        ctk.CTkLabel(
+            header,
+            text="pyla",
+            font=theme.ui_font(S(26), "bold"),
+            text_color=theme.TEXT_PRIMARY,
+        ).pack(side="left", padx=(S(4), S(10)))
+
+        ctk.CTkLabel(
+            header,
+            text="PylaAi-XXZ Hub",
+            font=theme.ui_font(S(13)),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            header,
+            text=f"v{self.version_str}",
+            font=theme.ui_font(S(13)),
+            text_color=theme.TEXT_MUTED,
+        ).pack(side="right", padx=S(8))
+
+        self.tabview = ctk.CTkTabview(
+            main_area,
+            width=S(1140),
+            height=S(690),
+            corner_radius=S(20),
+            fg_color=theme.CARD,
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        self.tabview.pack(fill="both", expand=True)
+
+        # Pill-style segmented tabs (purple selected segment; shared text color for readability)
         self.tabview._segmented_button.configure(
-            corner_radius=S(10),
-            border_width=2,
-            fg_color="#4A4A4A",
-            selected_color="#AA2A2A",
-            selected_hover_color="#BB3A3A",
-            unselected_color="#333333",
-            unselected_hover_color="#555555",
-            text_color="#FFFFFF",
-            font=("Arial", S(16), "bold"),
-            height=S(40)
+            corner_radius=S(14),
+            border_width=0,
+            fg_color=theme.CARD,
+            selected_color=theme.ACCENT,
+            selected_hover_color=theme.ACCENT_HOVER,
+            unselected_color=theme.INACTIVE,
+            unselected_hover_color=theme.INACTIVE_HOVER,
+            text_color=theme.TEXT_PRIMARY,
+            font=theme.ui_font(S(15), "bold"),
+            height=S(42),
         )
 
         # Add tabs
@@ -257,10 +289,10 @@ class Hub:
                 label = ctk.CTkLabel(
                     self.tooltip_window,
                     text=self._tooltip_text,
-                    fg_color="#333333",
-                    text_color="#FFFFFF",
-                    corner_radius=S(6),
-                    font=("Arial", S(12))
+                    fg_color=theme.INACTIVE,
+                    text_color=theme.TEXT_PRIMARY,
+                    corner_radius=S(8),
+                    font=theme.ui_font(S(12)),
                 )
                 label.pack(padx=S(6), pady=S(4))
 
@@ -286,8 +318,31 @@ class Hub:
     def _init_overview_tab(self):
         frame = self.tab_overview
 
-        container = ctk.CTkFrame(frame, fg_color="transparent")
-        container.pack(expand=True, fill="both")
+        outer = ctk.CTkFrame(frame, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        outer.grid_columnconfigure(0, weight=2)
+        outer.grid_columnconfigure(1, weight=1)
+
+        left_card = ctk.CTkFrame(
+            outer,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        left_card.grid(row=0, column=0, sticky="nsew", padx=(0, S(8)), pady=0)
+
+        right_card = ctk.CTkFrame(
+            outer,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        right_card.grid(row=0, column=1, sticky="new", padx=(S(8), 0), pady=0)
+
+        container = ctk.CTkFrame(left_card, fg_color="transparent")
+        container.pack(expand=True, fill="both", padx=S(18), pady=S(18))
 
         row_ = 0
 
@@ -305,8 +360,8 @@ class Hub:
             warn_label = ctk.CTkLabel(
                 container,
                 text=warn_text,
-                text_color="#e74c3c",
-                font=("Arial", S(16), "bold")
+                text_color=theme.ERROR,
+                font=theme.ui_font(S(16), "bold"),
             )
             warn_label.grid(row=row_, column=0, columnspan=2, pady=S(10))
             row_ += 1
@@ -322,7 +377,7 @@ class Hub:
         label_type = ctk.CTkLabel(
             orientation_frame,
             text="Map Orientation:",
-            font=("Arial", S(20), "bold")
+            font=theme.ui_font(S(20), "bold"),
         )
         label_type.pack(side="left", padx=S(15))
 
@@ -335,10 +390,10 @@ class Hub:
             orientation_frame,
             text="Vertical",
             command=lambda: set_gamemode_type(3),
-            font=("Arial", S(16), "bold"),
-            corner_radius=S(6),
+            font=theme.ui_font(S(16), "bold"),
+            corner_radius=S(12),
             width=S(120),
-            height=S(40)
+            height=S(40),
         )
         self.btn_type_vertical.pack(side="left", padx=S(10))
 
@@ -346,10 +401,10 @@ class Hub:
             orientation_frame,
             text="Horizontal",
             command=lambda: set_gamemode_type(5),
-            font=("Arial", S(16), "bold"),
-            corner_radius=S(6),
+            font=theme.ui_font(S(16), "bold"),
+            corner_radius=S(12),
             width=S(120),
-            height=S(40)
+            height=S(40),
         )
         self.btn_type_horizontal.pack(side="left", padx=S(10))
 
@@ -358,7 +413,7 @@ class Hub:
         # -----------------------------------------------------------------
         # 3) Gamemode Selection as rectangular buttons
         # -----------------------------------------------------------------
-        gm_label = ctk.CTkLabel(container, text="Select Gamemode:", font=("Arial", S(20), "bold"))
+        gm_label = ctk.CTkLabel(container, text="Select Gamemode:", font=theme.ui_font(S(20), "bold"))
         gm_label.grid(row=row_, column=0, columnspan=2, pady=S(10))
         row_ += 1
 
@@ -389,11 +444,11 @@ class Hub:
                 parent,
                 text=text_display,
                 command=on_click,
-                corner_radius=S(6),
+                corner_radius=S(12),
                 width=S(150),
                 height=S(40),
-                font=("Arial", S(16), "bold"),
-                state=("disabled" if disabled else "normal")
+                font=theme.ui_font(S(16), "bold"),
+                state=("disabled" if disabled else "normal"),
             )
             return btn
 
@@ -429,9 +484,9 @@ class Hub:
 
             def set_button_color(btn, val):
                 if val == gm_now:
-                    btn.configure(fg_color="#AA2A2A", hover_color="#BB3A3A")
+                    btn.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER)
                 else:
-                    btn.configure(fg_color="#333333", hover_color="#BB3A3A")
+                    btn.configure(fg_color=theme.INACTIVE, hover_color=theme.INACTIVE_HOVER)
 
             # For vertical set
             set_button_color(self.rb_brawlball_3, "brawlball")
@@ -446,11 +501,11 @@ class Hub:
             """Refresh the orientation buttons' color based on self.gamemode_type_var."""
             t = self.gamemode_type_var.get()
             if t == 3:
-                self.btn_type_vertical.configure(fg_color="#AA2A2A", hover_color="#BB3A3A")
-                self.btn_type_horizontal.configure(fg_color="#333333", hover_color="#BB3A3A")
+                self.btn_type_vertical.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER)
+                self.btn_type_horizontal.configure(fg_color=theme.INACTIVE, hover_color=theme.INACTIVE_HOVER)
             else:
-                self.btn_type_vertical.configure(fg_color="#333333", hover_color="#BB3A3A")
-                self.btn_type_horizontal.configure(fg_color="#AA2A2A", hover_color="#BB3A3A")
+                self.btn_type_vertical.configure(fg_color=theme.INACTIVE, hover_color=theme.INACTIVE_HOVER)
+                self.btn_type_horizontal.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER)
 
         self._refresh_orientation_buttons = refresh_orientation_buttons
 
@@ -477,7 +532,7 @@ class Hub:
         # -----------------------------------------------------------------
         # 4) Emulator Selection
         # -----------------------------------------------------------------
-        emulator_label = ctk.CTkLabel(container, text="Select Emulator:", font=("Arial", S(20), "bold"))
+        emulator_label = ctk.CTkLabel(container, text="Select Emulator:", font=theme.ui_font(S(20), "bold"))
         emulator_label.grid(row=row_, column=0, columnspan=2, pady=S(10))
         row_ += 1
 
@@ -532,10 +587,10 @@ class Hub:
                 parent,
                 text=text_display,
                 command=on_click,
-                corner_radius=S(6),
+                corner_radius=S(12),
                 width=S(150),
                 height=S(40),
-                font=("Arial", S(16), "bold")
+                font=theme.ui_font(S(16), "bold"),
             )
             return btn
 
@@ -550,9 +605,9 @@ class Hub:
 
             def color(btn, val):
                 if val == curr_emu:
-                    btn.configure(fg_color="#AA2A2A", hover_color="#BB3A3A")
+                    btn.configure(fg_color=theme.ACCENT, hover_color=theme.ACCENT_HOVER)
                 else:
-                    btn.configure(fg_color="#333333", hover_color="#BB3A3A")
+                    btn.configure(fg_color=theme.INACTIVE, hover_color=theme.INACTIVE_HOVER)
 
             color(self.btn_ldplayer, "LDPlayer")
             color(self.btn_mumu, "MuMu")
@@ -570,12 +625,11 @@ class Hub:
         start_button = ctk.CTkButton(
             container,
             text="Next",
-            fg_color="#c0392b",
-            hover_color="#e74c3c",
-            font=("Arial", S(24), "bold"),
             command=self._on_start,
             width=S(220),
-            height=S(60)
+            height=S(60),
+            font=theme.ui_font(S(24), "bold"),
+            **theme.primary_button_kwargs(S(14)),
         )
         start_button.grid(row=row_, column=0, columnspan=2, padx=S(20), pady=S(30))
         row_ += 1
@@ -589,8 +643,8 @@ class Hub:
         disclaim_label = ctk.CTkLabel(
             disclaim_frame,
             text="Pyla is free, public and open-source. Join the Discord -> ",
-            font=("Arial", S(18), "bold"),
-            text_color="#FFFFFF"
+            font=theme.ui_font(S(18), "bold"),
+            text_color=theme.TEXT_PRIMARY,
         )
         disclaim_label.pack(side="left")
 
@@ -602,9 +656,9 @@ class Hub:
         link_label = ctk.CTkLabel(
             disclaim_frame,
             text=discord_link,
-            font=("Arial", S(18), "bold"),
-            text_color="#3498db",
-            cursor="hand2"
+            font=theme.ui_font(S(18), "bold"),
+            text_color=theme.SKY,
+            cursor="hand2",
         )
         link_label.pack(side="left")
         link_label.bind("<Button-1>", lambda e: open_discord_link())
@@ -617,8 +671,8 @@ class Hub:
         ad_label = ctk.CTkLabel(
             ad_frame,
             text="Support Pyla and get Early Access to updates by becoming a Patreon supporter -> ",
-            font=("Arial", S(18), "bold"),
-            text_color="#FFFFFF"
+            font=theme.ui_font(S(18), "bold"),
+            text_color=theme.TEXT_PRIMARY,
         )
         ad_label.pack(side="left")
 
@@ -629,9 +683,9 @@ class Hub:
         patreon_label = ctk.CTkLabel(
             ad_frame,
             text=shown_patreon_link,
-            font=("Arial", S(18), "bold"),
-            text_color="#3498db",
-            cursor="hand2"
+            font=theme.ui_font(S(18), "bold"),
+            text_color=theme.SKY,
+            cursor="hand2",
         )
         patreon_label.pack(side="left")
         patreon_label.bind("<Button-1>", lambda e: open_patreon_link())
@@ -639,24 +693,64 @@ class Hub:
         container.grid_columnconfigure(0, weight=1)
         container.grid_columnconfigure(1, weight=1)
 
-        self._add_version_label(frame)
+        # --- Match stats (real data from match_history.toml) ---
+        ctk.CTkLabel(
+            right_card,
+            text="Match stats",
+            font=theme.ui_font(S(18), "bold"),
+            text_color=theme.TEXT_PRIMARY,
+        ).pack(anchor="w", padx=S(18), pady=(S(18), S(8)))
 
-    def _add_version_label(self, frame):
-        version_label = ctk.CTkLabel(
-            frame,
-            text="XXZ v1.2",
-            font=("Arial", S(14), "bold"),
-            text_color="#888888"
-        )
-        version_label.place(relx=1.0, rely=1.0, anchor="se", x=-S(10), y=-S(10))
+        total_stats = self.match_history.get("total", {})
+        wins = int(total_stats.get("victory", 0))
+        losses = int(total_stats.get("defeat", 0))
+        draws = int(total_stats.get("draw", 0))
+        games = wins + losses + draws
+        win_pct = round(100 * wins / games, 1) if games else 0.0
+        loss_pct = round(100 * losses / games, 1) if games else 0.0
+
+        def add_stat_row(parent, label, value, value_color=theme.TEXT_PRIMARY):
+            row = ctk.CTkFrame(parent, fg_color="transparent")
+            row.pack(fill="x", padx=S(18), pady=S(6))
+            ctk.CTkLabel(row, text=label, font=theme.ui_font(S(14)), text_color=theme.TEXT_SECONDARY).pack(
+                side="left"
+            )
+            ctk.CTkLabel(
+                row, text=value, font=theme.ui_font(S(14), "bold"), text_color=value_color
+            ).pack(side="right")
+
+        add_stat_row(right_card, "Games played", str(games))
+        add_stat_row(right_card, "Wins", str(wins), theme.TEAL)
+        add_stat_row(right_card, "Losses", str(losses), theme.ERROR)
+        add_stat_row(right_card, "Draws", str(draws), theme.TEXT_SECONDARY)
+        add_stat_row(right_card, "Win rate", f"{win_pct}%", theme.TEAL)
+        add_stat_row(right_card, "Loss rate", f"{loss_pct}%", theme.ERROR)
+
+        ctk.CTkLabel(
+            right_card,
+            text="Totals from saved match history.",
+            font=theme.ui_font(S(11)),
+            text_color=theme.TEXT_MUTED,
+            wraplength=S(220),
+        ).pack(anchor="w", padx=S(18), pady=(S(14), S(18)))
 
     # ---------------------------------------------------------------------------------------------
     #  Additional Settings Tab
     # ---------------------------------------------------------------------------------------------
     def _init_additional_tab(self):
         frame = self.tab_additional
-        container = ctk.CTkScrollableFrame(frame, width=S(900), height=S(620), fg_color="transparent")
-        container.pack(expand=True, fill="both")
+        wrap = ctk.CTkFrame(frame, fg_color="transparent")
+        wrap.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        card = ctk.CTkFrame(
+            wrap,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        card.pack(fill="both", expand=True)
+        container = ctk.CTkScrollableFrame(card, width=S(880), height=S(600), fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=S(12), pady=S(12))
 
         # Extra space to avoid tooltip clipping
         container.grid_rowconfigure(0, minsize=S(10))
@@ -673,7 +767,7 @@ class Hub:
                                  use_general_config=False,
                                  tooltip_text=None):
             nonlocal row_idx
-            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl = ctk.CTkLabel(container, text=label_text, font=theme.ui_font(S(18)))
             lbl.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
 
             # Decide which dictionary to read/write
@@ -699,7 +793,11 @@ class Hub:
                     var_str.set(str(current_config[config_key]))
 
             entry = ctk.CTkEntry(
-                container, textvariable=var_str, width=S(120), font=("Arial", S(16))
+                container,
+                textvariable=var_str,
+                width=S(120),
+                font=theme.ui_font(S(16)),
+                **theme.entry_kwargs(),
             )
             entry.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
             entry.bind("<FocusOut>", on_save)
@@ -757,7 +855,7 @@ class Hub:
         )
 
         # 4) CPU/GPU (store in general_config)
-        lbl_gpu = ctk.CTkLabel(container, text="Inference device:", font=("Arial", S(18)))
+        lbl_gpu = ctk.CTkLabel(container, text="Inference device:", font=theme.ui_font(S(18)))
         lbl_gpu.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
 
         gpu_values = ["auto", "directml", "cuda", "openvino", "cpu"]
@@ -772,12 +870,8 @@ class Hub:
             values=gpu_values,
             command=on_gpu_change,
             variable=gpu_var,
-            font=("Arial", S(16)),
-            fg_color="#AA2A2A",
-            button_color="#AA2A2A",
-            button_hover_color="#BB3A3A",
-            width=S(100),
-            height=S(35)
+            font=theme.ui_font(S(16)),
+            **theme.option_menu_kwargs(S(100), S(35)),
         )
         gpu_menu.grid(row=row_idx, column=1, padx=S(20), pady=S(10), sticky="w")
         row_idx += 1
@@ -790,7 +884,7 @@ class Hub:
             tooltip_text="DirectML adapter index. Keep auto unless DirectML uses the wrong GPU; try 0 or 1 on laptops with two GPUs."
         )
 
-        lbl_long_press = ctk.CTkLabel(container, text="Longpress star_drop:", font=("Arial", S(18)))
+        lbl_long_press = ctk.CTkLabel(container, text="Longpress star_drop:", font=theme.ui_font(S(18)))
         lbl_long_press.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         long_press_var = tk.BooleanVar(
             value=(str(self.general_config["long_press_star_drop"]).lower() in ["yes", "true"])
@@ -805,15 +899,14 @@ class Hub:
             text="",
             variable=long_press_var,
             command=toggle_long_press_detection,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
             width=S(30),
-            height=S(30)
+            height=S(30),
+            **theme.checkbox_kwargs(),
         )
         long_press_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         row_idx += 1
 
-        lbl_play_again = ctk.CTkLabel(container, text="Play Again On Win:", font=("Arial", S(18)))
+        lbl_play_again = ctk.CTkLabel(container, text="Play Again On Win:", font=theme.ui_font(S(18)))
         lbl_play_again.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         play_again_var = tk.BooleanVar(
             value=(str(self.bot_config["play_again_on_win"]).lower() in ["yes", "true"])
@@ -828,10 +921,9 @@ class Hub:
             text="",
             variable=play_again_var,
             command=toggle_play_again,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
             width=S(30),
-            height=S(30)
+            height=S(30),
+            **theme.checkbox_kwargs(),
         )
         play_again_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         self.attach_tooltip(
@@ -840,7 +932,7 @@ class Hub:
         )
         row_idx += 1
 
-        lbl_term_log = ctk.CTkLabel(container, text="Terminal Logging:", font=("Arial", S(18)))
+        lbl_term_log = ctk.CTkLabel(container, text="Terminal Logging:", font=theme.ui_font(S(18)))
         lbl_term_log.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         term_log_var = tk.BooleanVar(
             value=(str(self.general_config["terminal_logging"]).lower() in ["yes", "true"])
@@ -855,10 +947,9 @@ class Hub:
             text="",
             variable=term_log_var,
             command=toggle_terminal_logging,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
             width=S(30),
-            height=S(30)
+            height=S(30),
+            **theme.checkbox_kwargs(),
         )
         term_log_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         self.attach_tooltip(
@@ -867,7 +958,7 @@ class Hub:
         )
         row_idx += 1
 
-        lbl_debug_screen = ctk.CTkLabel(container, text="Debug Screen:", font=("Arial", S(18)))
+        lbl_debug_screen = ctk.CTkLabel(container, text="Debug Screen:", font=theme.ui_font(S(18)))
         lbl_debug_screen.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         debug_screen_var = tk.BooleanVar(
             value=(str(self.general_config["visual_debug"]).lower() in ["yes", "true"])
@@ -882,10 +973,9 @@ class Hub:
             text="",
             variable=debug_screen_var,
             command=toggle_debug_screen,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
             width=S(30),
-            height=S(30)
+            height=S(30),
+            **theme.checkbox_kwargs(),
         )
         debug_screen_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         self.attach_tooltip(
@@ -894,7 +984,7 @@ class Hub:
         )
         row_idx += 1
 
-        lbl_capture_vision = ctk.CTkLabel(container, text="Capture Vision Frames:", font=("Arial", S(18)))
+        lbl_capture_vision = ctk.CTkLabel(container, text="Capture Vision Frames:", font=theme.ui_font(S(18)))
         lbl_capture_vision.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         capture_vision_var = tk.BooleanVar(
             value=(str(self.general_config["capture_bad_vision_frames"]).lower() in ["yes", "true"])
@@ -909,10 +999,9 @@ class Hub:
             text="",
             variable=capture_vision_var,
             command=toggle_capture_vision,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
             width=S(30),
-            height=S(30)
+            height=S(30),
+            **theme.checkbox_kwargs(),
         )
         capture_vision_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         self.attach_tooltip(
@@ -997,24 +1086,20 @@ class Hub:
             tooltip_text="CPU threads used by the detection models. Lower values reduce CPU usage."
         )
 
-        lbl_profile = ctk.CTkLabel(container, text="Performance Profile:", font=("Arial", S(18)))
+        lbl_profile = ctk.CTkLabel(container, text="Performance Profile:", font=theme.ui_font(S(18)))
         lbl_profile.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         profile_var = tk.StringVar(value="balanced")
         profile_menu = ctk.CTkOptionMenu(
             container,
             values=["balanced", "low-end", "quality"],
             variable=profile_var,
-            font=("Arial", S(16)),
-            fg_color="#AA2A2A",
-            button_color="#AA2A2A",
-            button_hover_color="#BB3A3A",
-            width=S(120),
-            height=S(35)
+            font=theme.ui_font(S(16)),
+            **theme.option_menu_kwargs(S(120), S(35)),
         )
         profile_menu.grid(row=row_idx, column=1, padx=S(20), pady=S(10), sticky="w")
         row_idx += 1
 
-        profile_status = ctk.CTkLabel(container, text="", font=("Arial", S(14)), text_color="#AAAAAA")
+        profile_status = ctk.CTkLabel(container, text="", font=theme.ui_font(S(14)), text_color=theme.TEXT_SECONDARY)
         profile_status.grid(row=row_idx, column=0, columnspan=2, sticky="n", padx=S(20), pady=(0, S(4)))
         row_idx += 1
 
@@ -1043,21 +1128,19 @@ class Hub:
                 refresh_profile_fields(result)
                 profile_status.configure(
                     text=f"Applied {result['profile']} profile. Restart the bot to use it.",
-                    text_color="#2ECC71"
+                    text_color=theme.SUCCESS,
                 )
             except Exception as exc:
-                profile_status.configure(text=f"Could not apply profile: {exc}", text_color="#E74C3C")
+                profile_status.configure(text=f"Could not apply profile: {exc}", text_color=theme.ERROR)
 
         apply_profile_btn = ctk.CTkButton(
             container,
             text="Apply Performance Mode",
             command=on_apply_performance_profile,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
-            font=("Arial", S(16), "bold"),
-            corner_radius=S(6),
+            font=theme.ui_font(S(16), "bold"),
             width=S(220),
-            height=S(40)
+            height=S(40),
+            **theme.primary_button_kwargs(S(12)),
         )
         apply_profile_btn.grid(row=row_idx, column=0, columnspan=2, padx=S(20), pady=S(10))
         self.attach_tooltip(
@@ -1069,18 +1152,26 @@ class Hub:
         container.grid_columnconfigure(0, weight=1)
         container.grid_columnconfigure(1, weight=1)
 
-        self._add_version_label(frame)
-
     def _init_webhook_tab(self):
         frame = self.tab_webhook
-        container = ctk.CTkScrollableFrame(frame, width=S(900), height=S(620), fg_color="transparent")
-        container.pack(expand=True, fill="both")
+        wrap = ctk.CTkFrame(frame, fg_color="transparent")
+        wrap.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        card = ctk.CTkFrame(
+            wrap,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        card.pack(fill="both", expand=True)
+        container = ctk.CTkScrollableFrame(card, width=S(880), height=S(600), fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=S(12), pady=S(12))
 
         row_idx = 0
 
         def create_webhook_entry(label_text, config_key, convert_func=str, width=360, show=None):
             nonlocal row_idx
-            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl = ctk.CTkLabel(container, text=label_text, font=theme.ui_font(S(18)))
             lbl.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
             var_str = tk.StringVar(value=str(self.webhook_config.get(config_key, "")))
 
@@ -1092,7 +1183,14 @@ class Hub:
                 except ValueError:
                     var_str.set(str(self.webhook_config.get(config_key, "")))
 
-            entry = ctk.CTkEntry(container, textvariable=var_str, width=S(width), font=("Arial", S(16)), show=show)
+            entry = ctk.CTkEntry(
+                container,
+                textvariable=var_str,
+                width=S(width),
+                font=theme.ui_font(S(16)),
+                show=show,
+                **theme.entry_kwargs(),
+            )
             entry.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
             entry.bind("<FocusOut>", on_save)
             entry.bind("<Return>", on_save)
@@ -1100,7 +1198,7 @@ class Hub:
 
         def create_webhook_toggle(label_text, config_key):
             nonlocal row_idx
-            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl = ctk.CTkLabel(container, text=label_text, font=theme.ui_font(S(18)))
             lbl.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
             var_bool = tk.BooleanVar(value=bool(self.webhook_config.get(config_key, False)))
 
@@ -1113,10 +1211,9 @@ class Hub:
                 text="",
                 variable=var_bool,
                 command=on_toggle,
-                fg_color="#AA2A2A",
-                hover_color="#BB3A3A",
                 width=S(30),
                 height=S(30),
+                **theme.checkbox_kwargs(),
             )
             checkbox.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
             row_idx += 1
@@ -1136,21 +1233,21 @@ class Hub:
         create_webhook_entry("Allowed Channel ID:", "discord_control_channel_id", str, width=220)
         create_webhook_entry("Guild ID:", "discord_control_guild_id", str, width=220)
 
-        webhook_status = ctk.CTkLabel(container, text="", font=("Arial", S(14)), text_color="#AAAAAA")
+        webhook_status = ctk.CTkLabel(container, text="", font=theme.ui_font(S(14)), text_color=theme.TEXT_SECONDARY)
         webhook_status.grid(row=row_idx, column=0, columnspan=2, sticky="n", padx=S(20), pady=(S(6), 0))
         row_idx += 1
 
         def send_test_webhook():
-            webhook_status.configure(text="Sending Discord test...", text_color="#AAAAAA")
+            webhook_status.configure(text="Sending Discord test...", text_color=theme.TEXT_SECONDARY)
 
             def worker():
                 try:
                     ok = asyncio.run(async_send_test_notification())
                     message = "Discord test sent." if ok else "Discord test failed. Check URL and Discord permissions."
-                    color = "#2ECC71" if ok else "#E74C3C"
+                    color = theme.SUCCESS if ok else theme.ERROR
                 except Exception as exc:
                     message = f"Discord test failed: {exc}"
-                    color = "#E74C3C"
+                    color = theme.ERROR
                 try:
                     self.app.after(0, lambda: webhook_status.configure(text=message, text_color=color))
                 except Exception:
@@ -1162,12 +1259,10 @@ class Hub:
             container,
             text="Send Discord Test",
             command=send_test_webhook,
-            fg_color="#AA2A2A",
-            hover_color="#BB3A3A",
-            font=("Arial", S(16), "bold"),
-            corner_radius=S(6),
+            font=theme.ui_font(S(16), "bold"),
             width=S(220),
-            height=S(40)
+            height=S(40),
+            **theme.primary_button_kwargs(S(12)),
         )
         test_btn.grid(row=row_idx, column=0, columnspan=2, padx=S(20), pady=S(12))
         self.attach_tooltip(test_btn, "Sends a Discord test message using the current Discord settings.")
@@ -1176,15 +1271,23 @@ class Hub:
         container.grid_columnconfigure(0, weight=1)
         container.grid_columnconfigure(1, weight=1)
 
-        self._add_version_label(frame)
-
     # ---------------------------------------------------------------------------------------------
     #  Timers Tab
     # ---------------------------------------------------------------------------------------------
     def _init_timers_tab(self):
         frame = self.tab_timers
-        container = ctk.CTkFrame(frame, fg_color="transparent")
-        container.pack(expand=True, fill="both")
+        wrap = ctk.CTkFrame(frame, fg_color="transparent")
+        wrap.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        card = ctk.CTkFrame(
+            wrap,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
+        )
+        card.pack(fill="both", expand=True)
+        container = ctk.CTkFrame(card, fg_color="transparent")
+        container.pack(expand=True, fill="both", padx=S(12), pady=S(12))
 
         container.grid_rowconfigure(0, minsize=S(70))  # extra top space for tooltips
 
@@ -1193,7 +1296,7 @@ class Hub:
         def create_timer_setting(param_name, label_text, tooltip_text=None, disabled=False):
             nonlocal row_idx
 
-            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl = ctk.CTkLabel(container, text=label_text, font=theme.ui_font(S(18)))
             lbl.grid(row=row_idx, column=0, padx=S(20), pady=S(10), sticky="e")
 
             # Frame to hold slider & entry side by side
@@ -1210,7 +1313,11 @@ class Hub:
                 number_of_steps=99,
                 width=S(200),
                 command=lambda v: on_slider_change(v, val_var, param_name),
-                state=("disabled" if disabled else "normal")
+                state=("disabled" if disabled else "normal"),
+                fg_color=theme.INACTIVE,
+                progress_color=theme.ACCENT,
+                button_color=theme.ACCENT,
+                button_hover_color=theme.ACCENT_HOVER,
             )
             sld.pack(side="left", padx=S(5))
 
@@ -1219,8 +1326,9 @@ class Hub:
                 slider_entry_frame,
                 textvariable=val_var,
                 width=S(80),
-                font=("Arial", S(16)),
-                state=("disabled" if disabled else "normal")
+                font=theme.ui_font(S(16)),
+                state=("disabled" if disabled else "normal"),
+                **theme.entry_kwargs(),
             )
             entry.pack(side="left", padx=S(10))
 
@@ -1304,18 +1412,26 @@ class Hub:
         container.grid_columnconfigure(0, weight=1)
         container.grid_columnconfigure(1, weight=1)
 
-        self._add_version_label(frame)
-
     # ---------------------------------------------------------------------------------------------
     #  Match History Tab
     # ---------------------------------------------------------------------------------------------
     def _init_history_tab(self):
         frame = self.tab_history
 
-        scroll_frame = ctk.CTkScrollableFrame(
-            frame, width=S(900), height=S(600), fg_color="transparent", corner_radius=S(10)
+        wrap = ctk.CTkFrame(frame, fg_color="transparent")
+        wrap.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        card = ctk.CTkFrame(
+            wrap,
+            fg_color=theme.CARD,
+            corner_radius=S(20),
+            border_width=1,
+            border_color=theme.CARD_BORDER,
         )
-        scroll_frame.pack(fill="both", expand=True, padx=S(10), pady=S(10))
+        card.pack(fill="both", expand=True)
+        scroll_frame = ctk.CTkScrollableFrame(
+            card, width=S(880), height=S(580), fg_color="transparent", corner_radius=S(16)
+        )
+        scroll_frame.pack(fill="both", expand=True, padx=S(8), pady=S(8))
 
         max_cols = 4
         row_idx = 0
@@ -1343,7 +1459,10 @@ class Hub:
                 scroll_frame,
                 width=S(200),
                 height=S(220),
-                corner_radius=S(8)
+                corner_radius=S(16),
+                fg_color=theme.BG,
+                border_width=1,
+                border_color=theme.CARD_BORDER,
             )
             cell_frame.grid(row=row_idx, column=col_idx, padx=S(15), pady=S(15))
 
@@ -1356,23 +1475,20 @@ class Hub:
             text_label = ctk.CTkLabel(
                 cell_frame,
                 text=f"{brawler}\n{total_games} games",
-                font=("Arial", S(16), "bold")
+                font=theme.ui_font(S(16), "bold")
             )
             text_label.pack()
 
             stats_frame = ctk.CTkFrame(cell_frame, fg_color="transparent")
             stats_frame.pack(pady=S(5))
 
-            # Win in green
-            color_win = "#2ecc71"
-
-            # Loss in red
-            color_loss = "#e74c3c"
+            color_win = theme.TEAL
+            color_loss = theme.ERROR
 
             lbl_win = ctk.CTkLabel(
                 stats_frame,
                 text=f"{wr}%",
-                font=("Arial", S(14), "bold"),
+                font=theme.ui_font(S(14), "bold"),
                 text_color=color_win
             )
             lbl_win.pack(side="left", padx=S(5))
@@ -1380,7 +1496,7 @@ class Hub:
             lbl_loss = ctk.CTkLabel(
                 stats_frame,
                 text=f"{lr}%",
-                font=("Arial", S(14), "bold"),
+                font=theme.ui_font(S(14), "bold"),
                 text_color=color_loss
             )
             lbl_loss.pack(side="left", padx=S(5))
@@ -1389,8 +1505,6 @@ class Hub:
             if col_idx >= max_cols:
                 col_idx = 0
                 row_idx += 1
-
-        self._add_version_label(frame)
 
     # ---------------------------------------------------------------------------------------------
     #  On Start => close window + callback
