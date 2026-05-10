@@ -30,9 +30,11 @@ idle_pixels_minimum = 3000.0
 wall_detection_confidence = 0.8
 entity_detection_confidence = 0.55
 entity_detection_retry_confidence = 0.35
-projectile_detection_confidence = 0.9
+projectile_detection_confidence = 0.65
+# ONNX score gate for models/projectileDetector.onnx only (typical export probs peak ~0.5–0.85; use ~0.25–0.45 for recall).
+projectile_yolo_confidence = 0.35
 # Dedicated projectile ONNX runs every N vision frames (1 = every frame). Higher = better IPS; motion detection still runs each frame.
-projectile_detector_frame_stride = 2
+projectile_detector_frame_stride = 1
 player_center_bias_radius = 420
 player_green_pixel_weight = 0.03
 player_red_pixel_penalty = 0.05

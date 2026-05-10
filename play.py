@@ -150,6 +150,13 @@ class Movement:
         self.projectile_detection_confidence = float(
             bot_config.get("projectile_detection_confidence", 0.55)
         )
+        # Score threshold for the dedicated projectile ONNX only. Keep separate from
+        # ``projectile_detection_confidence`` (hub / incoming-angle strictness): that
+        # knob was never meant to gate raw YOLO scores, and values like 0.9 suppress
+        # nearly all hits because training mAP rarely exceeds ~0.8 on raw export probs.
+        self.projectile_yolo_confidence = float(
+            bot_config.get("projectile_yolo_confidence", 0.35)
+        )
         # Dedicated projectile ONNX runs only every N vision frames (1 = always).
         # Stride > 1 lowers CPU/GPU load and raises IPS; motion/residual paths still run every frame.
         self.projectile_detector_frame_stride = max(
@@ -1740,7 +1747,7 @@ class Play(Movement):
             if run_proj:
                 try:
                     proj = self.Detect_projectile.detect_objects(
-                        frame, conf_tresh=self.projectile_detection_confidence
+                        frame, conf_tresh=self.projectile_yolo_confidence
                     )
                     yolo_boxes = proj.get("projectile") or []
                 except Exception as exc:
