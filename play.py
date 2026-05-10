@@ -150,6 +150,11 @@ class Movement:
         self.projectile_detection_confidence = float(
             bot_config.get("projectile_detection_confidence", 0.55)
         )
+        # Dedicated projectile ONNX runs only every N vision frames (1 = always).
+        # Stride > 1 lowers CPU/GPU load and raises IPS; motion/residual paths still run every frame.
+        self.projectile_detector_frame_stride = max(
+            1, int(bot_config.get("projectile_detector_frame_stride", 2))
+        )
         # Enemy-origin gate: a candidate is only classified as a real
         # projectile if its first appearance was within
         # ``enemy_origin_radius`` of an enemy hitbox AND not within
@@ -571,7 +576,13 @@ class Play(Movement):
         if projectile_model and os.path.exists(projectile_model):
             try:
                 self.Detect_projectile = Detect(projectile_model, classes=['projectile'])
-                print(f"Loaded projectile detector: {projectile_model}")
+                stride = getattr(self, "projectile_detector_frame_stride", 1)
+                stride_note = (
+                    "every vision frame"
+                    if stride <= 1
+                    else f"every {stride} vision frames"
+                )
+                print(f"Loaded projectile detector: {projectile_model} ({stride_note})")
             except Exception as exc:
                 print(f"Failed to load projectile detector {projectile_model}: {exc}")
                 self.Detect_projectile = None
@@ -750,6 +761,8 @@ class Play(Movement):
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
         self._rl_yolo_debug_boxes = []
+        self._projectile_detector_stride_counter = 0
+        self._cached_projectile_yolo_boxes = []
         # Previous-frame motion/residual centers used to gate candidates
         # by direction-of-travel-toward-player.
         self._rl_prev_motion_centers: list = []
@@ -925,6 +938,8 @@ class Play(Movement):
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
         self._rl_yolo_debug_boxes = []
+        self._projectile_detector_stride_counter = 0
+        self._cached_projectile_yolo_boxes = []
         bridge = getattr(self, "_rl_bridge", None)
         if bridge and bridge is not False and hasattr(bridge, "on_match_reset"):
             try:
@@ -1717,14 +1732,23 @@ class Play(Movement):
         # motion-based residual/blob candidates via NMS, so both detectors
         # run in parallel and de-duplicate against each other.
         if self.Detect_projectile is not None:
-            try:
-                proj = self.Detect_projectile.detect_objects(
-                    frame, conf_tresh=self.projectile_detection_confidence
-                )
-                yolo_boxes = proj.get("projectile") or []
-            except Exception as exc:
-                print(f"Projectile detector inference failed: {exc}")
-                yolo_boxes = []
+            stride = max(1, getattr(self, "projectile_detector_frame_stride", 2))
+            run_proj = stride == 1 or (
+                self._projectile_detector_stride_counter % stride == 0
+            )
+            self._projectile_detector_stride_counter += 1
+            if run_proj:
+                try:
+                    proj = self.Detect_projectile.detect_objects(
+                        frame, conf_tresh=self.projectile_detection_confidence
+                    )
+                    yolo_boxes = proj.get("projectile") or []
+                except Exception as exc:
+                    print(f"Projectile detector inference failed: {exc}")
+                    yolo_boxes = []
+                self._cached_projectile_yolo_boxes = list(yolo_boxes)
+            else:
+                yolo_boxes = list(self._cached_projectile_yolo_boxes)
             self._rl_yolo_debug_boxes = list(yolo_boxes)
             if yolo_boxes:
                 data.setdefault("projectile", []).extend(yolo_boxes)
