@@ -128,7 +128,10 @@ def get_in_game_state(image):
     if is_in_daily_wins_hold_drop(image) or is_in_daily_wins_drop(image):
         return "daily_star_drop"
 
-    if is_in_star_drop(image):
+    star_drop_type = get_star_drop_type(image)
+    if star_drop_type == "starr_nova_hold":
+        return "nova_star_drop"
+    if star_drop_type is not None:
         return "star_drop"
 
     if is_in_trophy_reward(image):
@@ -679,7 +682,7 @@ def get_star_drop_type(image):
             if image_filename == "demonic_star_drop.png":
                 return "demonic"
             if image_filename == "starr_nova_star_drop.png":
-                return "daily_hold"
+                return "starr_nova_hold"
             if not has_standard_star_drop_screen_context(image):
                 return None
             return "standard"

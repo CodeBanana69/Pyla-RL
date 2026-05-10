@@ -43,6 +43,18 @@ class DiscordNotifierTest(unittest.TestCase):
 
         self.assertEqual(description, "A brawler reached the configured target.")
 
+    def test_match_summary_does_not_show_potentially_stale_brawler_name(self):
+        _, description = _title_and_description("match", {"result": "4th", "brawler": "amber"})
+
+        self.assertNotIn("Amber", description)
+
+    def test_match_fields_hide_potentially_stale_brawler_name(self):
+        embed = discord.Embed(title="test")
+
+        _add_fields(embed, {"event_type": "match", "brawler": "amber", "result": "4th"})
+
+        self.assertEqual(len(embed.fields), 1)
+
     def test_brawlers_left_field_is_user_friendly(self):
         embed = discord.Embed(title="test")
 

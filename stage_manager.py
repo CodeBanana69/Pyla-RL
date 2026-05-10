@@ -84,6 +84,7 @@ class StageManager:
             'lobby': self.start_game,
             'star_drop': self.handle_star_drop,
             'daily_star_drop': self.handle_star_drop,
+            'nova_star_drop': self.handle_star_drop,
             'prestige_reward': self.handle_prestige_reward,
             'trophy_reward': lambda: self.window_controller.press_key("Q"),
             'reward_unlock': self.handle_reward_unlock,
@@ -503,17 +504,27 @@ class StageManager:
         if drop_type is None:
             return
 
-        print(f"{drop_type.title()} star drop detected; opening by template.")
+        label = {
+            "daily_hold": "Daily Wins hold",
+            "starr_nova_hold": "Starr Nova hold",
+            "angelic": "Angelic",
+            "demonic": "Demonic",
+            "standard": "Standard",
+        }.get(drop_type, str(drop_type).replace("_", " ").title())
+        print(f"{label} star drop detected; opening by template.")
         self.window_controller.keys_up(list("wasd"))
         current_height, current_width = screenshot.shape[:2]
         width_ratio = current_width / 1920
         height_ratio = current_height / 1080
         x = int(965 * width_ratio)
         y = int(525 * height_ratio)
-        if drop_type in ("angelic", "demonic", "daily_hold"):
-            for _ in range(3):
-                self.window_controller.click(x, y, delay=0.45)
-                time.sleep(0.2)
+        if drop_type in ("angelic", "demonic", "daily_hold", "starr_nova_hold"):
+            for _ in range(2):
+                if hasattr(self.window_controller, "long_press"):
+                    self.window_controller.long_press(x, y, duration=1.15)
+                else:
+                    self.window_controller.click(x, y, delay=1.15)
+                time.sleep(0.25)
         else:
             for _ in range(5):
                 self.window_controller.click(x, y, delay=0.04)

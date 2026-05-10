@@ -138,8 +138,7 @@ def _title_and_description(event_type: str, details: dict[str, Any]) -> tuple[st
     brawler = str(details.get("brawler") or "").title()
     if event_type == "match":
         result = _format_result(details.get("result"))
-        brawler_text = f" with **{brawler}**" if brawler else ""
-        return "🏁 Match Finished", f"Finished{brawler_text}: **{result}**"
+        return "🏁 Match Finished", f"Finished: **{result}**"
     if event_type == "brawler_complete":
         if brawler:
             return "✅ Brawler Target Reached", f"**{brawler}** reached the configured target."
@@ -167,7 +166,9 @@ def _format_field_value(key: str, value: Any) -> str:
 
 
 def _add_fields(embed: discord.Embed, details: dict[str, Any]) -> None:
-    hidden = {"message", "reason"}
+    hidden = {"message", "reason", "event_type"}
+    if str(details.get("event_type") or "") == "match":
+        hidden.add("brawler")
     ordered_keys = [
         "brawler",
         "result",
@@ -229,6 +230,7 @@ async def async_notify_user(
     if event_type == "match" and not (_config_bool(settings.get("send_match_summary"), False) or ping):
         return False
 
+    details["event_type"] = event_type
     title, description = _title_and_description(event_type, details)
     embed = discord.Embed(
         title=title,

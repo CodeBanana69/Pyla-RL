@@ -1,0 +1,91 @@
+{"name": "Showdown Follower", "description": "Official Pyla follower idea adapted for XXZ: follow teammates when no enemies are reachable, while keeping poison-gas avoidance and fixed ability gates.", "brawlers": ["all"], "gamemodes": ["trio showdown"], "author": "Official/XXZ", "date": "2026-05-10"}
+def teammate_follow_movement():
+    closest_teammate_coords, _ = find_closest_teammate(teammate_data, player_pos, walls)
+    if not closest_teammate_coords:
+        return no_enemy_movement(player_data, walls)
+    direction_x = closest_teammate_coords[0] - player_pos[0]
+    direction_y = closest_teammate_coords[1] - player_pos[1]
+    move_horizontal = get_horizontal_move_key(direction_x)
+    move_vertical = get_vertical_move_key(direction_y)
+    movement_options = []
+    if move_horizontal and move_vertical:
+        movement_options.append(move_horizontal + move_vertical)
+    if move_vertical:
+        movement_options.append(move_vertical)
+    if move_horizontal:
+        movement_options.append(move_horizontal)
+    for move in movement_options:
+        if not is_path_blocked(player_pos, move, walls):
+            return move
+    return movement_options[0] if movement_options else "W"
+
+def avoid_poison_gas():
+    opposite_direction = {"up": "S", "down": "W", "left": "D", "right": "A"}
+    gas_movement = ""
+    for direction in ["up", "down"]:
+        if is_there_poison_gas(direction, player_data):
+            gas_movement += opposite_direction[direction]
+            break
+    for direction in ["left", "right"]:
+        if is_there_poison_gas(direction, player_data):
+            gas_movement += opposite_direction[direction]
+            break
+    return gas_movement
+
+brawler_info = brawlers_info.get(brawler)
+if not brawler_info:
+    raise ValueError(f"Brawler '{brawler}' not found in brawlers info.")
+must_brawler_hold_attack = must_brawler_hold_attack(brawler, brawlers_info)
+if must_brawler_hold_attack and persistent_data["time_since_holding_attack"] is not None and time.time() - persistent_data["time_since_holding_attack"] >= brawler_info['hold_attack'] + seconds_to_hold_attack_after_reaching_max:
+    attack(touch_up=True, touch_down=False)
+    persistent_data["time_since_holding_attack"] = None
+
+safe_range, attack_range, super_range = get_brawler_range(brawler)
+player_pos = get_player_pos(player_data)
+anti_poison_gas_movement = avoid_poison_gas()
+if not is_there_enemy(enemy_data):
+    movement = anti_poison_gas_movement or teammate_follow_movement()
+else:
+    enemy_coords, enemy_distance = find_closest_enemy(enemy_data, player_pos, walls, "attack")
+    if enemy_coords is None:
+        movement = anti_poison_gas_movement or teammate_follow_movement()
+    else:
+        direction_x = enemy_coords[0] - player_pos[0]
+        direction_y = enemy_coords[1] - player_pos[1]
+        if enemy_distance > safe_range:
+            move_horizontal = get_horizontal_move_key(direction_x)
+            move_vertical = get_vertical_move_key(direction_y)
+        else:
+            move_horizontal = get_horizontal_move_key(direction_x, opposite=True)
+            move_vertical = get_vertical_move_key(direction_y, opposite=True)
+
+        movement_options = [move_horizontal + move_vertical, move_vertical, move_horizontal]
+        for move in movement_options:
+            if move and not is_path_blocked(player_pos, move, walls):
+                movement = move
+                break
+        else:
+            movement = get_random_movement()
+
+        if is_super_ready and persistent_data["time_since_holding_attack"] is None:
+            super_type = brawler_info['super_type']
+            enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "super")
+            if should_use_super_on_enemy(brawler, super_type, enemy_distance, attack_range, super_range, enemy_hittable):
+                if is_hypercharge_ready:
+                    use_hypercharge()
+                use_super()
+
+        if enemy_distance <= attack_range:
+            enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
+            if enemy_hittable:
+                if is_gadget_ready and persistent_data["time_since_holding_attack"] is None:
+                    use_gadget()
+                if not must_brawler_hold_attack:
+                    attack()
+                else:
+                    if persistent_data["time_since_holding_attack"] is None:
+                        persistent_data["time_since_holding_attack"] = time.time()
+                        attack(touch_up=False, touch_down=True)
+                    elif time.time() - persistent_data["time_since_holding_attack"] >= brawlers_info[brawler]['hold_attack']:
+                        attack(touch_up=True, touch_down=False)
+                        persistent_data["time_since_holding_attack"] = None

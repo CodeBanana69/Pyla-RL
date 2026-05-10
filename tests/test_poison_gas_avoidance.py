@@ -69,6 +69,14 @@ class PoisonGasAvoidanceTests(unittest.TestCase):
         self.assertTrue(play.is_there_poison_gas("up", [135, 135, 165, 165]))
         self.assertTrue(play.is_there_poison_gas("down", [135, 135, 165, 165]))
 
+    def test_angle_path_guard_detects_fog_ahead_only(self):
+        play = self.make_play()
+        frame = np.zeros((300, 300, 3), dtype=np.uint8)
+        frame[135:165, 205:235] = self.fog_rgb()
+
+        self.assertTrue(play.angle_points_into_fog(frame, (150, 150), 0))
+        self.assertFalse(play.angle_points_into_fog(frame, (150, 150), 180))
+
 
 if __name__ == "__main__":
     unittest.main()

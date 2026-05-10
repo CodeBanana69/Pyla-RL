@@ -768,6 +768,7 @@ class Play(Movement):
         self.locked_teammate_distance = float('inf')
         self.teammate_hysteresis = 0.20  # Switch only if another teammate is 20% closer
         self.trio_grouping_enabled = str(bot_config.get("trio_grouping_enabled", "yes")).lower() in ("yes", "true", "1")
+        self.showdown_playstyle_mode = str(bot_config.get("showdown_playstyle_mode", "hide")).strip().lower()
         self.teammate_follow_min_distance = float(bot_config.get("teammate_follow_min_distance", 180))
         self.teammate_follow_max_distance = float(bot_config.get("teammate_follow_max_distance", 520))
         self.teammate_combat_regroup_distance = float(bot_config.get("teammate_combat_regroup_distance", 650))
@@ -1402,6 +1403,41 @@ class Play(Movement):
         vlog(f"directional fog escape: counts={direction_counts} -> angle={angle:.1f} deg")
         return angle
 
+    def angle_points_into_fog(self, frame, player_position, angle_degrees, lookahead=None):
+        """Return True when moving at angle_degrees would drive into nearby fog.
+
+        This is intentionally stricter than the generic fog threat check: it
+        only rejects the selected movement path, so teammate-following can still
+        work beside smoke without blindly walking toward a teammate inside it.
+        """
+        if frame is None or player_position is None or angle_degrees is None:
+            return False
+        r = int(max(140, lookahead or self.fog_flee_distance * 1.7))
+        built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
+        if built is None:
+            return False
+        mask, (ox, oy) = built
+
+        import numpy as np
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return False
+
+        px, py = player_position
+        dx = (xs + ox) - px
+        dy = (ys + oy) - py
+        ux, uy = self.angle_to_vector(float(angle_degrees))
+        forward = dx * ux + dy * uy
+        lateral = np.abs(dx * uy - dy * ux)
+        corridor_width = max(42, int(r * 0.28))
+        min_pixels = max(18, int(self.fog_min_pixels_in_radius * 0.5))
+        in_path = (forward > 0) & (forward <= r) & (lateral <= corridor_width)
+        count = int(in_path.sum())
+        if count >= min_pixels:
+            vlog(f"fog path guard: {count}px ahead at angle={float(angle_degrees):.1f}°")
+            return True
+        return False
+
     def is_there_poison_gas(self, direction, player_data):
         if self.current_frame is None or player_data is None:
             return False
@@ -1626,49 +1662,47 @@ class Play(Movement):
         return closest_teammate, closest_distance
 
     def showdown_follow_teammate(self, player_data, teammate_data, walls):
-        """Keep a useful Trio Showdown spacing around the closest teammate."""
+        """Official Pyla follower behavior adapted to angle movement.
+
+        The newest Pyla follower does not orbit or keep spacing. When no enemy
+        is reachable it simply moves toward the closest teammate, trying the
+        direct diagonal vector first, then the horizontal and vertical parts.
+        """
         player_pos = self.get_player_pos(player_data)
-        closest_teammate, closest_distance = self.get_closest_teammate(player_data, teammate_data)
+        closest_teammate, closest_distance = self.find_closest_teammate(teammate_data, player_pos, walls)
 
         if closest_teammate is None:
             self.locked_teammate = None
             self.locked_teammate_distance = float('inf')
+            vlog("follow teammate: no teammate detected -> roam")
             return self.showdown_roam(player_data, walls)
 
-        # Hysteresis only applies when there are multiple teammates to choose from.
-        # If we already have a locked target, check whether to switch to a closer one.
-        # Either way, always update the locked target's position to this frame's value.
-        if self.locked_teammate is not None:
-            locked_dist = self.get_distance(self.locked_teammate, player_pos)
-            if closest_distance < locked_dist * (1 - self.teammate_hysteresis):
-                vlog(f"follow teammate: switched target ({int(locked_dist)}px → {int(closest_distance)}px)")
-                self.locked_teammate = closest_teammate
-                self.locked_teammate_distance = closest_distance
-            else:
-                # Same target (or similar) — update its position to the current frame
-                self.locked_teammate = closest_teammate
-                self.locked_teammate_distance = closest_distance
-        else:
-            self.locked_teammate = closest_teammate
-            self.locked_teammate_distance = closest_distance
+        self.locked_teammate = closest_teammate
+        self.locked_teammate_distance = closest_distance
 
-        direction_x = self.locked_teammate[0] - player_pos[0]
-        direction_y = self.locked_teammate[1] - player_pos[1]
-        teammate_angle = self.angle_from_direction(direction_x, direction_y)
-        if self.trio_grouping_enabled and closest_distance < self.teammate_follow_min_distance:
-            angle = self.angle_opposite(teammate_angle)
-            action = "space"
-        elif self.trio_grouping_enabled and closest_distance <= self.teammate_follow_max_distance:
-            orbit_side = 1 if (int(time.time() / 2) % 2 == 0) else -1
-            angle = (teammate_angle + 90 * orbit_side) % 360
-            action = "orbit"
-        else:
-            angle = teammate_angle
-            action = "follow"
-        best = self.find_best_angle(player_pos, angle, walls)
-        vlog(f"{action} teammate → angle={best:.1f}° (desired={angle:.1f}°, dist={int(closest_distance)}px, "
-             f"player={int(player_pos[0])},{int(player_pos[1])} tm={int(self.locked_teammate[0])},{int(self.locked_teammate[1])})")
-        return best
+        direction_x = closest_teammate[0] - player_pos[0]
+        direction_y = closest_teammate[1] - player_pos[1]
+        movement_vectors = [(direction_x, direction_y), (direction_x, 0), (0, direction_y)]
+        fallback_angle = None
+
+        for dx, dy in movement_vectors:
+            if math.hypot(dx, dy) < 1:
+                continue
+            angle = self.angle_from_direction(dx, dy)
+            if fallback_angle is None:
+                fallback_angle = angle
+            if not self.is_path_blocked_angle(player_pos, angle, walls):
+                vlog(f"follow teammate -> angle={angle:.1f}° (dist={int(closest_distance)}px)")
+                return angle
+
+        for angle in (270.0, 180.0, 90.0, 0.0):
+            if not self.is_path_blocked_angle(player_pos, angle, walls):
+                vlog(f"follow teammate: preferred blocked -> fallback angle={angle:.1f}°")
+                return angle
+
+        angle = fallback_angle if fallback_angle is not None else self.showdown_roam(player_data, walls)
+        vlog(f"follow teammate: all paths blocked -> forcing angle={float(angle):.1f}°")
+        return angle
 
     def get_showdown_movement(self, player_data, enemy_data, teammate_data, walls, brawler):
         """Showdown movement using analog joystick angles.
@@ -1689,37 +1723,37 @@ class Play(Movement):
         safe_range, attack_range, super_range = self.get_brawler_range(brawler)
         player_pos = self.get_player_pos(player_data)
 
+        enemy_coords = None
+        enemy_distance = None
+        follow_teammates = self.showdown_playstyle_mode in ("follow", "follower", "team", "teammate", "teammates")
+
         # Fog override is applied uniformly at the end so it works for all
-        # three movement sources (chase/retreat enemy, follow teammate, roam).
-        # Throttled: only actually run the detector once every N calls and
-        # reuse the last decision in between — the fog advances slowly enough
-        # that a few frames of staleness don't matter.
+        # movement sources. In teammate-follow mode this check is deliberately
+        # unthrottled; following a teammate toward smoke is worse than spending
+        # a few extra milliseconds checking the screen.
         self._fog_check_counter += 1
-        if self._fog_check_counter >= self.fog_check_every_n_frames:
+        if follow_teammates or self._fog_check_counter >= self.fog_check_every_n_frames:
             self._fog_threat_cached = self.detect_fog_threat(self.current_frame, player_pos)
             self._fog_direction_escape_cached = self.detect_fog_direction_escape(self.current_frame, player_pos)
             self._fog_check_counter = 0
         fog_flee_angle = self._fog_direction_escape_cached or self._fog_threat_cached
 
-        enemy_coords = None
-        enemy_distance = None
-
         # --- No enemy in sight: follow teammate or roam ---
         if not self.is_there_enemy(enemy_data):
-            if teammate_data:
+            if follow_teammates and teammate_data:
                 vlog(f"no enemy → follow teammate ({len(teammate_data)} visible)")
                 angle = self.showdown_follow_teammate(player_data, teammate_data, walls)
             else:
-                vlog("no enemy, no teammate → roam")
+                vlog("no enemy → hide/roam")
                 angle = self.showdown_roam(player_data, walls)
         else:
             enemy_coords, enemy_distance = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
             if enemy_coords is None:
-                if teammate_data:
+                if follow_teammates and teammate_data:
                     vlog("enemy detected but unreachable → follow teammate")
                     angle = self.showdown_follow_teammate(player_data, teammate_data, walls)
                 else:
-                    vlog("enemy detected but unreachable, no teammate → roam")
+                    vlog("enemy detected but unreachable → hide/roam")
                     angle = self.showdown_roam(player_data, walls)
             else:
                 # --- Compute exact angle toward/away from enemy, then wall-avoid ---
@@ -1779,7 +1813,7 @@ class Play(Movement):
                     desired = self.apply_combat_dodge(desired, toward_angle, now_t, enemy_distance, safe_range)
                     vlog(f"combat dodge blend -> desired={desired:.1f}°")
 
-                if (self.trio_grouping_enabled and teammate_data and enemy_distance > attack_range):
+                if (follow_teammates and self.trio_grouping_enabled and teammate_data and enemy_distance > attack_range):
                     closest_teammate, teammate_distance = self.get_closest_teammate(player_data, teammate_data)
                     if closest_teammate is not None and teammate_distance > self.teammate_combat_regroup_distance:
                         team_angle = self.angle_from_direction(
@@ -1791,6 +1825,14 @@ class Play(Movement):
 
                 angle = self.find_best_angle(player_pos, desired, walls)
                 vlog(f"showdown: movement angle={angle:.1f}° (desired={desired:.1f}°)")
+
+        if (
+                follow_teammates
+                and fog_flee_angle is None
+                and self.angle_points_into_fog(self.current_frame, player_pos, angle)
+        ):
+            fog_flee_angle = self.angle_opposite(angle)
+            vlog(f"showdown: follow path points into fog -> fallback escape={fog_flee_angle:.1f}°")
 
         # --- Fog proximity override ---
         # If trusted fog is close, replace movement with a flee angle. Attack

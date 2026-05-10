@@ -66,7 +66,7 @@ def parse_max_ips(value):
 
 OUT_OF_MATCH_REWARD_STATES = {"prestige_reward", "trophy_reward"}
 TROPHY_REWARD_FOLLOWUP_STATES = {"reward_unlock"}
-STAR_DROP_STATES = {"star_drop", "daily_star_drop"}
+STAR_DROP_STATES = {"star_drop", "daily_star_drop", "nova_star_drop"}
 MATCH_RESULT_STATES = {
     "end_victory",
     "end_defeat",

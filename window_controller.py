@@ -1092,6 +1092,14 @@ class WindowController:
         time.sleep(delay)
         if touch_up: self.touch_up(x, y, pointer_id=self.PID_ATTACK)
 
+    def long_press(self, x: int, y: int, duration=1.15, already_include_ratio=True):
+        if not already_include_ratio:
+            x = x * self.width_ratio
+            y = y * self.height_ratio
+        self.touch_down(x, y, pointer_id=self.PID_ATTACK)
+        time.sleep(duration)
+        self.touch_up(x, y, pointer_id=self.PID_ATTACK)
+
     def press_key(self, key, delay=0.005, touch_up=True, touch_down=True):
         if key not in key_coords_dict:
             return

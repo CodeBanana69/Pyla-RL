@@ -108,7 +108,7 @@ class StateTransitionGuardTests(unittest.TestCase):
                 )
 
     def test_star_drop_is_allowed_only_from_post_match_reward_chain(self):
-        for previous_state in ("end_1st", "end_2nd", "end_3rd", "end_4th", "trophy_reward", "reward_unlock", "star_drop"):
+        for previous_state in ("end_1st", "end_2nd", "end_3rd", "end_4th", "trophy_reward", "reward_unlock", "star_drop", "nova_star_drop"):
             with self.subTest(previous_state=previous_state):
                 self.assertEqual(
                     normalize_detected_state(
@@ -154,6 +154,23 @@ class StateTransitionGuardTests(unittest.TestCase):
                 match_result_seen=True,
             ),
             "daily_star_drop",
+        )
+
+    def test_nova_star_drop_is_allowed_after_post_match_result(self):
+        self.assertEqual(
+            normalize_detected_state(
+                "nova_star_drop",
+                previous_state="end_1st",
+                match_result_seen=True,
+            ),
+            "nova_star_drop",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "nova_star_drop",
+                previous_state="star_drop",
+            ),
+            "nova_star_drop",
         )
         self.assertEqual(
             normalize_detected_state(

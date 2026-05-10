@@ -44,6 +44,7 @@ teammate_combat_bias = 0.35
 seconds_to_hold_attack_after_reaching_max = 1.5
 play_again_on_win = "no"
 current_playstyle = "default.pyla"
+showdown_playstyle_mode = "hide"
 match_warmup_seconds = 4.0
 adaptive_brain_enabled = "yes"
 adaptive_brain_window = 20

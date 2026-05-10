@@ -102,6 +102,114 @@ class CombatAdaptationTests(unittest.TestCase):
 
         self.assertEqual(movement, 270.0)
 
+    def test_showdown_hide_mode_roams_when_no_enemy_and_teammate_visible(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 999
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play.detect_fog_threat = lambda *_args, **_kwargs: None
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: None
+        play.current_frame = None
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_follow_teammate = lambda *_args, **_kwargs: 45.0
+        play.showdown_roam = lambda *_args, **_kwargs: 270.0
+        play.showdown_playstyle_mode = "hide"
+
+        movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
+
+        self.assertEqual(movement, 270.0)
+
+    def test_showdown_follow_mode_follows_teammate_when_no_enemy_visible(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 999
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play.detect_fog_threat = lambda *_args, **_kwargs: None
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: None
+        play.current_frame = None
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_follow_teammate = lambda *_args, **_kwargs: 45.0
+        play.showdown_roam = lambda *_args, **_kwargs: 270.0
+        play.showdown_playstyle_mode = "follow"
+
+        movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
+
+        self.assertEqual(movement, 45.0)
+
+    def test_showdown_follow_mode_does_not_follow_into_fog(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 999
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play.detect_fog_threat = lambda *_args, **_kwargs: None
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: None
+        play.current_frame = object()
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_follow_teammate = lambda *_args, **_kwargs: 0.0
+        play.showdown_roam = lambda *_args, **_kwargs: 270.0
+        play.angle_points_into_fog = lambda *_args, **_kwargs: True
+        play.angle_opposite = Play.angle_opposite
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.showdown_playstyle_mode = "follow"
+
+        movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
+
+        self.assertEqual(movement, 180.0)
+
+    def test_showdown_follow_teammate_moves_directly_toward_closest_teammate(self):
+        play = object.__new__(Play)
+        play.get_player_pos = lambda _player: (100, 100)
+        play.get_enemy_pos = lambda entity: entity
+        play.get_distance = Play.get_distance
+        play.angle_from_direction = Play.angle_from_direction
+        play.is_path_blocked_angle = lambda *_args, **_kwargs: False
+
+        movement = play.showdown_follow_teammate(
+            [90, 90, 110, 110],
+            [(200, 100), (120, 220)],
+            [],
+        )
+
+        self.assertEqual(movement, 0.0)
+
+    def test_showdown_follow_teammate_uses_axis_option_when_diagonal_blocked(self):
+        play = object.__new__(Play)
+        play.get_player_pos = lambda _player: (100, 100)
+        play.get_enemy_pos = lambda entity: entity
+        play.get_distance = Play.get_distance
+        play.angle_from_direction = Play.angle_from_direction
+        blocked = {45.0}
+        play.is_path_blocked_angle = lambda _player, angle, _walls: round(angle, 1) in blocked
+
+        movement = play.showdown_follow_teammate(
+            [90, 90, 110, 110],
+            [(200, 200)],
+            [],
+        )
+
+        self.assertEqual(movement, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
