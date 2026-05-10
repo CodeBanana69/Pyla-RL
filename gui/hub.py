@@ -111,6 +111,19 @@ class Hub:
         self.bot_config.setdefault("rl_show_projectile_debug", "yes")
         self.bot_config.setdefault("rl_use_hp_drop_penalty", "no")
         self.bot_config.setdefault("showdown_playstyle_mode", "hide")
+        self.bot_config.setdefault("teammate_lock_max_jump", 320)
+        self.bot_config.setdefault("teammate_follow_step_distance", 8)
+        self.bot_config.setdefault("teammate_combat_bias", 0.75)
+        self.bot_config.setdefault("teammate_follow_force_direct", "yes")
+        self.bot_config.setdefault("teammate_marker_follow_enabled", "yes")
+        self.bot_config.setdefault("teammate_marker_edge_margin", 0.28)
+        self.bot_config.setdefault("jump_pad_detection_enabled", "yes")
+        self.bot_config.setdefault("jump_pad_escape_distance", 620)
+        self.bot_config.setdefault("jump_pad_escape_min_distance", 55)
+        self.bot_config.setdefault("jump_pad_escape_requires_edge", "yes")
+        self.bot_config.setdefault("jump_pad_escape_edge_margin", 0.22)
+        self.bot_config.setdefault("jump_pad_escape_teammate_safe_distance", 360)
+        self.bot_config.setdefault("jump_pad_smoke_early_distance", 230)
 
         # Time thresholds defaults
         self.time_tresholds.setdefault("state_check", 3)
@@ -1313,11 +1326,15 @@ class Hub:
             "follow": "Follow teammates",
         }
         reverse_style_labels = {label: key for key, label in style_labels.items()}
-        current_style = str(self.bot_config.get("showdown_playstyle_mode", "hide")).lower()
-        style_var = tk.StringVar(value=style_labels.get(current_style, style_labels["hide"]))
+        current_style = str(self.bot_config.get("showdown_playstyle_mode", "follow")).strip().lower()
+        if current_style not in style_labels:
+            current_style = "follow"
+            self.bot_config["showdown_playstyle_mode"] = current_style
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+        style_var = tk.StringVar(value=style_labels.get(current_style, style_labels["follow"]))
 
         def on_showdown_style_change(choice):
-            self.bot_config["showdown_playstyle_mode"] = reverse_style_labels.get(choice, "hide")
+            self.bot_config["showdown_playstyle_mode"] = reverse_style_labels.get(choice, "follow")
             save_dict_as_toml(self.bot_config, self.bot_config_path)
 
         style_menu = ctk.CTkOptionMenu(

@@ -224,7 +224,7 @@ def get_matchmaking_exit_button_center(image):
     return int(x + bx + bw / 2), int(y + by + bh / 2)
 
 
-def is_matchmaking_tip_visible(image):
+def is_matchmaking_players_found_visible(image):
     top = crop_scaled_region(image, [650, 95, 620, 140])
     if top.size == 0:
         return False
@@ -233,19 +233,44 @@ def is_matchmaking_tip_visible(image):
     return white_ratio > 0.035 and dark_ratio > 0.025
 
 
-def is_matchmaking_background_visible(image):
-    center = crop_scaled_region(image, [0, 0, 1920, 840])
-    if center.size == 0:
+def is_matchmaking_tip_visible(image):
+    bottom = crop_scaled_region(image, [330, 735, 1260, 285])
+    if bottom.size == 0:
         return False
-    red_ratio = mask_ratio(center, (0, 60, 65), (12, 255, 255)) + mask_ratio(center, (170, 60, 65), (179, 255, 255))
-    dark_ratio = mask_ratio(center, (0, 0, 0), (179, 255, 90))
-    return red_ratio > 0.12 and dark_ratio > 0.035
+    white_ratio = mask_ratio(bottom, (0, 0, 165), (179, 90, 255))
+    dark_ratio = mask_ratio(bottom, (0, 0, 0), (179, 255, 85))
+    return white_ratio > 0.045 and dark_ratio > 0.035
+
+
+def is_matchmaking_star_logo_visible(image):
+    logo = crop_scaled_region(image, [650, 235, 650, 520])
+    if logo.size == 0:
+        return False
+    yellow_ratio = mask_ratio(logo, (17, 75, 115), (43, 255, 255))
+    dark_ratio = mask_ratio(logo, (0, 0, 0), (179, 255, 85))
+    # The central matchmaking logo is both very yellow and heavily outlined.
+    return yellow_ratio > 0.08 and dark_ratio > 0.025
+
+
+def is_matchmaking_background_visible(image):
+    background = crop_scaled_region(image, [0, 0, 1920, 760])
+    moon = crop_scaled_region(image, [580, 0, 760, 560])
+    if background.size == 0 or moon.size == 0:
+        return False
+    blue_ratio = (
+        mask_ratio(background, (82, 35, 70), (125, 255, 255))
+        + mask_ratio(background, (126, 25, 55), (155, 190, 235))
+    )
+    pale_moon_ratio = mask_ratio(moon, (0, 0, 175), (179, 70, 255))
+    return blue_ratio > 0.22 and pale_moon_ratio > 0.12
 
 
 def is_in_match_making(image) -> bool:
     return (
         get_matchmaking_exit_button_center(image) is not None
+        and is_matchmaking_players_found_visible(image)
         and is_matchmaking_tip_visible(image)
+        and is_matchmaking_star_logo_visible(image)
         and is_matchmaking_background_visible(image)
     )
 
@@ -318,6 +343,56 @@ def get_starr_nova_got_it_button_center(image):
         return None
     _, bx, by, bw, bh = max(candidates, key=lambda item: item[0])
     return int(x0 + bx + bw / 2), int(y0 + by + bh / 2)
+
+
+def get_starr_nova_hub_back_button_center(image):
+    current_height, current_width = image.shape[:2]
+    width_ratio = current_width / orig_screen_width
+    height_ratio = current_height / orig_screen_height
+
+    back_crop = crop_scaled_region(image, [0, 0, 150, 115])
+    if back_crop.size == 0:
+        return None
+
+    hsv = cv2.cvtColor(back_crop, cv2.COLOR_BGR2HSV)
+    white_ratio = cv2.countNonZero(
+        cv2.inRange(hsv, np.array((0, 0, 180), dtype=np.uint8), np.array((179, 75, 255), dtype=np.uint8))
+    ) / max(1, back_crop.shape[0] * back_crop.shape[1])
+    dark_ratio = cv2.countNonZero(
+        cv2.inRange(hsv, np.array((0, 0, 0), dtype=np.uint8), np.array((179, 255, 130), dtype=np.uint8))
+    ) / max(1, back_crop.shape[0] * back_crop.shape[1])
+
+    if white_ratio < 0.055 or dark_ratio < 0.18:
+        return None
+
+    return int(65 * width_ratio), int(55 * height_ratio)
+
+
+def is_starr_nova_hub_screen(image):
+    if get_starr_nova_hub_back_button_center(image) is None:
+        return False
+
+    top_logo = crop_scaled_region(image, [135, 0, 750, 130])
+    event_timer = crop_scaled_region(image, [1120, 0, 560, 105])
+    skin_card = crop_scaled_region(image, [250, 70, 650, 210])
+    bottom_tabs = crop_scaled_region(image, [260, 880, 1400, 200])
+    if top_logo.size == 0 or event_timer.size == 0 or skin_card.size == 0 or bottom_tabs.size == 0:
+        return False
+
+    logo_white = mask_ratio(top_logo, (0, 0, 165), (179, 105, 255))
+    logo_cyan = mask_ratio(top_logo, (80, 70, 110), (105, 255, 255))
+    timer_magenta = mask_ratio(event_timer, (140, 80, 110), (172, 255, 255))
+    timer_cyan = mask_ratio(event_timer, (82, 70, 110), (102, 255, 255))
+    timer_black = mask_ratio(event_timer, (0, 0, 0), (179, 255, 70))
+    card_cyan = mask_ratio(skin_card, (80, 70, 110), (105, 255, 255))
+    card_pink = mask_ratio(skin_card, (135, 70, 110), (172, 255, 255))
+    bottom_yellow = mask_ratio(bottom_tabs, (18, 80, 120), (42, 255, 255))
+    bottom_magenta = mask_ratio(bottom_tabs, (135, 80, 110), (172, 255, 255))
+
+    top_event_anchor = timer_black > 0.16 and timer_magenta > 0.004 and timer_cyan > 0.004
+    skin_anchor = card_cyan > 0.012 and card_pink > 0.006
+    bottom_anchor = bottom_yellow > 0.008 or bottom_magenta > 0.012
+    return logo_white > 0.025 and logo_cyan > 0.003 and top_event_anchor and (skin_anchor or bottom_anchor)
 
 
 def is_starr_nova_info_screen(image):

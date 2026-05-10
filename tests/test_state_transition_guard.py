@@ -96,6 +96,48 @@ class StateTransitionGuardTests(unittest.TestCase):
             "lobby",
         )
 
+    def test_matchmaking_is_only_allowed_after_lobby_or_start_press(self):
+        self.assertEqual(
+            normalize_detected_state(
+                "match_making",
+                previous_state="match",
+                match_launch_pending=False,
+            ),
+            "match",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "match_making",
+                previous_state=None,
+                match_launch_pending=False,
+            ),
+            "match",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "match_making",
+                previous_state="lobby",
+                match_launch_pending=False,
+            ),
+            "match_making",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "match_making",
+                previous_state="match",
+                match_launch_pending=True,
+            ),
+            "match_making",
+        )
+        self.assertEqual(
+            normalize_detected_state(
+                "match_making",
+                previous_state="match_making",
+                match_launch_pending=True,
+            ),
+            "match_making",
+        )
+
     def test_star_drop_is_blocked_unless_previous_state_was_post_match_reward_chain(self):
         for previous_state in ("match", "match_making", "shop", "lobby", None):
             with self.subTest(previous_state=previous_state):

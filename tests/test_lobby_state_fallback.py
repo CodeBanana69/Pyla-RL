@@ -7,11 +7,13 @@ from state_finder import (
     get_in_game_state,
     get_matchmaking_exit_button_center,
     get_starr_nova_got_it_button_center,
+    get_starr_nova_hub_back_button_center,
     is_in_match_making,
     is_lobby_currency_bar_visible,
     is_lobby_hud_visible,
     is_lobby_quests_button_visible,
     is_lobby_play_button_visible,
+    is_starr_nova_hub_screen,
     is_starr_nova_info_screen,
 )
 
@@ -69,16 +71,77 @@ class LobbyStateFallbackTests(unittest.TestCase):
         image[942:972, 855:1070] = (25, 25, 25)
 
     @staticmethod
-    def draw_matchmaking_screen(image):
-        red_bg = cv2.cvtColor(
-            np.full((1, 1, 3), (3, 155, 140), dtype=np.uint8),
+    def draw_starr_nova_hub_screen(image):
+        cyan_bgr = cv2.cvtColor(
+            np.full((1, 1, 3), (90, 220, 230), dtype=np.uint8),
             cv2.COLOR_HSV2BGR,
         )[0, 0]
-        image[:] = red_bg
-        image[0:840, :] = red_bg
-        for x in range(0, 1920, 220):
-            cv2.line(image, (x, 0), (x + 520, 840), (12, 12, 35), 10)
+        pink_bgr = cv2.cvtColor(
+            np.full((1, 1, 3), (150, 210, 230), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        yellow_bgr = cv2.cvtColor(
+            np.full((1, 1, 3), (28, 220, 230), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        image[:] = (214, 214, 214)
+        for x in range(0, 1920, 280):
+            cv2.line(image, (x, 0), (x + 280, 1080), (165, 165, 165), 6)
+        image[0:115, 0:150] = (48, 56, 74)
+        cv2.polylines(
+            image,
+            [np.array([(82, 18), (34, 56), (82, 96)], dtype=np.int32)],
+            False,
+            (245, 245, 245),
+            18,
+        )
+        image[12:105, 180:820] = (245, 245, 245)
+        image[25:92, 210:790] = cyan_bgr
+        image[0:95, 1120:1660] = (8, 8, 8)
+        image[8:45, 1340:1580] = pink_bgr
+        image[45:83, 1320:1525] = cyan_bgr
+        image[92:250, 330:850] = (245, 245, 245)
+        image[112:225, 360:820] = cyan_bgr
+        image[125:175, 555:760] = pink_bgr
+        image[900:1065, 1250:1720] = yellow_bgr
+        image[900:1065, 350:620] = pink_bgr
+
+    @staticmethod
+    def draw_matchmaking_screen(image):
+        blue_bg = cv2.cvtColor(
+            np.full((1, 1, 3), (100, 150, 205), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        deep_blue = cv2.cvtColor(
+            np.full((1, 1, 3), (118, 150, 110), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        yellow_bgr = cv2.cvtColor(
+            np.full((1, 1, 3), (28, 225, 245), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        image[:] = blue_bg
+        image[0:760, :] = blue_bg
+        cv2.circle(image, (960, 180), 360, (236, 248, 248), -1)
+        image[240:760, :] = np.maximum(image[240:760, :], deep_blue)
         image[120:210, 720:1190] = (245, 245, 245)
+        image[112:220, 710:1200] = np.minimum(image[112:220, 710:1200], 40)
+        image[125:205, 725:1185] = (245, 245, 245)
+        star_points = np.array(
+            [
+                (960, 250), (1030, 360), (1160, 360), (1060, 450),
+                (1110, 590), (960, 520), (810, 590), (860, 450),
+                (760, 360), (890, 360),
+            ],
+            dtype=np.int32,
+        )
+        cv2.fillPoly(image, [star_points], yellow_bgr.tolist())
+        cv2.polylines(image, [star_points], True, (10, 10, 10), 24)
+        cv2.circle(image, (960, 425), 120, (10, 10, 10), -1)
+        cv2.circle(image, (960, 425), 95, yellow_bgr.tolist(), -1)
+        image[780:895, 430:1490] = (245, 245, 245)
+        image[770:905, 420:1500] = np.minimum(image[770:905, 420:1500], 40)
+        image[785:890, 435:1485] = (245, 245, 245)
         exit_template = cv2.imread("images/states/exit_match_making.png")
         th, tw = exit_template.shape[:2]
         image[954:954 + th, 1636:1636 + tw] = exit_template
@@ -174,6 +237,31 @@ class LobbyStateFallbackTests(unittest.TestCase):
 
         self.assertFalse(is_starr_nova_info_screen(image))
 
+    def test_starr_nova_hub_screen_detects_back_button(self):
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        self.draw_starr_nova_hub_screen(image)
+
+        center = get_starr_nova_hub_back_button_center(image)
+
+        self.assertIsNotNone(center)
+        self.assertTrue(is_starr_nova_hub_screen(image))
+        self.assertTrue(45 <= center[0] <= 85)
+        self.assertTrue(40 <= center[1] <= 75)
+
+    def test_starr_nova_hub_screen_rejects_plain_back_button(self):
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        image[0:115, 0:150] = (48, 56, 74)
+        cv2.polylines(
+            image,
+            [np.array([(82, 18), (34, 56), (82, 96)], dtype=np.int32)],
+            False,
+            (245, 245, 245),
+            18,
+        )
+
+        self.assertIsNotNone(get_starr_nova_hub_back_button_center(image))
+        self.assertFalse(is_starr_nova_hub_screen(image))
+
     def test_matchmaking_screen_is_own_state(self):
         image = np.zeros((1080, 1920, 3), dtype=np.uint8)
         self.draw_matchmaking_screen(image)
@@ -192,6 +280,16 @@ class LobbyStateFallbackTests(unittest.TestCase):
         )[0, 0]
         image[935:1045, 1625:1890] = red_button
         image[960:1018, 1710:1845] = (250, 250, 250)
+
+        self.assertFalse(is_in_match_making(image))
+        self.assertNotEqual(get_in_game_state(image), "match_making")
+
+    def test_matchmaking_rejects_exit_button_without_unique_screen_anchors(self):
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        exit_template = cv2.imread("images/states/exit_match_making.png")
+        th, tw = exit_template.shape[:2]
+        image[954:954 + th, 1636:1636 + tw] = exit_template
+        image[120:210, 720:1190] = (245, 245, 245)
 
         self.assertFalse(is_in_match_making(image))
         self.assertNotEqual(get_in_game_state(image), "match_making")
