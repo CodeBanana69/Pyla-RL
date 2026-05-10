@@ -4,9 +4,15 @@ import time
 import cv2
 import numpy as np
 
-from typization import BrawlerName
 from state_finder import get_state
-from utils import extract_text_and_positions, count_hsv_pixels, load_toml_as_dict, find_template_center
+from utils import (
+    extract_text_and_positions,
+    extract_text_strings,
+    count_hsv_pixels,
+    load_toml_as_dict,
+    find_template_center,
+    resolve_brawler_name_alias,
+)
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 gray_pixels_treshold = load_toml_as_dict("./cfg/bot_config.toml")['idle_pixels_minimum']
@@ -48,10 +54,12 @@ class LobbyAutomation:
 
         x, y = self.coords_cfg['lobby']['brawler_btn'][0]*wr, self.coords_cfg['lobby']['brawler_btn'][1]*hr
         self.window_controller.click(x, y)
+        time.sleep(0.6)
         c = 0
         found_brawler = False
         for i in range(50):
             screenshot_full = self.window_controller.screenshot()
+            full_h = screenshot_full.shape[0]
             screenshot = cv2.resize(
                 screenshot_full,
                 (int(screenshot_full.shape[1] * ocr_scale), int(screenshot_full.shape[0] * ocr_scale)),
@@ -81,15 +89,59 @@ class LobbyAutomation:
                 click_x = int(x / ocr_scale)
                 # EasyOCR returns the text label center, not the card/icon center.
                 # Tapping above the label avoids selecting the brawler in the row below.
-                click_y = int((y / ocr_scale) - (95 * hr))
-                click_y = max(0, min(screenshot_full.shape[0] - 1, click_y))
+                y_offset = int(full_h * 0.088)
+                click_y = int((y / ocr_scale) - y_offset)
+                click_y = max(0, min(full_h - 1, click_y))
                 self.window_controller.click(click_x, click_y)
-                print("Found brawler ", brawler, f"(OCR: {detected_name}) clicking on its icon at ", click_x, click_y)
-                time.sleep(1)
+                print(f"Found brawler {brawler} (OCR: {detected_name}) clicking icon at ({click_x}, {click_y}), y_offset={y_offset}")
+                time.sleep(1.0)
+
+                verify_screenshot = self.window_controller.screenshot()
+                verify_state = get_state(verify_screenshot)
+                card_is_open = verify_state in ("brawler_selection", "shop")
+                if not card_is_open:
+                    try:
+                        select_words = {"select", "selegt", "selec", "selct", "selert"}
+                        card_is_open = any(
+                            self.normalize_ocr_name(text) in select_words
+                            for text in extract_text_strings(verify_screenshot)
+                        )
+                        if card_is_open:
+                            print(f"Brawler card detected by SELECT text (state was {verify_state}).")
+                    except Exception:
+                        pass
+
+                if not card_is_open:
+                    print(f"Brawler card did not open after tap (state={verify_state}); retrying without scrolling.")
+                    time.sleep(0.5)
+                    continue
+
+                card_crop = verify_screenshot[
+                    int(full_h * 0.05):int(full_h * 0.22),
+                    0:verify_screenshot.shape[1],
+                ]
+                try:
+                    card_texts = extract_text_strings(card_crop)
+                except Exception:
+                    card_texts = []
+                card_name_match = any(
+                    self.names_match(self.normalize_ocr_name(text), target_key)
+                    for text in card_texts
+                ) if card_texts else True
+
+                if not card_name_match:
+                    print(f"Card OCR shows {card_texts} but expected '{brawler}'; re-tapping with adjusted offset.")
+                    self.press_back()
+                    time.sleep(0.5)
+                    click_y = int((y / ocr_scale) - int(full_h * 0.04))
+                    click_y = max(0, min(full_h - 1, click_y))
+                    self.window_controller.click(click_x, click_y)
+                    time.sleep(1.0)
+
                 select_x, select_y = self.coords_cfg['lobby']['select_btn'][0], self.coords_cfg['lobby']['select_btn'][1]
                 self.window_controller.click(select_x, select_y, already_include_ratio=False)
                 time.sleep(0.5)
-                print("Selected brawler ", brawler)
+                print(f"Selected brawler {brawler}")
                 found_brawler = True
                 break
             if c == 0:
@@ -167,14 +219,7 @@ class LobbyAutomation:
         or returns the original string
         """
 
-        matched_typo: str | None = {
-            'shey': BrawlerName.Shelly.value,
-            'shlly': BrawlerName.Shelly.value,
-            'larryslawrie': BrawlerName.Larry.value,
-            '[eon': BrawlerName.Leon.value,
-        }.get(potential_brawler_name, None)
-
-        return matched_typo or potential_brawler_name
+        return resolve_brawler_name_alias(potential_brawler_name)
 
     @staticmethod
     def normalize_ocr_name(value: str) -> str:

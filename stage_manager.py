@@ -657,6 +657,8 @@ class StageManager:
         print("Game has ended", current_state)
 
     def quit_shop(self):
+        if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
+            return
         self.window_controller.click(100*self.window_controller.width_ratio, 60*self.window_controller.height_ratio)
 
     def close_pop_up(self):

@@ -49,6 +49,59 @@ class CombatAdaptationTests(unittest.TestCase):
         self.assertEqual(self.movement.movement_to_vector("wd"), (1, -1))
         self.assertEqual(self.movement.movement_to_vector("as"), (-1, 1))
 
+    def test_playstyle_env_exposes_biomistik_helpers(self):
+        play = object.__new__(Play)
+        play.playstyle_code = compile(
+            "movement = 270.0 if angle_to_keys(270) == 'W' and get_distance((0, 0), (3, 4)) == 5.0 else None",
+            "<test_playstyle>",
+            "exec",
+        )
+        play.time_since_holding_attack = None
+        play.TILE_SIZE = 60
+        play.brawlers_info = {}
+        play.game_mode = 3
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.is_hypercharge_ready = False
+        play.should_use_gadget = False
+        play.is_gadget_ready = False
+        play.is_super_ready = False
+        play.attack = lambda *args, **kwargs: True
+        play.use_hypercharge = lambda: True
+        play.use_gadget = lambda: True
+        play.use_super = lambda: True
+        play.clear_ability_ready = lambda _ability: None
+        play.should_use_super_on_enemy = lambda *args, **kwargs: False
+        play.must_brawler_hold_attack = lambda *args, **kwargs: False
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play.get_entity_pos = lambda _entity: (50, 50)
+        play.is_there_enemy = lambda _enemy: False
+        play.is_there_poison_gas = lambda *_args, **_kwargs: False
+        play.no_enemy_movement = lambda *_args, **_kwargs: "W"
+        play.find_closest_enemy = lambda *_args, **_kwargs: (None, None)
+        play.find_closest_teammate = lambda *_args, **_kwargs: (None, None)
+        play.get_horizontal_move_key = lambda *_args, **_kwargs: "D"
+        play.get_vertical_move_key = lambda *_args, **_kwargs: "W"
+        play.is_path_blocked = lambda *_args, **_kwargs: False
+        play.is_path_blocked_angle = lambda *_args, **_kwargs: False
+        play.is_enemy_hittable = lambda *_args, **_kwargs: False
+        play.walls_block_line_of_sight = lambda *_args, **_kwargs: False
+        play.aimed_attack = lambda *_args, **_kwargs: True
+        play.get_distance = Play.get_distance
+        play.angle_from_direction = lambda *_args, **_kwargs: 0.0
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.blend_angles = lambda primary, *_args, **_kwargs: primary
+        play.lead_shot_angle = lambda *_args, **_kwargs: 0.0
+        play.track_enemy_velocity = lambda *_args, **_kwargs: (0.0, 0.0)
+        play.detect_wall_stuck = lambda *_args, **_kwargs: False
+        play.start_semicircle_escape = lambda *_args, **_kwargs: None
+        play.semicircle_escape_step = lambda *_args, **_kwargs: None
+        play._playstyle_error_reported = False
+
+        movement = play.run_playstyle([0, 0, 100, 100], [], [], "shelly")
+
+        self.assertEqual(movement, 270.0)
+
 
 if __name__ == "__main__":
     unittest.main()

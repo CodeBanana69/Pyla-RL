@@ -775,7 +775,7 @@ class Play(Movement):
         self.wall_history = []
         self.wall_history_length = int(bot_config.get("wall_history_length", 3))
         self.scene_data = []
-        self.should_detect_walls = bot_config["gamemode"] in ["brawlball", "brawl_ball", "brawll ball", "showdown"]
+        self.should_detect_walls = bot_config["gamemode"] == "showdown"
         self.is_showdown = bot_config["gamemode"] == "showdown"
         self.minimum_movement_delay = bot_config["minimum_movement_delay"]
         self.no_detection_proceed_delay = time_config["no_detection_proceed"]
@@ -1001,7 +1001,7 @@ class Play(Movement):
                 self.clear_ability_ready("hypercharge")
 
         def use_gadget_wrapper():
-            if self.should_use_gadget:
+            if self.should_use_gadget_on_enemy(brawler, player_data, enemy_data, walls):
                 if self.use_gadget():
                     self.time_since_gadget_checked = time.time()
                     self.clear_ability_ready("gadget")
@@ -1058,7 +1058,32 @@ class Play(Movement):
             "get_horizontal_move_key": self.get_horizontal_move_key,
             "get_vertical_move_key": self.get_vertical_move_key,
             "is_path_blocked": self.is_path_blocked,
+            "is_path_blocked_angle": self.is_path_blocked_angle,
             "is_enemy_hittable": self.is_enemy_hittable,
+            "walls_block_line_of_sight": self.walls_block_line_of_sight,
+            "aimed_attack": self.aimed_attack,
+            "get_distance": self.get_distance,
+            "get_random_movement": lambda: random.choice(["WA", "WD", "SA", "SD", "W", "A", "S", "D"]),
+            "TILE_SIZE": self.TILE_SIZE,
+            "width": brawl_stars_width,
+            "height": brawl_stars_height,
+            "math": math,
+            "angle_from_direction": self.angle_from_direction,
+            "find_best_angle": self.find_best_angle,
+            "blend_angles": self.blend_angles,
+            "lead_shot_angle": self.lead_shot_angle,
+            "track_enemy_velocity": self.track_enemy_velocity,
+            "angle_to_keys": lambda angle: [
+                "D", "SD", "S", "SA", "A", "WA", "W", "WD"
+            ][int((float(angle) % 360 + 22.5) / 45) % 8],
+            "detect_wall_stuck": lambda is_moving: self.detect_wall_stuck(
+                walls,
+                self.get_player_pos(player_data),
+                bool(is_moving),
+                time.time(),
+            ),
+            "start_escape": lambda angle: self.start_semicircle_escape(float(angle), time.time()),
+            "escape_step": lambda: self.semicircle_escape_step(time.time()),
         }
 
         try:
@@ -1786,16 +1811,10 @@ class Play(Movement):
             enemy_hittable = self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
             vlog(f"enemy in attack range (dist={int(enemy_distance)}px, range={attack_range}px), hittable={enemy_hittable}")
             if enemy_hittable:
-                if self.should_use_gadget and self.is_gadget_ready and self.time_since_holding_attack is None:
-                    enemies_in_range = sum(
-                        1 for enemy in (enemy_data or [])
-                        if self.get_distance(self.get_enemy_pos(enemy), player_pos) <= attack_range
-                    )
-                    gadget_threshold = attack_range if enemies_in_range >= 2 else attack_range * 0.7
-                    if enemy_distance <= gadget_threshold:
-                        if self.use_gadget():
-                            self.time_since_gadget_checked = time.time()
-                            self.clear_ability_ready("gadget")
+                if self.should_use_gadget_on_enemy(brawler, player_data, enemy_data, walls):
+                    if self.use_gadget():
+                        self.time_since_gadget_checked = time.time()
+                        self.clear_ability_ready("gadget")
 
                 if not must_brawler_hold_attack:
                     attack_angle = toward_angle
@@ -2403,6 +2422,28 @@ class Play(Movement):
             return True
         return False
 
+    def should_use_gadget_on_enemy(self, brawler, player_data, enemy_data, walls):
+        if not self.should_use_gadget or not self.is_gadget_ready or self.time_since_holding_attack is not None:
+            return False
+        if not enemy_data:
+            return False
+
+        player_pos = self.get_player_pos(player_data)
+        enemy_coords, enemy_distance = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
+        if enemy_coords is None:
+            return False
+
+        _, attack_range, _ = self.get_brawler_range(brawler)
+        enemies_in_range = sum(
+            1
+            for enemy in (enemy_data or [])
+            if self.get_distance(self.get_enemy_pos(enemy), player_pos) <= attack_range
+        )
+        gadget_threshold = attack_range if enemies_in_range >= 2 else attack_range * 0.7
+        if enemy_distance > gadget_threshold:
+            return False
+        return self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
+
     def remember_ability_ready(self, ability_name, detected_ready, current_time):
         seen_attr = f"_{ability_name}_ready_seen_at"
         if detected_ready:
@@ -2580,7 +2621,7 @@ class Play(Movement):
             return []
         current_walls = self.wall_history[-1]
         historical_walls = [wall for walls in self.wall_history for wall in walls]
-        stable_history = self.merge_wall_boxes(historical_walls, min_hits=max(2, self.wall_history_min_hits))
+        stable_history = self.merge_wall_boxes(historical_walls, min_hits=max(1, self.wall_history_min_hits))
         return self.merge_wall_boxes(current_walls + stable_history)
 
     def get_movement(self, player_data, enemy_data, walls, brawler):
@@ -2669,7 +2710,7 @@ class Play(Movement):
                         safe_range,
                     )
                     movement = self.find_best_angle(player_pos, desired, walls)
-                if self.should_use_gadget == True and self.is_gadget_ready and self.time_since_holding_attack is None:
+                if self.should_use_gadget_on_enemy(brawler, player_data, enemy_data, walls):
                     if self.use_gadget():
                         self.time_since_gadget_checked = time.time()
                         self.clear_ability_ready("gadget")

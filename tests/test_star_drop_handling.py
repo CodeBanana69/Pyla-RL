@@ -84,6 +84,21 @@ class StarDropHandlingTests(unittest.TestCase):
         self.assertEqual(get_star_drop_type(image), "daily_hold")
         self.assertEqual(get_in_game_state(image), "daily_star_drop")
 
+    def test_starr_nova_template_uses_long_press_type(self):
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        template_path = Path("images/star_drop_types/starr_nova_star_drop.png")
+        template = cv2.imread(str(template_path))
+        self.assertIsNotNone(template)
+
+        x, y, w, h = 790, 350, 350, 350
+        th, tw = template.shape[:2]
+        px = x + (w - tw) // 2
+        py = y + (h - th) // 2
+        image[py:py + th, px:px + tw] = template
+
+        self.assertEqual(get_star_drop_type(image), "daily_hold")
+        self.assertEqual(get_in_game_state(image), "star_drop")
+
     @patch("stage_manager.time.sleep", return_value=None)
     @patch("stage_manager.get_star_drop_type", return_value="daily_hold")
     def test_daily_wins_tap_and_hold_drop_uses_long_clicks(self, *_):

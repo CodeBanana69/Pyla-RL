@@ -136,6 +136,34 @@ class SuperUsageTests(unittest.TestCase):
         self.assertTrue(play.is_gadget_ready)
         self.assertTrue(play.is_super_ready)
 
+    def test_gadget_waits_for_near_hittable_enemy(self):
+        play = Play.__new__(Play)
+        play.should_use_gadget = True
+        play.is_gadget_ready = True
+        play.time_since_holding_attack = None
+        play.get_player_pos = lambda _player_data: (0, 0)
+        play.find_closest_enemy = lambda *_args, **_kwargs: ((80, 0), 80)
+        play.get_brawler_range = lambda _brawler: (100, 100, 100)
+        play.get_enemy_pos = lambda enemy: enemy
+        play.get_distance = Play.get_distance
+        play.is_enemy_hittable = lambda *_args, **_kwargs: True
+
+        self.assertFalse(play.should_use_gadget_on_enemy("shelly", [0, 0, 10, 10], [(80, 0)], []))
+
+    def test_gadget_uses_on_close_hittable_enemy(self):
+        play = Play.__new__(Play)
+        play.should_use_gadget = True
+        play.is_gadget_ready = True
+        play.time_since_holding_attack = None
+        play.get_player_pos = lambda _player_data: (0, 0)
+        play.find_closest_enemy = lambda *_args, **_kwargs: ((60, 0), 60)
+        play.get_brawler_range = lambda _brawler: (100, 100, 100)
+        play.get_enemy_pos = lambda enemy: enemy
+        play.get_distance = Play.get_distance
+        play.is_enemy_hittable = lambda *_args, **_kwargs: True
+
+        self.assertTrue(play.should_use_gadget_on_enemy("shelly", [0, 0, 10, 10], [(60, 0)], []))
+
     def test_super_ready_detection_rejects_color_outside_button_crop(self):
         play = Play.__new__(Play)
         play.window_controller = FakeWindow()

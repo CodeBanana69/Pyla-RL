@@ -29,6 +29,11 @@ class PushAll1kSelectionTest(unittest.TestCase):
 
         self.assertEqual(brawler, "mina")
 
+    def test_ocr_match_uses_names_alias_file(self):
+        brawler = SelectBrawler._match_brawler_from_ocr_texts(["larrys lawrie"], ["larry & lawrie", "leon"])
+
+        self.assertEqual(brawler, "larry & lawrie")
+
     def test_selected_game_brawler_moves_to_front_and_flags_update(self):
         data = [
             {"brawler": "meg", "automatically_pick": False, "trophies": 0},

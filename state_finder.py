@@ -678,6 +678,8 @@ def get_star_drop_type(image):
                 return "angelic"
             if image_filename == "demonic_star_drop.png":
                 return "demonic"
+            if image_filename == "starr_nova_star_drop.png":
+                return "daily_hold"
             if not has_standard_star_drop_screen_context(image):
                 return None
             return "standard"

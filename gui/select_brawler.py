@@ -17,6 +17,7 @@ from utils import (
     load_brawl_stars_api_config,
     load_toml_as_dict,
     normalize_brawler_name,
+    resolve_brawler_name_alias,
     save_brawler_icon,
     get_dpi_scale,
 )
@@ -287,10 +288,11 @@ class SelectBrawler:
         best_score = 0.0
         known_names = [(brawler, normalize_brawler_name(brawler)) for brawler in known_brawlers]
         for raw_text in texts:
-            normalized_text = normalize_brawler_name(raw_text)
+            normalized_text = resolve_brawler_name_alias(raw_text)
             if not normalized_text:
                 continue
             for brawler, normalized_brawler in known_names:
+                normalized_brawler = resolve_brawler_name_alias(normalized_brawler)
                 if normalized_text == normalized_brawler:
                     return brawler
                 if normalized_brawler in normalized_text or normalized_text in normalized_brawler:
