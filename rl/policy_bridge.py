@@ -330,7 +330,18 @@ class RLMovementBridge:
             dmg_hit = hm.recent_damage_event(current_time, win) is not None
 
         cross = getattr(play, "cross_reference_projectile_hits", True)
-        projectile_hit = (tracker_hit and dmg_hit) if cross else tracker_hit
+        use_intercept = bool(
+            cross
+            and getattr(play, "intercept_confirm_enabled", True)
+        )
+        hc = getattr(play, "hit_confirmer", None)
+        if cross and use_intercept and hc is not None:
+            win = float(getattr(play, "damage_confirm_window_seconds", 0.5))
+            projectile_hit = hc.is_recent_confirmed_hit(current_time, win)
+        elif cross:
+            projectile_hit = (tracker_hit and dmg_hit)
+        else:
+            projectile_hit = tracker_hit
 
         # Compute reward in both training and inference so the score line
         # reflects what the policy is doing right now.

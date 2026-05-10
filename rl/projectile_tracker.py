@@ -171,6 +171,43 @@ class ProjectileTrack:
             self.cy + self.half_h + padding,
         )
 
+    def time_to_player_box(
+        self,
+        player_box: Sequence[float],
+        *,
+        padding: float = 0.0,
+        max_seconds: float = 1.0,
+        step_seconds: float = 0.02,
+    ) -> Optional[float]:
+        """Earliest time (seconds) until expanded hitbox overlaps player, or None.
+
+        Forward-Euler along smoothed velocity from the current center/box size.
+        """
+        if max_seconds <= 0 or step_seconds <= 0:
+            return None
+        pb = player_box
+        if len(pb) < 4:
+            return None
+        speed = math.hypot(self.vx, self.vy)
+        if speed < 1e-6:
+            return None
+        t_acc = 0.0
+        cx, cy = self.cx, self.cy
+        hw, hh = self.half_w, self.half_h
+        while t_acc <= max_seconds + 1e-9:
+            proj = (
+                cx - hw - padding,
+                cy - hh - padding,
+                cx + hw + padding,
+                cy + hh + padding,
+            )
+            if _boxes_overlap(pb, proj):
+                return float(t_acc)
+            cx += self.vx * step_seconds
+            cy += self.vy * step_seconds
+            t_acc += step_seconds
+        return None
+
     def alignment_to_player(self, player_pos: Tuple[float, float]) -> float:
         """Cosine of the angle between velocity and (player - projectile).
 
@@ -768,3 +805,35 @@ class ProjectileTracker:
             ):
                 return True
         return False
+
+    def pending_intercepts(
+        self,
+        player_box: Sequence[float],
+        _now: float,
+        max_lookahead_seconds: float,
+        *,
+        padding: float = 0.0,
+        min_streak: int = 1,
+    ) -> List[Tuple[int, float]]:
+        """Incoming-promoted tracks with ETA to player box within the horizon."""
+        if len(player_box) < 4 or max_lookahead_seconds <= 0:
+            return []
+        player_cx = (float(player_box[0]) + float(player_box[2])) * 0.5
+        player_cy = (float(player_box[1]) + float(player_box[3])) * 0.5
+        player_pos = (player_cx, player_cy)
+        out: List[Tuple[int, float]] = []
+        ms = max(1, int(min_streak))
+        for tr in self.incoming_tracks(player_pos):
+            if tr.match_streak < ms:
+                continue
+            eta = tr.time_to_player_box(
+                player_box,
+                padding=padding,
+                max_seconds=max_lookahead_seconds,
+            )
+            if eta is None:
+                continue
+            out.append((int(tr.track_id), float(eta) + 0.0))
+        # Stable sort: soonest ETA first
+        out.sort(key=lambda x: x[1])
+        return out

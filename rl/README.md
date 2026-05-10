@@ -28,6 +28,46 @@ Why this fork exists:
 | `rl_projectile_classes`       | `["projectile","super","bullet","enemy_shot"]` | Detector class names that the projectile tracker treats as incoming hazards. Add/remove names here to match the names the YOLO model emits.                                                                                                                                                      |
 | `rl_combat_blend_dodge`       | `"yes"`                                        | When in attack range, still blend the existing `apply_combat_dodge` strafe on top of the RL angle so attacks look natural.                                                                                                                                                                       |
 
+### Projectile tracking backend (`cfg/bot_config.toml`)
+
+| Key | Default | Effect |
+| --- | ------- | ------ |
+| `projectile_tracker_backend` | `"bytetrack"` | `"bytetrack"` uses [`supervision`](https://github.com/roboflow/supervision) `ByteTrack` (`rl/byte_projectile_tracker.py`). `"greedy"` uses the legacy greedy matcher in [`rl/projectile_tracker.py`](../rl/projectile_tracker.py). If `supervision` is missing, the bot logs once and falls back to greedy. |
+| `projectile_bytetrack_high_thresh` | `0.5` | ByteTrack `track_activation_threshold` — detections above this take the high-score association path. |
+| `projectile_bytetrack_low_thresh` | `0.1` | Reserved (library lower bound for low-score path is fixed in `supervision`); kept for future tuning. |
+| `projectile_bytetrack_match_thresh` | `0.8` | ByteTrack `minimum_matching_threshold` for IoU matching. |
+| `projectile_bytetrack_lost_seconds` | `0.5` | Converted to `lost_track_buffer` frames via `projectile_bytetrack_frame_rate`. |
+| `projectile_bytetrack_frame_rate` | `30` | Nominal FPS passed to ByteTrack (lost-buffer scaling). |
+
+Synthetic per-detector confidences are assigned before ByteTrack: `labeled=0.85`, `residual=0.55`, `motion=0.40` so YOLO boxes stay in the high path and motion blobs can use the low path.
+
+### Intercept confirmation (`cfg/bot_config.toml`)
+
+When **`cross_reference_projectile_hits = "yes"`** and **`intercept_confirm_enabled = "yes"`**, RL damage uses [`HitConfirmer`](../rl/hit_confirmer.py): each frame the tracker exposes `pending_intercepts` (incoming tracks with an ETA to overlap the player box). Expected wall-clock hit time is `now + eta`. A [`DamageEvent`](../rl/health_monitor.py) within **`intercept_confirm_tolerance_seconds`** of that time confirms the paired track (`confidence_confirmed`) and feeds `projectile_hit` via recent confirmations — **not** the older `is_player_hit AND recent_damage_event` boolean.
+
+| Key | Default | Effect |
+| --- | ------- | ------ |
+| `intercept_confirm_enabled` | `"yes"` | Master switch (also hub checkbox). Requires `cross_reference_projectile_hits = "yes"` to take effect. |
+| `intercept_confirm_tolerance_seconds` | `0.30` | Max \|predicted hit time − damage time\| for a match. |
+| `intercept_confirm_max_lookahead_seconds` | `1.00` | Horizon for `ProjectileTrack.time_to_player_box` when building intercepts. |
+| `intercept_confirm_min_streak` | `2` | Minimum `match_streak` for an intercept to count (same idea as promotion). |
+
+```mermaid
+sequenceDiagram
+    participant Play as Play.update_projectile_tracker
+    participant HM as HealthMonitor
+    participant PT as ProjectileTracker
+    participant HC as HitConfirmer
+    Play->>HM: update HP strip
+    HM-->>Play: optional DamageEvent
+    Play->>PT: update detections
+    PT-->>Play: tracks
+    Play->>HC: record_damage
+    Play->>HC: record_pending_intercepts
+    Play->>HC: confirm
+    HC->>PT: confidence_confirmed on match
+```
+
 ### Health bar, damage events, red flash, cross-reference (`cfg/bot_config.toml`)
 
 These tighten projectile **perception** and the RL **hit signal** when motion/residual layers hallucinate hits during damage flashes or UI tint.
@@ -35,18 +75,24 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 | Key | Default | Effect |
 | --- | ------- | ------ |
 | `health_bar_band_offset_px` | `8` | Vertical offset from player box top to HP strip (scaled by window scale factor). |
-| `health_bar_band_height_px` | `14` | Height of HSV strip used for green vs red fill ratio. |
-| `health_bar_min_total_pixels` | `40` | Minimum green+red pixels for a valid HP reading. |
+| `health_bar_band_height_px` | `14` | Height of HSV strip used for fill ratio. |
+| `health_bar_search_height_px` | `40` | Vertical search window above the player to auto-align the HP strip when the fixed offset is slightly off. |
+| `health_bar_yellow_enabled` | `"yes"` | Count yellow/orange HSV as “alive” HP fill (low HP). |
+| `health_bar_shield_enabled` | `"yes"` | Count cyan HSV as “alive” (shield overlay). |
+| `health_bar_min_total_pixels` | `40` | Minimum colored pixels for a valid HP reading. |
+| `health_bar_min_consecutive_drops` | `2` | Consecutive frames below the prior-window max (by threshold) before emitting a `DamageEvent` (reduces single-frame flicker). |
 | `health_ocr_enabled` | `"yes"` | Optional EasyOCR read of numeric HP (throttled); drives `hp_value` / `observed_max_hp` for debug. |
 | `health_ocr_interval_seconds` | `0.5` | Minimum time between OCR passes. |
+| `health_ocr_validate_against_hsv` | `"yes"` | If OCR fraction and HSV disagree by >25%, `last_hp_status = inconsistent` and HSV is trusted for logic. |
+| `health_ocr_max_relative_jump` | `0.4` | Reject OCR readings that jump more than this fraction vs the previous accepted value. |
 | `damage_hp_drop_threshold_pct` | `0.015` | Emit a damage event when valid HP% drops more than this vs rolling max in the prior ~0.4 s window. |
 | `damage_confirm_window_seconds` | `0.5` | Lookback for “recent damage” when confirming tracks and when gating RL hits. |
 | `red_flash_detect_enabled` | `"yes"` | Enable full-frame red-dominance spike detector (`rl/red_flash.py`). |
 | `red_flash_red_dom_threshold` | `1.40` | Flash when `mean(R) / (0.5*(mean(G)+mean(B)))` exceeds baseline × this factor. |
 | `red_flash_baseline_alpha` | `0.1` | EMA smoothing for the baseline when not flashing. |
-| `cross_reference_projectile_hits` | `"yes"` | If `"yes"`, RL `projectile_hit` reward requires **both** `ProjectileTracker.is_player_hit` **and** a recent `HealthMonitor` damage event within `damage_confirm_window_seconds`. |
+| `cross_reference_projectile_hits` | `"yes"` | If `"yes"`, RL hit signal is strict (see intercept table). With **`intercept_confirm_enabled = "yes"`**, uses [`HitConfirmer`](../rl/hit_confirmer.py). Otherwise: requires **`ProjectileTracker.is_player_hit`** **and** a recent `HealthMonitor` damage event within `damage_confirm_window_seconds`. |
 
-Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); reward glue in [`rl/policy_bridge.py`](../rl/policy_bridge.py).
+Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py), [`rl/hit_confirmer.py`](../rl/hit_confirmer.py), [`rl/byte_projectile_tracker.py`](../rl/byte_projectile_tracker.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); reward glue in [`rl/policy_bridge.py`](../rl/policy_bridge.py).
 
 The same toggles are exposed as checkboxes in `gui/hub.py` (`Use RL Movement`, `Enable RL Movement Training`).
 
@@ -97,14 +143,20 @@ normal Gym env from the trainer's perspective.
 | Survival                   | `+0.01` per step                                                       | Continuous bonus for staying alive.                                                                                                                                                                                                                    |
 | Safe band vs nearest enemy | `+0.02` when enemy distance is in `[0.35, 0.75] * frame_diagonal/2`    | Encourages "in attack range, out of danger" positioning.                                                                                                                                                                                               |
 | Teammate proximity         | `+0.01` when teammate distance is in `[0.05, 0.30] * frame_diagonal/2` | Encourages staying near teammates as the user requested.                                                                                                                                                                                               |
-| Projectile hit             | `-1.0`                                                                 | With **`cross_reference_projectile_hits = "yes"`** (default): penalty only when **`is_player_hit`** is true **and** [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) is non-null inside **`damage_confirm_window_seconds`**. With **`"no"`**, behavior matches the legacy proxy: penalty whenever `is_player_hit` is true (tracker overlap + lookahead). |
+| Projectile hit             | `-1.0`                                                                 | With **`cross_reference_projectile_hits = "yes"`** and **`intercept_confirm_enabled = "yes"`** (default): penalty when [`HitConfirmer.is_recent_confirmed_hit`](../rl/hit_confirmer.py) is true inside **`damage_confirm_window_seconds`**. With cross-reference on and intercept off: penalty when **`is_player_hit`** is true **and** [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) is non-null. With **`cross_reference_projectile_hits = "no"`**, penalty whenever `is_player_hit` is true. |
 | Episode end survival bonus | `+0.5`                                                                 | Added on `done` when the match resets.                                                                                                                                                                                                                 |
 
 ## Health bar and damage events
 
-[`HealthMonitor`](../rl/health_monitor.py) crops a band **above** the player detection box, measures **green vs red** HSV pixels for HP fill ratio, and maintains a short history. A **`DamageEvent`** is emitted when the latest valid reading drops sharply versus the rolling maximum in the prior window (and not during the respawn overlay — [`Play.is_respawning_overlay`](../play.py)).
+[`HealthMonitor`](../rl/health_monitor.py) searches a band **above** the player box (adaptive vertical search within `health_bar_search_height_px`), measures **green / yellow / shield cyan vs red** HSV pixels for HP fill ratio, applies a short median smoother, and maintains a short history. A **`DamageEvent`** is emitted when the smoothed reading drops sharply versus the rolling maximum in the prior window — optionally requiring **`health_bar_min_consecutive_drops`** consecutive sub-threshold frames. Optional **EasyOCR** (throttled) reads numeric HP; large jumps are rejected, **`observed_max_hp`** only bumps after the same reading is seen twice, and disagreement with HSV sets `last_hp_status = inconsistent`. Percent-based logic drives damage detection.
 
-Optional **EasyOCR** (throttled) reads numeric HP for overlay/debug and tracks **`observed_max_hp`**. Percent-based logic drives damage detection.
+| `last_hp_status` | Meaning |
+| --- | --- |
+| `ok` | Usable reading. |
+| `insufficient_pixels` | Too few HSV hits in the band (noisy/too small crop). |
+| `respawn` | Respawn overlay gate active. |
+| `inconsistent` | OCR and HSV HP fraction disagree strongly. |
+| `unknown` | Missing player box or empty reading. |
 
 ## Red-flash frame gating
 
@@ -112,7 +164,7 @@ Optional **EasyOCR** (throttled) reads numeric HP for overlay/debug and tracks *
 
 ## Tracker confirmation and purge
 
-Each [`ProjectileTrack`](../rl/projectile_tracker.py) carries **`confidence_confirmed`**. After a tracker update, if a recent damage event exists, **`confirm_tracks_touching_player`** marks overlapping / short-lookahead incoming tracks (same geometry as **`is_player_hit`**). **`purge_unconfirmed_recent_tracks`** removes young **`motion`** / **`residual`** tracks with **`from_enemy != True`** that were never confirmed — trimming ghosts born from flashes or noise.
+Each [`ProjectileTrack`](../rl/projectile_tracker.py) carries **`confidence_confirmed`**. When **`intercept_confirm_enabled`** is on, [`HitConfirmer`](../rl/hit_confirmer.py) sets this when predicted impact time matches a damage event. Otherwise (legacy), after a tracker update, if a recent damage event exists, **`confirm_tracks_touching_player`** marks overlapping / short-lookahead incoming tracks (same geometry as **`is_player_hit`**). **`purge_unconfirmed_recent_tracks`** removes young **`motion`** / **`residual`** tracks with **`from_enemy != True`** that were never confirmed — trimming ghosts born from flashes or noise.
 
 ## Visual debug
 
@@ -231,7 +283,9 @@ observation feature shape and ordering, **`purge_unconfirmed_recent_tracks` / co
 reward components (penalty, episode bonus).
 - `test_rl_action_mapping.py`: 2D action → showdown angle / WASD string
 mapping.
-- `test_health_monitor.py`: HSV band ratios, insufficient-pixel guard, sharp drop vs gradual drift damage events.
+- `test_health_monitor.py`: HSV band ratios, adaptive search, debounced drops, insufficient-pixel guard, sharp drop vs gradual drift damage events.
+- `test_byte_projectile_tracker.py`: ByteTrack ID continuity (skipped if `supervision` missing).
+- `test_intercept_confirmer.py`: tolerance matching for `HitConfirmer`.
 - `test_red_flash.py`: red spike after green baseline vs steady frames.
 - `test_setup_amd_rocm.py` / `test_setup_bootstrap.py`: AMD ROCm helper parsing and bootstrap batch contents (see root [`README.md`](../README.md)).
 

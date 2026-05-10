@@ -245,6 +245,54 @@ class Movement:
         self.cross_reference_projectile_hits = str(
             bot_config.get("cross_reference_projectile_hits", "yes")
         ).lower() in ("yes", "true", "1")
+        self.projectile_tracker_backend = str(
+            bot_config.get("projectile_tracker_backend", "bytetrack")
+        ).strip().lower()
+        self.projectile_bytetrack_high_thresh = float(
+            bot_config.get("projectile_bytetrack_high_thresh", 0.5)
+        )
+        self.projectile_bytetrack_low_thresh = float(
+            bot_config.get("projectile_bytetrack_low_thresh", 0.1)
+        )
+        self.projectile_bytetrack_match_thresh = float(
+            bot_config.get("projectile_bytetrack_match_thresh", 0.8)
+        )
+        self.projectile_bytetrack_lost_seconds = float(
+            bot_config.get("projectile_bytetrack_lost_seconds", 0.5)
+        )
+        self.projectile_bytetrack_frame_rate = float(
+            bot_config.get("projectile_bytetrack_frame_rate", 30.0)
+        )
+        self.intercept_confirm_enabled = str(
+            bot_config.get("intercept_confirm_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.intercept_confirm_tolerance_seconds = float(
+            bot_config.get("intercept_confirm_tolerance_seconds", 0.30)
+        )
+        self.intercept_confirm_max_lookahead_seconds = float(
+            bot_config.get("intercept_confirm_max_lookahead_seconds", 1.0)
+        )
+        self.intercept_confirm_min_streak = max(
+            1, int(bot_config.get("intercept_confirm_min_streak", 2))
+        )
+        self.health_bar_search_height_px = float(
+            bot_config.get("health_bar_search_height_px", 40.0)
+        )
+        self.health_bar_yellow_enabled = str(
+            bot_config.get("health_bar_yellow_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.health_bar_shield_enabled = str(
+            bot_config.get("health_bar_shield_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.health_bar_min_consecutive_drops = max(
+            1, int(bot_config.get("health_bar_min_consecutive_drops", 2))
+        )
+        self.health_ocr_validate_against_hsv = str(
+            bot_config.get("health_ocr_validate_against_hsv", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.health_ocr_max_relative_jump = float(
+            bot_config.get("health_ocr_max_relative_jump", 0.4)
+        )
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -715,54 +763,97 @@ class Play(Movement):
         self._playstyle_error_reported = False
         self.load_playstyle()
 
+        _pt_kwargs = dict(
+            history_seconds=self.rl_projectile_history_seconds,
+            velocity_alpha=0.45,
+            max_match_distance=self.rl_projectile_max_match_distance,
+            min_speed_px_s=self.rl_projectile_min_speed_px_s,
+            incoming_min_alignment=max(
+                -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
+            ),
+            enemy_origin_radius=self.rl_projectile_enemy_origin_radius,
+            motion_enemy_origin_radius=self.rl_projectile_motion_origin_radius,
+            friendly_origin_radius=self.rl_projectile_friendly_origin_radius,
+            require_enemy_origin=self.rl_projectile_require_enemy_origin,
+            require_enemy_origin_strict=self.rl_projectile_require_enemy_origin_strict,
+            min_hits_to_promote=self.rl_projectile_min_hits_to_promote,
+            max_speed_px_s=self.rl_projectile_max_speed_px_s,
+            max_accel_px_s2=self.rl_projectile_max_accel_px_s2,
+            max_line_residual_frac=self.rl_projectile_max_line_residual_frac,
+        )
+        _fps = max(1.0, float(self.projectile_bytetrack_frame_rate))
+        _bt_kwargs = dict(
+            track_activation_threshold=float(self.projectile_bytetrack_high_thresh),
+            minimum_matching_threshold=float(self.projectile_bytetrack_match_thresh),
+            lost_track_buffer_frames=max(
+                1, int(round(_fps * float(self.projectile_bytetrack_lost_seconds)))
+            ),
+            frame_rate=_fps,
+            minimum_consecutive_frames=max(1, int(self.rl_projectile_min_hits_to_promote)),
+        )
+
+        self.projectile_tracker = None
         try:
-            from rl.projectile_tracker import ProjectileTracker
-            self.projectile_tracker = ProjectileTracker(
-                history_seconds=self.rl_projectile_history_seconds,
-                min_speed_px_s=self.rl_projectile_min_speed_px_s,
-                max_match_distance=self.rl_projectile_max_match_distance,
-                # Map 0..1 confidence to a cosine alignment threshold so the
-                # tracker only counts tracks heading at the player.
-                # 0.5 -> 0 (±90°), 0.75 -> 0.5 (±60°), 0.9 -> 0.8 (±37°).
-                incoming_min_alignment=max(
-                    -1.0, min(1.0, 2.0 * self.projectile_detection_confidence - 1.0)
-                ),
-                enemy_origin_radius=self.rl_projectile_enemy_origin_radius,
-                motion_enemy_origin_radius=self.rl_projectile_motion_origin_radius,
-                friendly_origin_radius=self.rl_projectile_friendly_origin_radius,
-                require_enemy_origin=self.rl_projectile_require_enemy_origin,
-                require_enemy_origin_strict=self.rl_projectile_require_enemy_origin_strict,
-                min_hits_to_promote=self.rl_projectile_min_hits_to_promote,
-                max_speed_px_s=self.rl_projectile_max_speed_px_s,
-                max_accel_px_s2=self.rl_projectile_max_accel_px_s2,
-                max_line_residual_frac=self.rl_projectile_max_line_residual_frac,
-            )
+            if self.projectile_tracker_backend in (
+                "bytetrack",
+                "byte",
+                "byte_track",
+                "bytetracker",
+            ):
+                from rl.byte_projectile_tracker import (
+                    BYTE_TRACK_AVAILABLE,
+                    ByteProjectileTracker,
+                )
+
+                if BYTE_TRACK_AVAILABLE:
+                    self.projectile_tracker = ByteProjectileTracker(
+                        **_pt_kwargs,
+                        **_bt_kwargs,
+                    )
+                else:
+                    print(
+                        "projectile_tracker_backend=bytetrack but supervision/ByteTrack "
+                        "is not installed; falling back to greedy ProjectileTracker."
+                    )
+            if self.projectile_tracker is None:
+                from rl.projectile_tracker import ProjectileTracker
+
+                self.projectile_tracker = ProjectileTracker(**_pt_kwargs)
         except Exception as exc:
             print(f"Could not initialise projectile tracker: {exc}")
             self.projectile_tracker = None
 
         try:
             from rl.health_monitor import HealthMonitor
+            from rl.hit_confirmer import HitConfirmer
             from rl.red_flash import RedFlashDetector
 
             self.health_monitor = HealthMonitor(
                 band_offset_px=self.health_bar_band_offset_px,
                 band_height_px=self.health_bar_band_height_px,
+                search_height_px=self.health_bar_search_height_px,
                 min_total_pixels=self.health_bar_min_total_pixels,
                 damage_drop_threshold=self.damage_hp_drop_threshold_pct,
                 prior_window_seconds=0.4,
                 history_seconds=2.0,
                 ocr_enabled=self.health_ocr_enabled,
                 ocr_interval_seconds=self.health_ocr_interval_seconds,
+                yellow_enabled=self.health_bar_yellow_enabled,
+                shield_enabled=self.health_bar_shield_enabled,
+                min_consecutive_drops=self.health_bar_min_consecutive_drops,
+                ocr_max_relative_jump=self.health_ocr_max_relative_jump,
+                ocr_validate_against_hsv=self.health_ocr_validate_against_hsv,
             )
             self.red_flash_detector = RedFlashDetector(
                 threshold=self.red_flash_red_dom_threshold,
                 baseline_alpha=self.red_flash_baseline_alpha,
             )
+            self.hit_confirmer = HitConfirmer(history_seconds=2.0)
         except Exception as exc:
             print(f"Could not initialise health / red-flash monitors: {exc}")
             self.health_monitor = None
             self.red_flash_detector = None
+            self.hit_confirmer = None
 
         self._visual_debug_red_flash = False
         self._rl_motion_prev_gray = None
@@ -937,9 +1028,9 @@ class Play(Movement):
                 self.health_monitor.reset_match()
             except Exception:
                 pass
-        if getattr(self, "red_flash_detector", None) is not None:
+        if getattr(self, "hit_confirmer", None) is not None:
             try:
-                self.red_flash_detector.reset()
+                self.hit_confirmer.reset()
             except Exception:
                 pass
         self._rl_motion_prev_gray = None
@@ -2524,9 +2615,10 @@ class Play(Movement):
         scale = self.window_controller.scale_factor
         hm_early = getattr(self, "health_monitor", None)
         frame_early = self.current_frame
+        damage_ev_early = None
         if hm_early is not None and frame_early is not None and data.get("player"):
             try:
-                hm_early.update(
+                damage_ev_early = hm_early.update(
                     current_time,
                     frame_early,
                     data["player"][0],
@@ -2748,10 +2840,36 @@ class Play(Movement):
         pt = self.projectile_tracker
         win = float(getattr(self, "damage_confirm_window_seconds", 0.5))
         hm = getattr(self, "health_monitor", None)
+        hc = getattr(self, "hit_confirmer", None)
+        use_intercept = bool(
+            getattr(self, "intercept_confirm_enabled", True)
+            and getattr(self, "cross_reference_projectile_hits", True)
+        )
         if pt is not None and data.get("player"):
             player_box = data["player"][0]
             try:
-                if hm is not None and not flashing:
+                if (
+                    hm is not None
+                    and hc is not None
+                    and use_intercept
+                    and not flashing
+                ):
+                    if damage_ev_early is not None:
+                        hc.record_damage(damage_ev_early)
+                    intercepts = pt.pending_intercepts(
+                        player_box,
+                        current_time,
+                        float(getattr(self, "intercept_confirm_max_lookahead_seconds", 1.0)),
+                        padding=self.rl_projectile_hit_radius_padding,
+                        min_streak=int(getattr(self, "intercept_confirm_min_streak", 2)),
+                    )
+                    hc.record_pending_intercepts(intercepts, current_time)
+                    hc.confirm(
+                        pt,
+                        current_time,
+                        float(getattr(self, "intercept_confirm_tolerance_seconds", 0.3)),
+                    )
+                elif hm is not None and not flashing:
                     if hm.recent_damage_event(current_time, win) is not None:
                         pt.confirm_tracks_touching_player(
                             player_box,
@@ -3008,6 +3126,16 @@ class Play(Movement):
                 bar_left = int(min(x1, x2))
                 bar_top = int(min(y1, y2) - off - bh)
                 hp_pct = hm_dbg.last_hp_pct if hm_dbg.last_hp_ok else None
+                st = getattr(hm_dbg, "last_hp_status", "ok") or "ok"
+                if st in ("inconsistent", "unknown") or (not hm_dbg.last_hp_ok and hp_pct is None):
+                    warn_bar_h = max(4, s(8))
+                    cv2.rectangle(
+                        img,
+                        (0, max(0, s(bar_top) - warn_bar_h - s(4))),
+                        (min(img.shape[1], s(bar_left) + bar_w + s(40)), max(0, s(bar_top) - s(4))),
+                        (50, 180, 240),
+                        -1,
+                    )
                 if hp_pct is not None:
                     fill_w = max(0, int(bar_w * hp_pct))
                     cv2.rectangle(
@@ -3029,6 +3157,11 @@ class Play(Movement):
                     hp_label = f"HP {hm_dbg.hp_value}/{hm_dbg.observed_max_hp}"
                 elif hp_pct is not None:
                     hp_label = f"HP {hp_pct * 100:.0f}%"
+                if st not in ("ok",) or not hm_dbg.last_hp_ok:
+                    if hp_label:
+                        hp_label += f" [{st}]"
+                    else:
+                        hp_label = f"HP ? [{st}]"
                 if hp_label:
                     cv2.putText(
                         img,

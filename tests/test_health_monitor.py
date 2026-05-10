@@ -81,6 +81,7 @@ class HealthMonitorTests(unittest.TestCase):
             min_total_pixels=20,
             damage_drop_threshold=0.015,
             prior_window_seconds=0.4,
+            min_consecutive_drops=1,
         )
         ev0 = hm.update(0.0, frame_hi, player, 1.0, None)
         self.assertIsNone(ev0)
@@ -95,6 +96,7 @@ class HealthMonitorTests(unittest.TestCase):
             min_total_pixels=20,
             damage_drop_threshold=0.015,
             prior_window_seconds=0.4,
+            min_consecutive_drops=1,
         )
         player = [100.0, 200.0, 300.0, 220.0]
         for i in range(15):
@@ -103,6 +105,22 @@ class HealthMonitorTests(unittest.TestCase):
             _fill_hp_band_green(frame, player, green_ratio=max(0.05, min(1.0, g)))
             ev = hm.update(0.01 * i, frame, player, 1.0, None)
             self.assertIsNone(ev)
+
+    def test_debounce_requires_two_frames_when_min2(self):
+        frame_hi = np.zeros((400, 400, 3), dtype=np.uint8)
+        frame_lo = np.zeros((400, 400, 3), dtype=np.uint8)
+        player = [100.0, 200.0, 300.0, 220.0]
+        _fill_hp_band_green(frame_hi, player, green_ratio=1.0)
+        _fill_hp_band_green(frame_lo, player, green_ratio=0.3)
+        hm = HealthMonitor(
+            min_total_pixels=20,
+            damage_drop_threshold=0.015,
+            prior_window_seconds=0.4,
+            min_consecutive_drops=2,
+        )
+        hm.update(0.0, frame_hi, player, 1.0, None)
+        ev1 = hm.update(0.1, frame_lo, player, 1.0, None)
+        self.assertIsNone(ev1)
 
 
 if __name__ == "__main__":

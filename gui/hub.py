@@ -73,6 +73,8 @@ class Hub:
         self.bot_config.setdefault("entity_detection_confidence", 0.6)
         self.bot_config.setdefault("projectile_detection_confidence", 0.55)
         self.bot_config.setdefault("projectile_yolo_confidence", 0.35)
+        self.bot_config.setdefault("projectile_tracker_backend", "bytetrack")
+        self.bot_config.setdefault("intercept_confirm_enabled", "yes")
         self.bot_config.setdefault("unstuck_movement_delay", 3.0)
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
         self.bot_config.setdefault("play_again_on_win", "no")
@@ -860,6 +862,59 @@ class Hub:
             use_general_config=False,
             tooltip_text="On a scale between 0 and 1, minimum score to keep a box from the dedicated projectile ONNX model. Training exports rarely exceed ~0.8; use ~0.25–0.45 for recall. This is separate from Projectile Detection Confidence (RL / incoming-angle strictness)."
         )
+
+        lbl_bt = ctk.CTkLabel(
+            container, text="Projectile tracker backend:", font=theme.ui_font(S(18))
+        )
+        lbl_bt.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        bt_var = tk.StringVar(
+            value=str(self.bot_config.get("projectile_tracker_backend", "bytetrack")).lower()
+        )
+
+        def on_bt_change(choice):
+            self.bot_config["projectile_tracker_backend"] = str(choice).lower()
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        bt_menu = ctk.CTkOptionMenu(
+            container,
+            values=["bytetrack", "greedy"],
+            command=on_bt_change,
+            variable=bt_var,
+            font=theme.ui_font(S(16)),
+            **theme.option_menu_kwargs(S(160), S(35)),
+        )
+        bt_menu.grid(row=row_idx, column=1, padx=S(20), pady=S(10), sticky="w")
+        row_idx += 1
+
+        lbl_ic = ctk.CTkLabel(
+            container, text="Intercept HP confirmation:", font=theme.ui_font(S(18))
+        )
+        lbl_ic.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        ic_var = tk.BooleanVar(
+            value=str(self.bot_config.get("intercept_confirm_enabled", "yes")).lower()
+            in ("yes", "true", "1")
+        )
+
+        def toggle_intercept_confirm():
+            self.bot_config["intercept_confirm_enabled"] = "yes" if ic_var.get() else "no"
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        ic_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=ic_var,
+            command=toggle_intercept_confirm,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        ic_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            ic_cb,
+            "When on (and Cross-reference projectile hits is on), RL damage uses predicted "
+            "projectile impact time matched to HP drops. Reduces false positive hits.",
+        )
+        row_idx += 1
 
         # 7) Unstuck Movement Delay (bot_config)
         create_labeled_entry(

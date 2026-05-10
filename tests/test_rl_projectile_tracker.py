@@ -363,6 +363,27 @@ class ProjectileTrackerTests(unittest.TestCase):
         tracker.purge_unconfirmed_recent_tracks(now + 0.05, since_seconds=0.5)
         self.assertEqual(len(tracker._tracks), 1)
 
+    def test_time_to_player_box_and_pending_intercepts(self):
+        tracker = ProjectileTracker(
+            velocity_alpha=1.0,
+            min_hits_to_promote=1,
+            incoming_min_alignment=-1.0,
+            min_speed_px_s=1.0,
+        )
+        tracker.update([[0, 100, 20, 120]], now=0.0)
+        tracker.update([[50, 100, 70, 120]], now=0.1)
+        tr = tracker.tracks[0]
+        player_box = [400.0, 100.0, 420.0, 120.0]
+        eta = tr.time_to_player_box(player_box, max_seconds=3.0)
+        self.assertIsNotNone(eta)
+        intercepts = tracker.pending_intercepts(
+            player_box,
+            0.1,
+            max_lookahead_seconds=3.0,
+            min_streak=1,
+        )
+        self.assertTrue(len(intercepts) >= 1)
+
 
 if __name__ == "__main__":
     unittest.main()
