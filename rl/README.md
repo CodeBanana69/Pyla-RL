@@ -77,9 +77,13 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 | `health_bar_band_offset_px` | `8` | Vertical offset from player box top to HP strip (scaled by window scale factor). |
 | `health_bar_band_height_px` | `14` | Height of HSV strip used for fill ratio. |
 | `health_bar_search_height_px` | `40` | Vertical search window above the player to auto-align the HP strip when the fixed offset is slightly off. |
+| `health_bar_horizontal_pad_px` | `26` | Minimum extra half-width (× scale) added to the crop so the HP bar fits when it is wider than the brawler box. |
+| `health_bar_width_expand_frac` | `0.22` | Extra horizontal padding as a fraction of the player half-width (combined with the pad above). |
+| `health_hsv_min_saturation` / `health_hsv_min_value` | `52` / `52` | Primary OpenCV HSV lower bounds for classifying UI green/red/yellow; lower values tolerate dim or bloomy HUD. |
+| `health_hsv_relaxed_min_saturation` / `health_hsv_relaxed_min_value` | `38` / `38` | Fallback thresholds when the primary pass counts too few pixels (same game frame, avoids false `insufficient_pixels`). |
 | `health_bar_yellow_enabled` | `"yes"` | Count yellow/orange HSV as “alive” HP fill (low HP). |
 | `health_bar_shield_enabled` | `"yes"` | Count cyan HSV as “alive” (shield overlay). |
-| `health_bar_min_total_pixels` | `40` | Minimum colored pixels for a valid HP reading. |
+| `health_bar_min_total_pixels` | `40` | Target minimum colored pixels; the reader also scales this down for very small search crops (near the top of the screen). |
 | `health_bar_min_consecutive_drops` | `2` | Consecutive frames below the prior-window max (by threshold) before emitting a `DamageEvent` (reduces single-frame flicker). |
 | `health_ocr_enabled` | `"yes"` | Optional EasyOCR read of numeric HP (throttled); drives `hp_value` / `observed_max_hp` for debug. |
 | `health_ocr_interval_seconds` | `0.5` | Minimum time between OCR passes. |

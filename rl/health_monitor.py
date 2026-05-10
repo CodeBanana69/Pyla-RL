@@ -31,8 +31,14 @@ class HealthMonitor:
         band_offset_px: float = 8.0,
         band_height_px: float = 14.0,
         search_height_px: float = 40.0,
+        band_horizontal_pad_px: float = 26.0,
+        band_width_expand_frac: float = 0.22,
         digit_band_extra_px: float = 28.0,
         min_total_pixels: int = 40,
+        hsv_min_saturation: int = 52,
+        hsv_min_value: int = 52,
+        hsv_relaxed_min_saturation: int = 38,
+        hsv_relaxed_min_value: int = 38,
         damage_drop_threshold: float = 0.015,
         prior_window_seconds: float = 0.4,
         history_seconds: float = 2.0,
@@ -47,8 +53,14 @@ class HealthMonitor:
         self.band_offset_px = float(band_offset_px)
         self.band_height_px = float(band_height_px)
         self.search_height_px = float(search_height_px)
+        self.band_horizontal_pad_px = float(band_horizontal_pad_px)
+        self.band_width_expand_frac = float(band_width_expand_frac)
         self.digit_band_extra_px = float(digit_band_extra_px)
         self.min_total_pixels = int(min_total_pixels)
+        self.hsv_min_saturation = int(np.clip(hsv_min_saturation, 1, 255))
+        self.hsv_min_value = int(np.clip(hsv_min_value, 1, 255))
+        self.hsv_relaxed_min_saturation = int(np.clip(hsv_relaxed_min_saturation, 1, 255))
+        self.hsv_relaxed_min_value = int(np.clip(hsv_relaxed_min_value, 1, 255))
         self.damage_drop_threshold = float(damage_drop_threshold)
         self.prior_window_seconds = float(prior_window_seconds)
         self.history_seconds = float(history_seconds)
@@ -92,29 +104,56 @@ class HealthMonitor:
         self.observed_max_hp = 0
         self.last_green_red = (0, 0)
 
-    def _count_fill_pixels(self, hsv: np.ndarray) -> Tuple[int, int, int, int]:
+    def _horizontal_crop_x(self, x1: float, x2: float, w: int, sf: float) -> Tuple[int, int]:
+        """Widen the crop vs the player box so the HP bar (often wider than the brawler) fits."""
+        if x2 < x1:
+            x1, x2 = x2, x1
+        half_w = (x2 - x1) * 0.5
+        cx = (x1 + x2) * 0.5
+        extra = max(self.band_horizontal_pad_px * sf, half_w * self.band_width_expand_frac)
+        bx1 = max(0, int(round(cx - half_w - extra)))
+        bx2 = min(int(w), int(round(cx + half_w + extra)))
+        return bx1, bx2
+
+    def _count_fill_pixels(
+        self, hsv: np.ndarray, *, relaxed: bool = False
+    ) -> Tuple[int, int, int, int]:
         """Returns (green, yellow_orange, shield_cyan, red) pixel counts."""
+        ms = self.hsv_relaxed_min_saturation if relaxed else self.hsv_min_saturation
+        mv = self.hsv_relaxed_min_value if relaxed else self.hsv_min_value
+        cyan_ms = max(40, ms - 8) if not relaxed else max(32, ms - 10)
+
         green = cv2.inRange(
-            hsv, np.array((35, 80, 80), dtype=np.uint8), np.array((85, 255, 255), dtype=np.uint8)
+            hsv,
+            np.array((35, ms, mv), dtype=np.uint8),
+            np.array((85, 255, 255), dtype=np.uint8),
         )
         r1 = cv2.inRange(
-            hsv, np.array((0, 80, 80), dtype=np.uint8), np.array((14, 255, 255), dtype=np.uint8)
+            hsv,
+            np.array((0, ms, mv), dtype=np.uint8),
+            np.array((14, 255, 255), dtype=np.uint8),
         )
         r2 = cv2.inRange(
-            hsv, np.array((170, 80, 80), dtype=np.uint8), np.array((179, 255, 255), dtype=np.uint8)
+            hsv,
+            np.array((170, ms, mv), dtype=np.uint8),
+            np.array((179, 255, 255), dtype=np.uint8),
         )
         red = cv2.bitwise_or(r1, r2)
 
         yellow = np.zeros_like(red)
         if self.yellow_enabled:
             yellow = cv2.inRange(
-                hsv, np.array((15, 80, 80), dtype=np.uint8), np.array((34, 255, 255), dtype=np.uint8)
+                hsv,
+                np.array((15, ms, mv), dtype=np.uint8),
+                np.array((34, 255, 255), dtype=np.uint8),
             )
 
         cyan = np.zeros_like(red)
         if self.shield_enabled:
             cyan = cv2.inRange(
-                hsv, np.array((85, 60, 80), dtype=np.uint8), np.array((105, 255, 255), dtype=np.uint8)
+                hsv,
+                np.array((85, cyan_ms, mv), dtype=np.uint8),
+                np.array((105, 255, 255), dtype=np.uint8),
             )
 
         return (
@@ -124,8 +163,8 @@ class HealthMonitor:
             int(cv2.countNonZero(red)),
         )
 
-    def _row_density(self, hsv_rows: np.ndarray) -> int:
-        g, y, c, r = self._count_fill_pixels(hsv_rows)
+    def _row_density(self, hsv_rows: np.ndarray, *, relaxed: bool = False) -> int:
+        g, y, c, r = self._count_fill_pixels(hsv_rows, relaxed=relaxed)
         return g + y + c + r
 
     def read_hp_band(
@@ -146,8 +185,7 @@ class HealthMonitor:
         if y2 < y1:
             y1, y2 = y2, y1
 
-        bx1 = max(0, int(x1))
-        bx2 = min(w, int(x2))
+        bx1, bx2 = self._horizontal_crop_x(x1, x2, w, sf)
         off = max(2.0, self.band_offset_px * sf)
         bh = max(4.0, self.band_height_px * sf)
         search_h = max(bh, self.search_height_px * sf)
@@ -173,18 +211,37 @@ class HealthMonitor:
             row_counts = np.zeros(nrow, dtype=np.int32)
             for ri in range(nrow):
                 row_counts[ri] = self._row_density(hsv_full[ri : ri + 1, :, :])
+            # If strict HSV misses the UI tint entirely, retry rows with relaxed thresholds
+            # so the adaptive slab still lands on the real bar.
+            if int(row_counts.max()) <= 0:
+                for ri in range(nrow):
+                    row_counts[ri] = self._row_density(hsv_full[ri : ri + 1, :, :], relaxed=True)
             for start in range(0, nrow - bh_i + 1):
                 slab = int(row_counts[start : start + bh_i].sum())
                 if slab > best_score:
                     best_score = slab
                     best_start = start
         crop_hsv = hsv_full[best_start : best_start + min(bh_i, nrow), :, :]
+        crop_rows = min(bh_i, nrow)
+        crop_cols = max(1, int(crop_hsv.shape[1]))
+        crop_area = max(1, crop_rows * crop_cols)
+        # Small vertical search windows (near top of screen) need a lower floor than 40.
+        min_need = max(8, min(self.min_total_pixels, max(12, int(crop_area * 0.017))))
+
         g, ye, cy, r = self._count_fill_pixels(crop_hsv)
         alive = g + ye + cy
         total = alive + r
+        if total < min_need:
+            g2, ye2, cy2, r2 = self._count_fill_pixels(crop_hsv, relaxed=True)
+            alive2 = g2 + ye2 + cy2
+            total2 = alive2 + r2
+            if total2 >= min_need:
+                g, ye, cy, r = g2, ye2, cy2, r2
+                alive, total = alive2, total2
+
         self.last_green_red = (alive, r)
 
-        if total < self.min_total_pixels:
+        if total < min_need:
             self.last_hp_status = "insufficient_pixels"
             return None, False, (alive, r)
 
@@ -202,8 +259,7 @@ class HealthMonitor:
             x1, x2 = x2, x1
         if y2 < y1:
             y1, y2 = y2, y1
-        bx1 = max(0, int(x1))
-        bx2 = min(w, int(x2))
+        bx1, bx2 = self._horizontal_crop_x(x1, x2, w, sf)
         extra = max(8.0, self.digit_band_extra_px * sf)
         off = max(2.0, self.band_offset_px * sf)
         bh = max(4.0, self.band_height_px * sf)

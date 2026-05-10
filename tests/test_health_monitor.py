@@ -65,11 +65,27 @@ class HealthMonitorTests(unittest.TestCase):
 
     def test_insufficient_pixels_not_ok(self):
         frame = np.zeros((400, 400, 3), dtype=np.uint8)
-        player = [100.0, 200.0, 105.0, 220.0]
-        _fill_hp_band_green(frame, player, green_ratio=1.0)
-        hm = HealthMonitor(min_total_pixels=5000)
+        player = [100.0, 200.0, 300.0, 220.0]
+        hm = HealthMonitor(min_total_pixels=20)
         _pct, ok, _gr = hm.read_hp_band(frame, player, scale_factor=1.0)
         self.assertFalse(ok)
+        self.assertEqual(hm.last_hp_status, "insufficient_pixels")
+
+    def test_muted_green_still_counts(self):
+        """S/V floors used to be 80; dim UI greens must still register as fill."""
+        frame = np.zeros((400, 400, 3), dtype=np.uint8)
+        player = [100.0, 200.0, 300.0, 220.0]
+        x1, y1, x2, y2 = player
+        off, bh = 8.0, 14.0
+        band_top = max(0, int(y1 - off - bh))
+        band_bot = min(400, int(y1 - off))
+        bx1, bx2 = max(0, int(x1)), min(400, int(x2))
+        frame[band_top:band_bot, bx1:bx2] = (90, 190, 90)
+        hm = HealthMonitor(min_total_pixels=20)
+        pct, ok, _gr = hm.read_hp_band(frame, player, scale_factor=1.0)
+        self.assertTrue(ok)
+        assert pct is not None
+        self.assertGreater(pct, 0.7)
 
     def test_sharp_drop_emits_damage_event(self):
         frame_hi = np.zeros((400, 400, 3), dtype=np.uint8)

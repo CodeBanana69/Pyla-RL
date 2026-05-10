@@ -278,6 +278,22 @@ class Movement:
         self.health_bar_search_height_px = float(
             bot_config.get("health_bar_search_height_px", 40.0)
         )
+        self.health_bar_horizontal_pad_px = float(
+            bot_config.get("health_bar_horizontal_pad_px", 26.0)
+        )
+        self.health_bar_width_expand_frac = float(
+            bot_config.get("health_bar_width_expand_frac", 0.22)
+        )
+        self.health_hsv_min_saturation = int(
+            bot_config.get("health_hsv_min_saturation", 52)
+        )
+        self.health_hsv_min_value = int(bot_config.get("health_hsv_min_value", 52))
+        self.health_hsv_relaxed_min_saturation = int(
+            bot_config.get("health_hsv_relaxed_min_saturation", 38)
+        )
+        self.health_hsv_relaxed_min_value = int(
+            bot_config.get("health_hsv_relaxed_min_value", 38)
+        )
         self.health_bar_yellow_enabled = str(
             bot_config.get("health_bar_yellow_enabled", "yes")
         ).lower() in ("yes", "true", "1")
@@ -832,7 +848,13 @@ class Play(Movement):
                 band_offset_px=self.health_bar_band_offset_px,
                 band_height_px=self.health_bar_band_height_px,
                 search_height_px=self.health_bar_search_height_px,
+                band_horizontal_pad_px=self.health_bar_horizontal_pad_px,
+                band_width_expand_frac=self.health_bar_width_expand_frac,
                 min_total_pixels=self.health_bar_min_total_pixels,
+                hsv_min_saturation=self.health_hsv_min_saturation,
+                hsv_min_value=self.health_hsv_min_value,
+                hsv_relaxed_min_saturation=self.health_hsv_relaxed_min_saturation,
+                hsv_relaxed_min_value=self.health_hsv_relaxed_min_value,
                 damage_drop_threshold=self.damage_hp_drop_threshold_pct,
                 prior_window_seconds=0.4,
                 history_seconds=2.0,

@@ -126,6 +126,14 @@ intercept_confirm_tolerance_seconds = 0.30
 intercept_confirm_max_lookahead_seconds = 1.00
 intercept_confirm_min_streak = 2
 health_bar_search_height_px = 40
+# Widen HP crop vs player box (brawler silhouette is often narrower than the HP bar).
+health_bar_horizontal_pad_px = 26
+health_bar_width_expand_frac = 0.22
+# Primary HSV gates (OpenCV H/S/V); lower = more tolerant of dim / bloom / UI themes.
+health_hsv_min_saturation = 52
+health_hsv_min_value = 52
+health_hsv_relaxed_min_saturation = 38
+health_hsv_relaxed_min_value = 38
 health_bar_yellow_enabled = "yes"
 health_bar_shield_enabled = "yes"
 health_bar_min_consecutive_drops = 2
