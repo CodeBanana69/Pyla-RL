@@ -550,7 +550,7 @@ class Movement:
 
 class Play(Movement):
 
-    def __init__(self, main_info_model, tile_detector_model, window_controller):
+    def __init__(self, main_info_model, tile_detector_model, projectile_model, window_controller):
         super().__init__(window_controller)
 
         bot_config = load_toml_as_dict("cfg/bot_config.toml")
@@ -562,6 +562,24 @@ class Play(Movement):
             tile_detector_model,
             classes=self.tile_detector_model_classes
         )
+
+        # Optional dedicated projectile detector. When the ONNX exists, its
+        # outputs are merged into `data["projectile"]` in `get_main_data`,
+        # which feeds the same labeled-source slot consumed by the tracker
+        # and the universal-projectile motion pipeline (both run together).
+        self.Detect_projectile = None
+        if projectile_model and os.path.exists(projectile_model):
+            try:
+                self.Detect_projectile = Detect(projectile_model, classes=['projectile'])
+                print(f"Loaded projectile detector: {projectile_model}")
+            except Exception as exc:
+                print(f"Failed to load projectile detector {projectile_model}: {exc}")
+                self.Detect_projectile = None
+        else:
+            print(
+                "No projectile detector ONNX found "
+                f"({projectile_model!r}); using motion-based projectile pipeline only."
+            )
 
         self.time_since_movement = time.time()
         self.time_since_gadget_checked = time.time()
@@ -632,6 +650,9 @@ class Play(Movement):
         self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
         self.visual_debug_max_wall_boxes = max(0, int(general_config.get("visual_debug_max_wall_boxes", 250)))
         self.visual_debug_motion_boxes = str(general_config.get("visual_debug_motion_boxes", "no")).lower() in ("yes", "true", "1")
+        self.visual_debug_yolo_projectile_boxes = str(
+            general_config.get("visual_debug_yolo_projectile_boxes", "yes")
+        ).lower() in ("yes", "true", "1")
         self._visual_debug_next_frame_at = 0.0
         self._visual_debug_next_enqueue_at = 0.0
         self._visual_debug_lock = threading.Lock()
@@ -728,6 +749,7 @@ class Play(Movement):
         self._visual_debug_red_flash = False
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
+        self._rl_yolo_debug_boxes = []
         # Previous-frame motion/residual centers used to gate candidates
         # by direction-of-travel-toward-player.
         self._rl_prev_motion_centers: list = []
@@ -902,6 +924,7 @@ class Play(Movement):
                 pass
         self._rl_motion_prev_gray = None
         self._rl_motion_debug_boxes = []
+        self._rl_yolo_debug_boxes = []
         bridge = getattr(self, "_rl_bridge", None)
         if bridge and bridge is not False and hasattr(bridge, "on_match_reset"):
             try:
@@ -1686,7 +1709,28 @@ class Play(Movement):
                         f"{self.entity_detection_retry_confidence:.2f}"
                     )
                 data = retry_data
-        return self.stabilize_entity_roles(frame, data)
+        data = self.stabilize_entity_roles(frame, data)
+
+        # Run the dedicated projectile detector (if installed) and merge its
+        # boxes into data["projectile"]. The downstream pipeline at
+        # `_update_projectile_tracker` already fuses these YOLO boxes with the
+        # motion-based residual/blob candidates via NMS, so both detectors
+        # run in parallel and de-duplicate against each other.
+        if self.Detect_projectile is not None:
+            try:
+                proj = self.Detect_projectile.detect_objects(
+                    frame, conf_tresh=self.projectile_detection_confidence
+                )
+                yolo_boxes = proj.get("projectile") or []
+            except Exception as exc:
+                print(f"Projectile detector inference failed: {exc}")
+                yolo_boxes = []
+            self._rl_yolo_debug_boxes = list(yolo_boxes)
+            if yolo_boxes:
+                data.setdefault("projectile", []).extend(yolo_boxes)
+        else:
+            self._rl_yolo_debug_boxes = []
+        return data
 
     def is_path_blocked(self, player_pos, move_direction, walls, distance=None):  # Increased distance
         if distance is None:
@@ -3049,7 +3093,15 @@ class Play(Movement):
                 cluster_tracks_by_distance,
             )
 
-            track_col = (255, 165, 0)
+            # Per-track colour reflects which detector promoted the track,
+            # so it is visually obvious whether the YOLO model and the
+            # motion-based pipeline are both alive at runtime.
+            track_colors_by_source = {
+                "labeled": (0, 220, 0),       # green = YOLO projectile detector
+                "residual": (255, 80, 200),   # magenta = residual detector
+                "motion": (255, 165, 0),      # orange = motion blob (legacy default)
+            }
+            default_track_col = (255, 165, 0)
             cluster_col = (255, 215, 0)  # gold for cluster bounds
             arrow_dt = 0.1
             promoted_tracks = [
@@ -3059,6 +3111,8 @@ class Play(Movement):
             ]
 
             for tr in promoted_tracks:
+                source = getattr(tr, "source", "labeled")
+                track_col = track_colors_by_source.get(source, default_track_col)
                 x1, y1, x2, y2 = tr.expanded_box()
                 xa1, ya1, xa2, ya2 = int(x1), int(y1), int(x2), int(y2)
                 cv2.rectangle(
@@ -3069,9 +3123,10 @@ class Play(Movement):
                     max(1, s(2)),
                 )
                 suffix = "*" if getattr(tr, "confidence_confirmed", False) else ""
+                source_tag = source[:3] if source else "?"
                 cv2.putText(
                     img,
-                    f"proj{tr.track_id}{suffix}",
+                    f"proj{tr.track_id}{suffix} [{source_tag}]",
                     sp((xa1, max(ya1 - 6, 0))),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     max(0.35, 0.5 * scale),
@@ -3137,6 +3192,29 @@ class Play(Movement):
                     cv2.FONT_HERSHEY_SIMPLEX,
                     max(0.35, 0.45 * scale),
                     motion_col,
+                    1,
+                )
+                boxes_drawn += 1
+
+        # Raw YOLO projectile detections (pre-merge / pre-tracking).
+        # Lets users verify the dedicated projectile detector is firing
+        # even before any track has been promoted by the tracker.
+        if getattr(self, "visual_debug_yolo_projectile_boxes", True):
+            yolo_col = (80, 255, 80)
+            for box in getattr(self, "_rl_yolo_debug_boxes", []) or []:
+                if boxes_drawn >= self.visual_debug_max_boxes:
+                    break
+                if len(box) < 4:
+                    continue
+                x1, y1, x2, y2 = map(int, box[:4])
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), yolo_col, 1)
+                cv2.putText(
+                    img,
+                    "yolo",
+                    sp((x1, max(y1 - 6, 0))),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.35, 0.45 * scale),
+                    yolo_col,
                     1,
                 )
                 boxes_drawn += 1

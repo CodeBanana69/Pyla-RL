@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 5
+names: ['* collaborate with your team on computer vision projects', '==============================', 'Brawl Stars BOT V3 - v3 Full Dataset', 'Roboflow is an end-to-end computer vision platform that helps you', 'This dataset was exported via roboflow.com on December 8, 2023 at 4:37 AM GMT']
+
+roboflow:
+  workspace: ryan-wycga
+  project: ryan-wycga
+  version: dataset
+  license: Private
+  url: https://app.roboflow.com/ryan-wycga/ryan-wycga/dataset

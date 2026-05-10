@@ -37,7 +37,12 @@ def main():
 
     brawler = args.brawler or load_brawler()
     controller = WindowController()
-    play = Play("models/mainInGameModel.onnx", "models/tileDetector.onnx", controller)
+    play = Play(
+        "models/mainInGameModel.onnx",
+        "models/tileDetector.onnx",
+        "models/projectileDetector.onnx",
+        controller,
+    )
     play.current_brawler = brawler
     shim = MainShim()
 

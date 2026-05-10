@@ -33,7 +33,12 @@ def main():
     args = parser.parse_args()
 
     controller = WindowController()
-    play = Play("models/mainInGameModel.onnx", "models/tileDetector.onnx", controller)
+    play = Play(
+        "models/mainInGameModel.onnx",
+        "models/tileDetector.onnx",
+        "models/projectileDetector.onnx",
+        controller,
+    )
     output = ROOT / args.output
     start = time.time()
     last_capture = 0.0

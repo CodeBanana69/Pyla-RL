@@ -240,7 +240,11 @@ def pyla_main(data):
         @staticmethod
         def load_models():
             folder_path = "./models/"
-            model_names = ['mainInGameModel.onnx', 'tileDetector.onnx']
+            # `projectileDetector.onnx` is optional: Play handles the missing
+            # case gracefully and falls back to the motion-only projectile
+            # pipeline. The path is always passed so the bot picks up the
+            # model automatically once training finishes.
+            model_names = ['mainInGameModel.onnx', 'tileDetector.onnx', 'projectileDetector.onnx']
             loaded_models = []
 
             for name in model_names:
