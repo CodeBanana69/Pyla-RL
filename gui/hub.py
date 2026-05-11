@@ -124,6 +124,14 @@ class Hub:
         self.bot_config.setdefault("jump_pad_escape_edge_margin", 0.22)
         self.bot_config.setdefault("jump_pad_escape_teammate_safe_distance", 360)
         self.bot_config.setdefault("jump_pad_smoke_early_distance", 230)
+        self.bot_config.setdefault("health_ocr_primary", "yes")
+        self.bot_config.setdefault("health_ocr_poll_hz", 5.0)
+        self.bot_config.setdefault("health_ocr_run_in_thread", "auto")
+        self.bot_config.setdefault("health_ocr_full_hp_lock_repeats", 2)
+        self.bot_config.setdefault("health_ocr_min_confidence", 0.35)
+        self.bot_config.setdefault("health_ocr_log_terminal", "yes")
+        self.bot_config.setdefault("health_ocr_damage_drop_min", 1)
+        self.bot_config.setdefault("health_hsv_fallback_enabled", "yes")
 
         # Time thresholds defaults
         self.time_tresholds.setdefault("state_check", 3)
@@ -1265,6 +1273,102 @@ class Hub:
             rl_hp_pen_cb,
             "When ON, RL penalizes HP loss from HealthMonitor (storm, melee, shots) instead of the projectile/intercept detector. Restart the bot.",
         )
+        row_idx += 1
+
+        lbl_ocr_hz = ctk.CTkLabel(
+            container,
+            text="HP OCR poll rate (Hz):",
+            font=theme.ui_font(S(18)),
+        )
+        lbl_ocr_hz.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+
+        ocr_hz_frame = ctk.CTkFrame(container, fg_color="transparent")
+        ocr_hz_frame.grid(row=row_idx, column=1, padx=S(20), pady=S(10), sticky="w")
+
+        try:
+            _hz_init = float(self.bot_config.get("health_ocr_poll_hz", 5.0))
+        except (TypeError, ValueError):
+            _hz_init = 5.0
+        _hz_init = max(1.0, min(15.0, _hz_init))
+        ocr_hz_var = tk.StringVar(value=f"{_hz_init:.1f}")
+
+        _ocr_primary_on = str(
+            self.bot_config.get("health_ocr_primary", "yes")
+        ).lower() in ("yes", "true", "1")
+        _hz_state = "normal" if _ocr_primary_on else "disabled"
+
+        ocr_hz_slider = ctk.CTkSlider(
+            ocr_hz_frame,
+            from_=1.0,
+            to=15.0,
+            number_of_steps=28,
+            width=S(200),
+            fg_color=theme.INACTIVE,
+            progress_color=theme.ACCENT,
+            button_color=theme.ACCENT,
+            button_hover_color=theme.ACCENT_HOVER,
+            state=_hz_state,
+        )
+        ocr_hz_slider.pack(side="left", padx=S(5))
+
+        ocr_hz_entry = ctk.CTkEntry(
+            ocr_hz_frame,
+            textvariable=ocr_hz_var,
+            width=S(70),
+            font=theme.ui_font(S(16)),
+            state=_hz_state,
+            **theme.entry_kwargs(),
+        )
+        ocr_hz_entry.pack(side="left", padx=S(10))
+
+        def _commit_ocr_hz(value: float):
+            v = max(1.0, min(15.0, float(value)))
+            v = round(v * 2.0) / 2.0
+            self.bot_config["health_ocr_poll_hz"] = v
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        def _on_ocr_hz_slider(value):
+            if ocr_hz_slider.cget("state") == "disabled":
+                return
+            v = max(1.0, min(15.0, float(value)))
+            v = round(v * 2.0) / 2.0
+            ocr_hz_var.set(f"{v:.1f}")
+            _commit_ocr_hz(v)
+
+        def _on_ocr_hz_entry(_evt=None):
+            if ocr_hz_entry.cget("state") == "disabled":
+                return
+            text = ocr_hz_var.get().strip()
+            if not text:
+                ocr_hz_var.set(f"{float(self.bot_config.get('health_ocr_poll_hz', 5.0)):.1f}")
+                return
+            try:
+                v = float(text)
+            except ValueError:
+                ocr_hz_var.set(f"{float(self.bot_config.get('health_ocr_poll_hz', 5.0)):.1f}")
+                return
+            v = max(1.0, min(15.0, v))
+            v = round(v * 2.0) / 2.0
+            ocr_hz_var.set(f"{v:.1f}")
+            ocr_hz_slider.set(v)
+            _commit_ocr_hz(v)
+
+        ocr_hz_slider.configure(command=_on_ocr_hz_slider)
+        ocr_hz_slider.set(_hz_init)
+        ocr_hz_entry.bind("<FocusOut>", _on_ocr_hz_entry)
+        ocr_hz_entry.bind("<Return>", _on_ocr_hz_entry)
+
+        if _ocr_primary_on:
+            self.attach_tooltip(
+                ocr_hz_slider,
+                "How often EasyOCR re-reads the HP number. 5 Hz is a good default; "
+                "higher = more CPU, lower = laggier damage signal. Takes effect on next match.",
+            )
+        else:
+            self.attach_tooltip(
+                ocr_hz_slider,
+                "Disabled because 'health_ocr_primary' is off — HSV is the active HP source.",
+            )
         row_idx += 1
 
         lbl_term_log = ctk.CTkLabel(container, text="Terminal Logging:", font=theme.ui_font(S(18)))

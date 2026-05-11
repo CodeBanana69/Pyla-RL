@@ -391,6 +391,31 @@ class Movement:
         self.health_ocr_max_relative_jump = float(
             bot_config.get("health_ocr_max_relative_jump", 0.4)
         )
+        # OCR-first HP detection (new in OCR-first overhaul)
+        self.health_ocr_primary = str(bot_config.get("health_ocr_primary", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.health_ocr_poll_hz = float(bot_config.get("health_ocr_poll_hz", 5.0))
+        self.health_ocr_run_in_thread = str(
+            bot_config.get("health_ocr_run_in_thread", "auto")
+        ).strip().lower()
+        self.health_ocr_full_hp_lock_repeats = max(
+            1, int(bot_config.get("health_ocr_full_hp_lock_repeats", 2))
+        )
+        self.health_ocr_min_confidence = float(
+            bot_config.get("health_ocr_min_confidence", 0.35)
+        )
+        self.health_ocr_log_terminal = str(
+            bot_config.get("health_ocr_log_terminal", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.health_ocr_damage_drop_min = max(
+            1, int(bot_config.get("health_ocr_damage_drop_min", 1))
+        )
+        self.health_hsv_fallback_enabled = str(
+            bot_config.get("health_hsv_fallback_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -955,6 +980,15 @@ class Play(Movement):
                 min_consecutive_drops=self.health_bar_min_consecutive_drops,
                 ocr_max_relative_jump=self.health_ocr_max_relative_jump,
                 ocr_validate_against_hsv=self.health_ocr_validate_against_hsv,
+                # OCR-first knobs
+                ocr_primary=self.health_ocr_primary,
+                ocr_poll_hz=self.health_ocr_poll_hz,
+                ocr_run_in_thread=self.health_ocr_run_in_thread,
+                ocr_full_hp_lock_repeats=self.health_ocr_full_hp_lock_repeats,
+                ocr_min_confidence=self.health_ocr_min_confidence,
+                ocr_log_terminal=self.health_ocr_log_terminal,
+                ocr_damage_drop_min=self.health_ocr_damage_drop_min,
+                hsv_fallback_enabled=self.health_hsv_fallback_enabled,
             )
             self.red_flash_detector = RedFlashDetector(
                 threshold=self.red_flash_red_dom_threshold,

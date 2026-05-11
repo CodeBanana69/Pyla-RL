@@ -15,6 +15,7 @@ import discord
 import cv2
 import numpy as np
 from packaging import version
+from typing import Optional
 
 DEVELOPER_API_BASE_URL = "https://developer.brawlstars.com/api/"
 _brawl_stars_api_refresh_done = False
@@ -176,13 +177,31 @@ def refresh_brawl_stars_api_token_if_enabled(config, file_path="cfg/brawl_stars_
 
 
 class DefaultEasyOCR:
-    def __init__(self):
+    def __init__(self, *, gpu: Optional[bool] = None, languages: Optional[list] = None):
         import easyocr
 
-        self.reader = easyocr.Reader(['en'])
+        if gpu is None:
+            gpu = False
+            try:
+                import torch  # type: ignore
 
-    def readtext(self, image_input):
-        return self.reader.readtext(image_input)
+                gpu = bool(torch.cuda.is_available())
+            except Exception:
+                gpu = False
+        langs = list(languages) if languages else ["en"]
+        try:
+            self.reader = easyocr.Reader(langs, gpu=gpu)
+        except TypeError:
+            # Older EasyOCR signatures that don't accept gpu=
+            self.reader = easyocr.Reader(langs)
+
+    def readtext(self, image_input, **kwargs):
+        return self.reader.readtext(image_input, **kwargs)
+
+
+def make_digit_ocr_reader():
+    """Factory for a digit-only EasyOCR reader (auto-GPU if torch+CUDA present)."""
+    return DefaultEasyOCR()
 
 
 cached_toml = {}

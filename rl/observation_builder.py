@@ -290,8 +290,21 @@ class ObservationBuilder:
 
         if self.cfg.use_hp:
             hm = getattr(play, "health_monitor", None)
-            if hm is not None and getattr(hm, "last_hp_ok", False) and hm.last_hp_pct is not None:
-                obs[OB_HP_FRAC] = float(np.clip(hm.last_hp_pct, 0.0, 1.0))
+            hp_used: Optional[float] = None
+            if hm is not None:
+                # Prefer the OCR-latched authoritative value when available.
+                if getattr(hm, "max_hp_locked", False):
+                    val_pct = getattr(hm, "hp_value_pct", None)
+                    if val_pct is not None:
+                        hp_used = float(val_pct)
+                if (
+                    hp_used is None
+                    and getattr(hm, "last_hp_ok", False)
+                    and hm.last_hp_pct is not None
+                ):
+                    hp_used = float(hm.last_hp_pct)
+            if hp_used is not None:
+                obs[OB_HP_FRAC] = float(np.clip(hp_used, 0.0, 1.0))
             else:
                 obs[OB_HP_FRAC] = 0.5
             obs[OB_TIME_SINCE_DAMAGE] = 1.0

@@ -97,6 +97,15 @@ sequenceDiagram
 
 These tighten projectile **perception** and the RL **hit signal** when motion/residual layers hallucinate hits during damage flashes or UI tint.
 
+**OCR-first HP detection.** [`rl/health_monitor.py`](../rl/health_monitor.py) now uses **EasyOCR as the source of truth** for player HP. At match start, the first stable read latches `max_hp`; every subsequent accepted read produces `hp_value` and `hp_value_pct`, drives a numeric `DamageEvent`, and prints a per-tick log line like:
+
+```
+[HP] match start full_hp=47900
+[HP] full=47900 cur=39700 dmg=8200 (82.9%)
+```
+
+HSV is still computed cheaply and is used as a fallback **only until OCR latches**. To keep IPS healthy the OCR call runs on a single background worker thread when CUDA is not detected (`utils.DefaultEasyOCR` now auto-passes `gpu=True` if `torch.cuda.is_available()`) and the digit crop is tiny + grayscale + CLAHE + `allowlist="0123456789"`. The poll cadence is configurable via the **HP OCR poll rate (Hz)** slider in the Hub **Additional** tab (default 5 Hz, range 1–15).
+
 | Key | Default | Effect |
 | --- | ------- | ------ |
 | `health_bar_band_offset_px` | `8` | Vertical offset from player box top to HP strip (scaled by window scale factor). |
@@ -109,10 +118,18 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 | `health_bar_yellow_enabled` | `"yes"` | Count yellow/orange HSV as “alive” HP fill (low HP). |
 | `health_bar_shield_enabled` | `"yes"` | Count cyan HSV as “alive” (shield overlay). |
 | `health_bar_min_total_pixels` | `40` | Target minimum colored pixels; the reader also scales this down for very small search crops (near the top of the screen). |
-| `health_bar_min_consecutive_drops` | `2` | Consecutive frames below the prior-window max (by threshold) before emitting a `DamageEvent` (reduces single-frame flicker). |
-| `health_ocr_enabled` | `"yes"` | Optional EasyOCR read of numeric HP (throttled); drives `hp_value` / `observed_max_hp` for debug. |
-| `health_ocr_interval_seconds` | `0.5` | Minimum time between OCR passes. |
-| `health_ocr_validate_against_hsv` | `"yes"` | If OCR fraction and HSV disagree by >25%, `last_hp_status = inconsistent` and HSV is trusted for logic. |
+| `health_bar_min_consecutive_drops` | `2` | Consecutive frames below the prior-window max (by threshold) before emitting an HSV-pre-latch `DamageEvent`. |
+| `health_ocr_primary` | `"yes"` | If `"yes"`, OCR is the source of truth and HSV is fallback-only. Set `"no"` to revert to the legacy HSV-primary pipeline. |
+| `health_ocr_poll_hz` | `5.0` | Per-second OCR cadence. Slider in the Hub Additional tab (1–15 Hz, 0.5 step). Higher = more CPU, lower = laggier damage signal. |
+| `health_ocr_run_in_thread` | `"auto"` | `"auto"` (background thread when no CUDA), `"yes"`, or `"no"` (inline; preferred on GPU). |
+| `health_ocr_full_hp_lock_repeats` | `2` | Consecutive identical reads before `max_hp` latches at match start. |
+| `health_ocr_min_confidence` | `0.35` | Reject OCR reads with EasyOCR confidence below this. |
+| `health_ocr_log_terminal` | `"yes"` | Print `[HP] full=… cur=… dmg=… (xx.x%)` whenever the value changes. |
+| `health_ocr_damage_drop_min` | `1` | Minimum absolute HP drop (in HP, not %) before an OCR-driven `DamageEvent` fires. |
+| `health_hsv_fallback_enabled` | `"yes"` | When OCR has nothing to say (typically the first few frames), fall back to the HSV fill ratio for `last_hp_pct` and event detection. |
+| `health_ocr_enabled` | `"yes"` | Master OCR switch. When `"no"`, behaves like the legacy HSV-only path. |
+| `health_ocr_interval_seconds` | `0.5` | Legacy minimum interval; only honored when `health_ocr_poll_hz <= 0`. |
+| `health_ocr_validate_against_hsv` | `"yes"` | Legacy HSV cross-check (kept for old configs; the OCR-first path ignores HSV after latch). |
 | `health_ocr_max_relative_jump` | `0.4` | Reject OCR readings that jump more than this fraction vs the previous accepted value. |
 | `damage_hp_drop_threshold_pct` | `0.015` | Emit a damage event when valid HP% drops more than this vs rolling max in the prior ~0.4 s window. |
 | `damage_confirm_window_seconds` | `0.5` | Lookback for “recent damage” when confirming tracks and when gating RL hits. |

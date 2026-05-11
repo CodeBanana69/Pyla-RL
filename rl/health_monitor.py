@@ -1,33 +1,134 @@
-"""Player HP bar reading (HSV fill ratio + optional OCR) and damage events."""
+"""Player HP detection (OCR-first, HSV fallback) and damage events.
+
+OCR-first design
+----------------
+EasyOCR is the source of truth. At match start, two stable identical reads of
+the numeric HP latch ``max_hp``. From then on every accepted read produces
+``hp_value`` / ``hp_value_pct`` and feeds the per-frame damage detector. HSV
+fill ratio is still computed cheaply, but it is only used as a fallback when
+OCR has not yet produced a value (e.g. during the first frames of a match or
+when the digit crop is unreadable).
+
+Performance
+-----------
+The OCR call is throttled to a configurable cadence (``ocr_poll_hz``, default
+5 Hz). When CUDA is not available, the OCR pass is dispatched to a single
+background worker thread so the live game loop never blocks waiting for
+EasyOCR. The main loop submits a fresh job at most once per cadence step and
+reads whatever result is currently sitting in the mailbox; stale data by one
+frame is fine because HP changes slowly compared to projectiles.
+"""
 
 from __future__ import annotations
 
 import re
-import time
+import threading
+import time as _time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Deque, List, Literal, Optional, Sequence, Tuple
+from typing import Any, Callable, Deque, List, Literal, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
 
-HpStatus = Literal["ok", "insufficient_pixels", "occluded", "respawn", "inconsistent", "unknown"]
+HpStatus = Literal[
+    "ok",
+    "insufficient_pixels",
+    "occluded",
+    "respawn",
+    "inconsistent",
+    "ocr_pending",
+    "unknown",
+]
 
 
 @dataclass
 class DamageEvent:
-    """Emitted when HP bar percentage drops sharply vs. recent baseline."""
+    """Emitted when HP drops sharply vs. recent baseline.
+
+    ``drop_pct`` is a fractional drop (e.g. 0.17 ≈ 17% of max HP).
+    """
 
     time: float
-    drop_pct: float  # approximate fractional drop (e.g. 0.02 = 2 points)
+    drop_pct: float
+
+
+@dataclass
+class _OcrJob:
+    crop: np.ndarray
+    submitted_at: float
+
+
+@dataclass
+class _OcrResult:
+    value: Optional[int]
+    prob: float
+    done_at: float
+
+
+class _OcrWorker:
+    """Single-slot background OCR worker used when CUDA is not available."""
+
+    def __init__(self, run_inline_fn: Callable[[np.ndarray], Tuple[Optional[int], float]]):
+        self._run = run_inline_fn
+        self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._pending: Optional[_OcrJob] = None
+        self._latest: Optional[_OcrResult] = None
+        self._stop = False
+        self._thread = threading.Thread(target=self._loop, name="HpOcrWorker", daemon=True)
+        self._thread.start()
+
+    def submit(self, crop: np.ndarray, now: float) -> None:
+        with self._cv:
+            # Always overwrite — only the most recent crop matters.
+            self._pending = _OcrJob(crop=crop, submitted_at=now)
+            self._cv.notify()
+
+    def latest(self) -> Optional[_OcrResult]:
+        with self._lock:
+            return self._latest
+
+    def stop(self) -> None:
+        with self._cv:
+            self._stop = True
+            self._cv.notify_all()
+
+    def _loop(self) -> None:
+        while True:
+            with self._cv:
+                while self._pending is None and not self._stop:
+                    self._cv.wait()
+                if self._stop:
+                    return
+                job = self._pending
+                self._pending = None
+            if job is None:
+                continue
+            try:
+                val, prob = self._run(job.crop)
+            except Exception:
+                val, prob = None, 0.0
+            with self._lock:
+                self._latest = _OcrResult(value=val, prob=prob, done_at=_time.time())
+
+
+def _cuda_available() -> bool:
+    try:  # torch is an optional dep for the OCR path
+        import torch  # type: ignore
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
 
 
 class HealthMonitor:
-    """Tracks HP bar fill percentage from HSV pixels above the player box."""
+    """OCR-first HP tracker with HSV fallback and damage event emission."""
 
     def __init__(
         self,
         *,
+        # ── HP-bar / HSV geometry (kept for fallback + visual debug) ──────────
         band_offset_px: float = 8.0,
         band_height_px: float = 14.0,
         search_height_px: float = 40.0,
@@ -42,14 +143,26 @@ class HealthMonitor:
         damage_drop_threshold: float = 0.015,
         prior_window_seconds: float = 0.4,
         history_seconds: float = 2.0,
-        ocr_enabled: bool = True,
-        ocr_interval_seconds: float = 0.5,
         yellow_enabled: bool = True,
         shield_enabled: bool = True,
         min_consecutive_drops: int = 2,
+        # ── Legacy OCR knobs (kept so old configs don't error) ───────────────
+        ocr_enabled: bool = True,
+        ocr_interval_seconds: float = 0.5,
         ocr_max_relative_jump: float = 0.4,
         ocr_validate_against_hsv: bool = True,
+        # ── New OCR-first knobs ──────────────────────────────────────────────
+        ocr_primary: bool = True,
+        ocr_poll_hz: float = 5.0,
+        ocr_run_in_thread: str = "auto",         # "auto" | "yes" | "no"
+        ocr_full_hp_lock_repeats: int = 2,
+        ocr_min_confidence: float = 0.35,
+        ocr_log_terminal: bool = True,
+        ocr_damage_drop_min: int = 1,
+        hsv_fallback_enabled: bool = True,
+        ocr_reader: Optional[Any] = None,        # injected (tests / custom factory)
     ) -> None:
+        # HSV/geometry knobs
         self.band_offset_px = float(band_offset_px)
         self.band_height_px = float(band_height_px)
         self.search_height_px = float(search_height_px)
@@ -64,23 +177,57 @@ class HealthMonitor:
         self.damage_drop_threshold = float(damage_drop_threshold)
         self.prior_window_seconds = float(prior_window_seconds)
         self.history_seconds = float(history_seconds)
-        self.ocr_enabled = bool(ocr_enabled)
-        self.ocr_interval_seconds = float(ocr_interval_seconds)
         self.yellow_enabled = bool(yellow_enabled)
         self.shield_enabled = bool(shield_enabled)
         self.min_consecutive_drops = max(1, int(min_consecutive_drops))
+
+        # Legacy OCR knobs
+        self.ocr_enabled = bool(ocr_enabled)
+        self.ocr_interval_seconds = float(ocr_interval_seconds)
         self.ocr_max_relative_jump = float(ocr_max_relative_jump)
         self.ocr_validate_against_hsv = bool(ocr_validate_against_hsv)
 
+        # OCR-first knobs
+        self.ocr_primary = bool(ocr_primary)
+        # Honor legacy interval if user explicitly disables the new cadence.
+        if float(ocr_poll_hz) <= 0.0 and self.ocr_interval_seconds > 0:
+            ocr_poll_hz = 1.0 / max(0.05, self.ocr_interval_seconds)
+        self.ocr_poll_hz = max(0.5, float(ocr_poll_hz))
+        self.ocr_full_hp_lock_repeats = max(1, int(ocr_full_hp_lock_repeats))
+        self.ocr_min_confidence = float(ocr_min_confidence)
+        self.ocr_log_terminal = bool(ocr_log_terminal)
+        self.ocr_damage_drop_min = max(1, int(ocr_damage_drop_min))
+        self.hsv_fallback_enabled = bool(hsv_fallback_enabled)
+        self._ocr_reader_override = ocr_reader
+
+        # Threading decision
+        choice = str(ocr_run_in_thread).strip().lower()
+        if choice == "yes":
+            use_thread = True
+        elif choice == "no":
+            use_thread = False
+        else:  # "auto"
+            use_thread = not _cuda_available()
+        self._use_thread = bool(use_thread) and ocr_reader is None
+
+        # State
         self._history: Deque[Tuple[float, Optional[float]]] = deque(maxlen=240)
         self._damage_events: Deque[DamageEvent] = deque(maxlen=64)
-        self._last_ocr_time = 0.0
         self._pct_smooth: Deque[Optional[float]] = deque(maxlen=3)
         self._drop_streak = 0
-        self._ocr_repeat_val: Optional[int] = None
-        self._ocr_same_count = 0
-        self._prior_ocr_value: Optional[int] = None
 
+        # OCR runtime state
+        self._last_ocr_submit_t: float = 0.0
+        self._last_ocr_result_consumed_at: float = 0.0
+        self._latch_repeat_val: Optional[int] = None
+        self._latch_repeat_count: int = 0
+        self._max_hp_locked: bool = False
+        self._prev_hp_value: Optional[int] = None
+        self._last_log_value: Optional[int] = None
+        self._worker: Optional[_OcrWorker] = None
+        self._first_after_reset: bool = True
+
+        # Public state (also read by RL / visual debug)
         self.last_hp_pct: Optional[float] = None
         self.last_hp_ok: bool = False
         self.last_hp_status: HpStatus = "unknown"
@@ -88,15 +235,22 @@ class HealthMonitor:
         self.observed_max_hp: int = 0
         self.last_green_red: Tuple[int, int] = (0, 0)
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Match lifecycle
+    # ──────────────────────────────────────────────────────────────────────
     def reset_match(self) -> None:
         self._history.clear()
         self._damage_events.clear()
-        self._last_ocr_time = 0.0
         self._pct_smooth.clear()
         self._drop_streak = 0
-        self._ocr_repeat_val = None
-        self._ocr_same_count = 0
-        self._prior_ocr_value = None
+        self._last_ocr_submit_t = 0.0
+        self._last_ocr_result_consumed_at = 0.0
+        self._latch_repeat_val = None
+        self._latch_repeat_count = 0
+        self._max_hp_locked = False
+        self._prev_hp_value = None
+        self._last_log_value = None
+        self._first_after_reset = True
         self.last_hp_pct = None
         self.last_hp_ok = False
         self.last_hp_status = "unknown"
@@ -104,8 +258,18 @@ class HealthMonitor:
         self.observed_max_hp = 0
         self.last_green_red = (0, 0)
 
+    def close(self) -> None:
+        if self._worker is not None:
+            try:
+                self._worker.stop()
+            except Exception:
+                pass
+            self._worker = None
+
+    # ──────────────────────────────────────────────────────────────────────
+    # HSV pipeline (fallback only)
+    # ──────────────────────────────────────────────────────────────────────
     def _horizontal_crop_x(self, x1: float, x2: float, w: int, sf: float) -> Tuple[int, int]:
-        """Widen the crop vs the player box so the HP bar (often wider than the brawler) fits."""
         if x2 < x1:
             x1, x2 = x2, x1
         half_w = (x2 - x1) * 0.5
@@ -118,11 +282,9 @@ class HealthMonitor:
     def _count_fill_pixels(
         self, hsv: np.ndarray, *, relaxed: bool = False
     ) -> Tuple[int, int, int, int]:
-        """Returns (green, yellow_orange, shield_cyan, red) pixel counts."""
         ms = self.hsv_relaxed_min_saturation if relaxed else self.hsv_min_saturation
         mv = self.hsv_relaxed_min_value if relaxed else self.hsv_min_value
         cyan_ms = max(40, ms - 8) if not relaxed else max(32, ms - 10)
-
         green = cv2.inRange(
             hsv,
             np.array((35, ms, mv), dtype=np.uint8),
@@ -139,7 +301,6 @@ class HealthMonitor:
             np.array((179, 255, 255), dtype=np.uint8),
         )
         red = cv2.bitwise_or(r1, r2)
-
         yellow = np.zeros_like(red)
         if self.yellow_enabled:
             yellow = cv2.inRange(
@@ -147,7 +308,6 @@ class HealthMonitor:
                 np.array((15, ms, mv), dtype=np.uint8),
                 np.array((34, 255, 255), dtype=np.uint8),
             )
-
         cyan = np.zeros_like(red)
         if self.shield_enabled:
             cyan = cv2.inRange(
@@ -155,7 +315,6 @@ class HealthMonitor:
                 np.array((85, cyan_ms, mv), dtype=np.uint8),
                 np.array((105, 255, 255), dtype=np.uint8),
             )
-
         return (
             int(cv2.countNonZero(green)),
             int(cv2.countNonZero(yellow)),
@@ -164,12 +323,6 @@ class HealthMonitor:
         )
 
     def _count_fill_pixels_ui_rescue(self, hsv: np.ndarray) -> Tuple[int, int, int, int]:
-        """Last-resort HSV ranges for Brawl HP bars that fail strict/relaxed passes.
-
-        Some skins use very bright, low-saturation greens near full HP; widening
-        Hue for green and relaxing S/V avoids false ``insufficient_pixels`` when
-        the bar is actually full.
-        """
         ms = max(14, int(self.hsv_relaxed_min_saturation) - 22)
         mv = max(14, int(self.hsv_relaxed_min_value) - 25)
         green = cv2.inRange(
@@ -188,7 +341,6 @@ class HealthMonitor:
             np.array((179, 255, 255), dtype=np.uint8),
         )
         red = cv2.bitwise_or(r1, r2)
-
         yellow = np.zeros_like(red)
         if self.yellow_enabled:
             yellow = cv2.inRange(
@@ -196,7 +348,6 @@ class HealthMonitor:
                 np.array((12, ms, mv), dtype=np.uint8),
                 np.array((34, 255, 255), dtype=np.uint8),
             )
-
         cyan = np.zeros_like(red)
         if self.shield_enabled:
             cyan_ms = max(26, ms - 10)
@@ -205,7 +356,6 @@ class HealthMonitor:
                 np.array((80, cyan_ms, mv), dtype=np.uint8),
                 np.array((108, 255, 255), dtype=np.uint8),
             )
-
         return (
             int(cv2.countNonZero(green)),
             int(cv2.countNonZero(yellow)),
@@ -223,7 +373,7 @@ class HealthMonitor:
         player_box: Sequence[float],
         scale_factor: float,
     ) -> Tuple[Optional[float], bool, Tuple[int, int]]:
-        """Return (hp_pct 0..1 or None, ok, (alive_px, red_px))."""
+        """HSV fill ratio (0..1). Kept for fallback + visual debug."""
         if frame_rgb is None or frame_rgb.size == 0 or len(player_box) < 4:
             self.last_hp_status = "unknown"
             return None, False, (0, 0)
@@ -234,24 +384,20 @@ class HealthMonitor:
             x1, x2 = x2, x1
         if y2 < y1:
             y1, y2 = y2, y1
-
         bx1, bx2 = self._horizontal_crop_x(x1, x2, w, sf)
         off = max(2.0, self.band_offset_px * sf)
         bh = max(4.0, self.band_height_px * sf)
         search_h = max(bh, self.search_height_px * sf)
-
         band_bot = int(y1 - off)
         search_top = max(0, int(band_bot - search_h))
         search_bot = min(h, max(search_top + 2, band_bot))
         if search_bot <= search_top or bx2 <= bx1:
             self.last_hp_status = "insufficient_pixels"
             return None, False, (0, 0)
-
         search_strip = frame_rgb[search_top:search_bot, bx1:bx2]
         if search_strip.size == 0:
             self.last_hp_status = "insufficient_pixels"
             return None, False, (0, 0)
-
         hsv_full = cv2.cvtColor(search_strip, cv2.COLOR_RGB2HSV)
         nrow = hsv_full.shape[0]
         bh_i = max(2, int(round(bh)))
@@ -261,8 +407,6 @@ class HealthMonitor:
             row_counts = np.zeros(nrow, dtype=np.int32)
             for ri in range(nrow):
                 row_counts[ri] = self._row_density(hsv_full[ri : ri + 1, :, :])
-            # If strict HSV misses the UI tint entirely, retry rows with relaxed thresholds
-            # so the adaptive slab still lands on the real bar.
             if int(row_counts.max()) <= 0:
                 for ri in range(nrow):
                     row_counts[ri] = self._row_density(hsv_full[ri : ri + 1, :, :], relaxed=True)
@@ -275,9 +419,7 @@ class HealthMonitor:
         crop_rows = min(bh_i, nrow)
         crop_cols = max(1, int(crop_hsv.shape[1]))
         crop_area = max(1, crop_rows * crop_cols)
-        # Small vertical search windows (near top of screen) need a lower floor than 40.
         min_need = max(8, min(self.min_total_pixels, max(12, int(crop_area * 0.017))))
-
         g, ye, cy, r = self._count_fill_pixels(crop_hsv)
         alive = g + ye + cy
         total = alive + r
@@ -295,19 +437,25 @@ class HealthMonitor:
             if total3 >= min_need:
                 g, ye, cy, r = g3, ye3, cy3, r3
                 alive, total = alive3, total3
-
         self.last_green_red = (alive, r)
-
         if total < min_need:
             self.last_hp_status = "insufficient_pixels"
             return None, False, (alive, r)
-
         pct = float(alive) / float(total)
         self.last_hp_status = "ok"
         return pct, True, (alive, r)
 
-    def _ocr_hp_value(self, frame_rgb: np.ndarray, player_box: Sequence[float], scale_factor: float) -> Optional[int]:
-        if not self.ocr_enabled:
+    # ──────────────────────────────────────────────────────────────────────
+    # OCR pipeline (primary)
+    # ──────────────────────────────────────────────────────────────────────
+    def _build_digit_crop(
+        self,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> Optional[np.ndarray]:
+        """Tiny grayscale crop above the player's HP bar, upscaled for OCR."""
+        if frame_rgb is None or frame_rgb.size == 0 or len(player_box) < 4:
             return None
         h, w = frame_rgb.shape[:2]
         sf = max(0.25, float(scale_factor))
@@ -320,23 +468,61 @@ class HealthMonitor:
         extra = max(8.0, self.digit_band_extra_px * sf)
         off = max(2.0, self.band_offset_px * sf)
         bh = max(4.0, self.band_height_px * sf)
-        digit_top = int(y1 - off - bh - extra)
-        digit_bot = int(y1 - off + 4)
-        digit_top = max(0, digit_top)
-        digit_bot = min(h, max(digit_top + 4, digit_bot))
-        crop = frame_rgb[digit_top:digit_bot, bx1:bx2]
-        if crop.size == 0 or crop.shape[0] < 4 or crop.shape[1] < 8:
+        digit_top = max(0, int(y1 - off - bh - extra))
+        digit_bot = min(h, max(digit_top + 4, int(y1 - off + 4)))
+        if digit_bot - digit_top < 6 or bx2 - bx1 < 10:
             return None
+        crop = frame_rgb[digit_top:digit_bot, bx1:bx2]
+        if crop.size == 0:
+            return None
+        try:
+            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+            gray = clahe.apply(gray)
+            up = cv2.resize(
+                gray, (gray.shape[1] * 2, gray.shape[0] * 2), interpolation=cv2.INTER_CUBIC
+            )
+            return up
+        except Exception:
+            return None
+
+    def _get_reader(self) -> Optional[Any]:
+        if self._ocr_reader_override is not None:
+            return self._ocr_reader_override
         try:
             from utils import get_ocr_reader
 
-            reader = get_ocr_reader()
-            results = reader.readtext(crop)
+            return get_ocr_reader()
         except Exception:
             return None
+
+    def _run_ocr_inline(self, crop: np.ndarray) -> Tuple[Optional[int], float]:
+        """Synchronous OCR call. Returns (best_int_value, best_prob)."""
+        reader = self._get_reader()
+        if reader is None:
+            return None, 0.0
+        try:
+            results = reader.readtext(
+                crop,
+                allowlist="0123456789",
+                paragraph=False,
+                detail=1,
+            )
+        except TypeError:
+            # Test stubs / older readers may not accept the kwargs.
+            try:
+                results = reader.readtext(crop)
+            except Exception:
+                return None, 0.0
+        except Exception:
+            return None, 0.0
         best_val: Optional[int] = None
         best_prob = 0.0
-        for _bbox, text, prob in results:
+        for item in results or []:
+            try:
+                _bbox, text, prob = item
+            except (TypeError, ValueError):
+                continue
             digits = re.sub(r"[^\d]", "", str(text))
             if not digits:
                 continue
@@ -344,17 +530,89 @@ class HealthMonitor:
                 val = int(digits)
             except ValueError:
                 continue
-            if prob > best_prob and val > 0:
-                best_prob = prob
+            if val <= 0:
+                continue
+            if float(prob) > best_prob:
+                best_prob = float(prob)
                 best_val = val
-        return best_val
+        return best_val, best_prob
 
-    def _median_smooth_pct(self) -> Optional[float]:
-        vals = [p for p in self._pct_smooth if p is not None]
-        if not vals:
+    def _submit_or_read_ocr(
+        self,
+        now: float,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> Optional[Tuple[int, float]]:
+        """Returns a *newly available* (value, prob) reading or None.
+
+        Honors the cadence gate (``ocr_poll_hz``). The very first call after
+        ``reset_match`` always runs to seed ``max_hp`` quickly.
+        """
+        if not self.ocr_primary or not self.ocr_enabled:
             return None
-        return float(np.median(np.asarray(vals, dtype=np.float64)))
+        period = 1.0 / max(0.5, self.ocr_poll_hz)
+        force_now = self._first_after_reset
+        if not force_now and (now - self._last_ocr_submit_t) < period:
+            # Still inside cadence window — surface any new threaded result.
+            if self._worker is not None:
+                res = self._worker.latest()
+                if res is not None and res.done_at > self._last_ocr_result_consumed_at:
+                    self._last_ocr_result_consumed_at = res.done_at
+                    if res.value is not None and res.prob >= self.ocr_min_confidence:
+                        return res.value, res.prob
+            return None
 
+        crop = self._build_digit_crop(frame_rgb, player_box, scale_factor)
+        self._last_ocr_submit_t = now
+        self._first_after_reset = False
+        if crop is None:
+            return None
+
+        if self._use_thread:
+            if self._worker is None:
+                self._worker = _OcrWorker(self._run_ocr_inline)
+            self._worker.submit(crop, now)
+            res = self._worker.latest()
+            if res is not None and res.done_at > self._last_ocr_result_consumed_at:
+                self._last_ocr_result_consumed_at = res.done_at
+                if res.value is not None and res.prob >= self.ocr_min_confidence:
+                    return res.value, res.prob
+            return None
+
+        val, prob = self._run_ocr_inline(crop)
+        if val is None or prob < self.ocr_min_confidence:
+            return None
+        return val, prob
+
+    def _try_latch_max_hp(self, val: int) -> None:
+        if self._max_hp_locked:
+            return
+        if self._latch_repeat_val == val:
+            self._latch_repeat_count += 1
+        else:
+            self._latch_repeat_val = val
+            self._latch_repeat_count = 1
+        if self._latch_repeat_count >= self.ocr_full_hp_lock_repeats:
+            self.observed_max_hp = int(val)
+            self._max_hp_locked = True
+            if self.ocr_log_terminal:
+                print(f"[HP] match start full_hp={self.observed_max_hp}")
+
+    def _log_terminal(self, cur: int) -> None:
+        if not self.ocr_log_terminal:
+            return
+        if self._last_log_value == cur:
+            return
+        self._last_log_value = cur
+        full = max(1, int(self.observed_max_hp))
+        dmg = max(0, full - int(cur))
+        pct = 100.0 * float(cur) / float(full)
+        print(f"[HP] full={full} cur={cur} dmg={dmg} ({pct:.1f}%)")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Main update
+    # ──────────────────────────────────────────────────────────────────────
     def update(
         self,
         now: float,
@@ -363,7 +621,7 @@ class HealthMonitor:
         scale_factor: float,
         respawning_check: Optional[Callable[[], bool]] = None,
     ) -> Optional[DamageEvent]:
-        """Append HP reading; emit DamageEvent on sharp drop. Returns latest event if any this frame."""
+        """Update HP state for this frame; return a fresh DamageEvent on big drops."""
         if respawning_check and respawning_check():
             self.last_hp_ok = False
             self.last_hp_status = "respawn"
@@ -373,93 +631,150 @@ class HealthMonitor:
             self.last_hp_status = "unknown"
             return None
 
-        hp_pct_raw, ok, _gr = self.read_hp_band(frame_rgb, player_box, scale_factor)
-        self._pct_smooth.append(hp_pct_raw if ok else None)
+        # OCR-first
+        ocr_pair = self._submit_or_read_ocr(now, frame_rgb, player_box, scale_factor)
+        ocr_val: Optional[int] = None
+        if ocr_pair is not None:
+            ocr_val = int(ocr_pair[0])
+            # Cheap sanity: a sudden 10× spike vs the prior accepted value is OCR
+            # garbage (e.g. "47900" misread as "479000"). Drop it.
+            if self._prev_hp_value is not None and self._prev_hp_value > 0:
+                base = float(self._prev_hp_value)
+                if abs(ocr_val - self._prev_hp_value) / base > self.ocr_max_relative_jump and (
+                    self._max_hp_locked or ocr_val > base * 2.0
+                ):
+                    ocr_val = None
+            if ocr_val is not None and self.observed_max_hp > 0:
+                if ocr_val > int(self.observed_max_hp * 1.2 + 0.5):
+                    ocr_val = None
+
+        # HSV (fallback / visual-debug only)
+        hp_pct_raw: Optional[float] = None
+        hsv_ok = False
+        if self.hsv_fallback_enabled or not self.ocr_primary:
+            hp_pct_raw, hsv_ok, _gr = self.read_hp_band(frame_rgb, player_box, scale_factor)
+        self._pct_smooth.append(hp_pct_raw if hsv_ok else None)
         hp_pct_med = self._median_smooth_pct()
-        self.last_hp_pct = hp_pct_med if hp_pct_med is not None else hp_pct_raw
-        self.last_hp_ok = ok and hp_pct_med is not None
 
-        if now - self._last_ocr_time >= self.ocr_interval_seconds:
-            self._last_ocr_time = now
-            ocr_raw = self._ocr_hp_value(frame_rgb, player_box, scale_factor)
-            if ocr_raw is not None:
-                if self.observed_max_hp > 0 and ocr_raw > int(self.observed_max_hp * 1.2 + 0.5):
-                    ocr_raw = None
-                if ocr_raw is not None and self._prior_ocr_value is not None:
-                    base = max(1, int(self._prior_ocr_value))
-                    if abs(ocr_raw - self._prior_ocr_value) / float(base) > self.ocr_max_relative_jump:
-                        ocr_raw = None
-                if ocr_raw is not None:
-                    if ocr_raw == self._ocr_repeat_val:
-                        self._ocr_same_count += 1
-                    else:
-                        self._ocr_repeat_val = ocr_raw
-                        self._ocr_same_count = 1
-                    if self._ocr_same_count >= 2:
-                        self.observed_max_hp = max(self.observed_max_hp, ocr_raw)
-                    self.hp_value = ocr_raw
-                    self._prior_ocr_value = ocr_raw
-                    if (
-                        self.ocr_validate_against_hsv
-                        and hp_pct_med is not None
-                        and self.observed_max_hp > 0
-                    ):
-                        ocr_frac = float(ocr_raw) / float(max(1, self.observed_max_hp))
-                        if abs(ocr_frac - float(hp_pct_med)) > 0.25:
-                            self.last_hp_status = "inconsistent"
-                        elif ok:
-                            self.last_hp_status = "ok"
-                    elif ok:
-                        self.last_hp_status = "ok"
-
+        # Resolve HP percentage + emit damage events
         emitted: Optional[DamageEvent] = None
-        hp_use = hp_pct_med if hp_pct_med is not None else hp_pct_raw
-        if ok and hp_use is not None:
-            prior_max: Optional[float] = None
-            for t, p in self._history:
-                dt = now - t
-                if 1e-6 < dt <= self.prior_window_seconds and p is not None:
-                    prior_max = p if prior_max is None else max(prior_max, p)
+        if ocr_val is not None:
+            if not self._max_hp_locked:
+                self._try_latch_max_hp(ocr_val)
+            if self._max_hp_locked:
+                full = int(self.observed_max_hp)
+                cur = int(ocr_val)
+                hp_pct = float(cur) / float(max(1, full))
+                hp_pct = float(np.clip(hp_pct, 0.0, 1.0))
+                self.last_hp_pct = hp_pct
+                self.last_hp_ok = True
+                self.last_hp_status = "ok"
+                self.hp_value = cur
+                self._log_terminal(cur)
 
-            self._history.append((now, hp_use))
-
-            cutoff = now - self.history_seconds
-            while self._history and self._history[0][0] < cutoff:
-                self._history.popleft()
-
-            dropping = (
-                prior_max is not None
-                and hp_use < prior_max - self.damage_drop_threshold
-            )
-            if dropping:
-                self._drop_streak += 1
+                # OCR-driven damage event
+                if self._prev_hp_value is not None and self._prev_hp_value > cur:
+                    drop_hp = int(self._prev_hp_value - cur)
+                    min_drop_hp = max(
+                        self.ocr_damage_drop_min,
+                        int(full * self.damage_drop_threshold + 0.5),
+                    )
+                    if drop_hp >= min_drop_hp:
+                        drop_pct = float(drop_hp) / float(max(1, full))
+                        ev = DamageEvent(time=now, drop_pct=drop_pct)
+                        self._damage_events.append(ev)
+                        emitted = ev
+                self._prev_hp_value = cur
             else:
-                self._drop_streak = 0
-
+                # Seen one OCR digit, still latching — surface partial state
+                self.last_hp_pct = 1.0
+                self.last_hp_ok = False
+                self.last_hp_status = "ocr_pending"
+                self.hp_value = ocr_val
+        else:
+            # No OCR this tick: use HSV fallback if enabled and OCR has never latched.
             if (
-                prior_max is not None
-                and hp_use < prior_max - self.damage_drop_threshold
-                and self._drop_streak >= self.min_consecutive_drops
+                self.hsv_fallback_enabled
+                and not self._max_hp_locked
+                and (hp_pct_med is not None or hp_pct_raw is not None)
             ):
-                drop = float(prior_max - hp_use)
-                emitted = DamageEvent(time=now, drop_pct=drop)
-                self._damage_events.append(emitted)
-                self._drop_streak = 0
+                hp_pct = hp_pct_med if hp_pct_med is not None else hp_pct_raw
+                self.last_hp_pct = hp_pct
+                self.last_hp_ok = hsv_ok
+                if hsv_ok:
+                    self.last_hp_status = "ok"
+                emitted = self._maybe_emit_hsv_damage(now, hp_pct, hsv_ok)
+            elif self._max_hp_locked:
+                # Keep the last good OCR percent — don't fall back to HSV after latching.
+                self.last_hp_ok = self.last_hp_pct is not None
+                if self.last_hp_ok:
+                    self.last_hp_status = "ok"
+            else:
+                self.last_hp_ok = False
+                if self.last_hp_status not in ("respawn", "unknown"):
+                    self.last_hp_status = "ocr_pending"
 
         return emitted
 
+    def _maybe_emit_hsv_damage(
+        self,
+        now: float,
+        hp_use: Optional[float],
+        hsv_ok: bool,
+    ) -> Optional[DamageEvent]:
+        if not hsv_ok or hp_use is None:
+            return None
+        prior_max: Optional[float] = None
+        for t, p in self._history:
+            dt = now - t
+            if 1e-6 < dt <= self.prior_window_seconds and p is not None:
+                prior_max = p if prior_max is None else max(prior_max, p)
+        self._history.append((now, hp_use))
+        cutoff = now - self.history_seconds
+        while self._history and self._history[0][0] < cutoff:
+            self._history.popleft()
+        dropping = (
+            prior_max is not None and hp_use < prior_max - self.damage_drop_threshold
+        )
+        if dropping:
+            self._drop_streak += 1
+        else:
+            self._drop_streak = 0
+        if (
+            prior_max is not None
+            and hp_use < prior_max - self.damage_drop_threshold
+            and self._drop_streak >= self.min_consecutive_drops
+        ):
+            drop = float(prior_max - hp_use)
+            ev = DamageEvent(time=now, drop_pct=drop)
+            self._damage_events.append(ev)
+            self._drop_streak = 0
+            return ev
+        return None
+
+    def _median_smooth_pct(self) -> Optional[float]:
+        vals = [p for p in self._pct_smooth if p is not None]
+        if not vals:
+            return None
+        return float(np.median(np.asarray(vals, dtype=np.float64)))
+
+    # ──────────────────────────────────────────────────────────────────────
+    # External getters
+    # ──────────────────────────────────────────────────────────────────────
     def recent_damage_event(self, now: float, lookback_seconds: float) -> Optional[DamageEvent]:
         """Most recent damage event within ``lookback_seconds``."""
         lb = float(lookback_seconds)
-        best: Optional[DamageEvent] = None
         for ev in reversed(self._damage_events):
             if now - ev.time <= lb:
-                best = ev
-                break
-        return best
+                return ev
+        return None
 
     @property
     def hp_value_pct(self) -> Optional[float]:
         if self.hp_value is None or self.observed_max_hp <= 0:
             return None
         return float(self.hp_value) / float(self.observed_max_hp)
+
+    @property
+    def max_hp_locked(self) -> bool:
+        return bool(self._max_hp_locked)
