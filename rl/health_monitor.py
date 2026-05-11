@@ -163,6 +163,56 @@ class HealthMonitor:
             int(cv2.countNonZero(red)),
         )
 
+    def _count_fill_pixels_ui_rescue(self, hsv: np.ndarray) -> Tuple[int, int, int, int]:
+        """Last-resort HSV ranges for Brawl HP bars that fail strict/relaxed passes.
+
+        Some skins use very bright, low-saturation greens near full HP; widening
+        Hue for green and relaxing S/V avoids false ``insufficient_pixels`` when
+        the bar is actually full.
+        """
+        ms = max(14, int(self.hsv_relaxed_min_saturation) - 22)
+        mv = max(14, int(self.hsv_relaxed_min_value) - 25)
+        green = cv2.inRange(
+            hsv,
+            np.array((22, ms, mv), dtype=np.uint8),
+            np.array((92, 255, 255), dtype=np.uint8),
+        )
+        r1 = cv2.inRange(
+            hsv,
+            np.array((0, ms, mv), dtype=np.uint8),
+            np.array((16, 255, 255), dtype=np.uint8),
+        )
+        r2 = cv2.inRange(
+            hsv,
+            np.array((168, ms, mv), dtype=np.uint8),
+            np.array((179, 255, 255), dtype=np.uint8),
+        )
+        red = cv2.bitwise_or(r1, r2)
+
+        yellow = np.zeros_like(red)
+        if self.yellow_enabled:
+            yellow = cv2.inRange(
+                hsv,
+                np.array((12, ms, mv), dtype=np.uint8),
+                np.array((34, 255, 255), dtype=np.uint8),
+            )
+
+        cyan = np.zeros_like(red)
+        if self.shield_enabled:
+            cyan_ms = max(26, ms - 10)
+            cyan = cv2.inRange(
+                hsv,
+                np.array((80, cyan_ms, mv), dtype=np.uint8),
+                np.array((108, 255, 255), dtype=np.uint8),
+            )
+
+        return (
+            int(cv2.countNonZero(green)),
+            int(cv2.countNonZero(yellow)),
+            int(cv2.countNonZero(cyan)),
+            int(cv2.countNonZero(red)),
+        )
+
     def _row_density(self, hsv_rows: np.ndarray, *, relaxed: bool = False) -> int:
         g, y, c, r = self._count_fill_pixels(hsv_rows, relaxed=relaxed)
         return g + y + c + r
@@ -238,6 +288,13 @@ class HealthMonitor:
             if total2 >= min_need:
                 g, ye, cy, r = g2, ye2, cy2, r2
                 alive, total = alive2, total2
+        if total < min_need:
+            g3, ye3, cy3, r3 = self._count_fill_pixels_ui_rescue(crop_hsv)
+            alive3 = g3 + ye3 + cy3
+            total3 = alive3 + r3
+            if total3 >= min_need:
+                g, ye, cy, r = g3, ye3, cy3, r3
+                alive, total = alive3, total3
 
         self.last_green_red = (alive, r)
 

@@ -1,5 +1,7 @@
 ﻿import customtkinter as ctk
 import asyncio
+import subprocess
+import sys
 import threading
 import webbrowser
 import os
@@ -81,6 +83,29 @@ class Hub:
         self.bot_config.setdefault("current_playstyle", "default.pyla")
         self.bot_config.setdefault("use_rl_movement", "no")
         self.bot_config.setdefault("enable_rl_movement_training", "no")
+        self.bot_config.setdefault("rl_algorithm", "sac")
+        self.bot_config.setdefault("rl_record_transitions", self.bot_config.get("enable_rl_movement_training", "no"))
+        self.bot_config.setdefault("rl_replay_dir", "data/rl_replay")
+        self.bot_config.setdefault("rl_replay_disk_budget_mb", 2048)
+        self.bot_config.setdefault("rl_replay_batch_size", 1000)
+        self.bot_config.setdefault("rl_replay_flush_seconds", 30.0)
+        self.bot_config.setdefault("rl_frame_stack", 1)
+        self.bot_config.setdefault("rl_obs_use_hp", "yes")
+        self.bot_config.setdefault("rl_obs_use_fog", "yes")
+        self.bot_config.setdefault("rl_obs_use_walls", "yes")
+        self.bot_config.setdefault("rl_obs_use_super", "yes")
+        self.bot_config.setdefault("rl_fog_ray_max_px", 200.0)
+        self.bot_config.setdefault("rl_fog_ray_step_px", 4.0)
+        self.bot_config.setdefault("rl_damage_lookback_norm_seconds", 5.0)
+        self.bot_config.setdefault("rl_hp_potential_coef", 1.0)
+        self.bot_config.setdefault("rl_stationary_penalty", 0.05)
+        self.bot_config.setdefault("rl_stationary_need_seconds", 2.0)
+        self.bot_config.setdefault("rl_stationary_small_action_mag", 0.1)
+        self.bot_config.setdefault("rl_wall_hug_penalty", 0.05)
+        self.bot_config.setdefault("rl_wall_hug_min_walls", 3)
+        self.bot_config.setdefault("rl_fog_proximity_penalty", 0.10)
+        self.bot_config.setdefault("rl_fog_proximity_threshold", 0.15)
+        self.bot_config.setdefault("rl_sac_gamma", 0.97)
         self.bot_config.setdefault("rl_movement_model_path", "models/rl_movement_policy.zip")
         self.bot_config.setdefault("rl_use_projectile_features", "yes")
         self.bot_config.setdefault("rl_show_projectile_debug", "yes")
@@ -322,6 +347,40 @@ class Hub:
         widget.bind("<Unmap>", on_leave, add="+")  # IMPORTANT: tab switching / frame hidden
         widget.bind("<Destroy>", on_leave, add="+")  # safety
         widget.bind("<ButtonPress>", on_leave, add="+")  # click on the widget -> hide
+
+    def _launch_train_rl_offline(self) -> None:
+        """Spawn offline SAC trainer (replay .npz → gradient steps)."""
+        hub_dir = Path(__file__).resolve().parent
+        root = hub_dir.parent
+        script = root / "tools" / "train_rl_offline.py"
+        if not script.is_file():
+            print(f"[Hub] Missing {script}")
+            return
+        rep = str(self.bot_config.get("rl_replay_dir", "data/rl_replay"))
+        mod = str(self.bot_config.get("rl_movement_model_path", "models/rl_movement_policy.zip"))
+        gam = str(self.bot_config.get("rl_sac_gamma", 0.97))
+        cmd = [
+            sys.executable,
+            str(script),
+            "--replay-dir",
+            os.path.expandvars(os.path.expanduser(rep)),
+            "--model-path",
+            os.path.expandvars(os.path.expanduser(mod)),
+            "--total-steps",
+            "200000",
+            "--gamma",
+            gam,
+            "--tensorboard",
+            str(root / "runs" / "rl_sac"),
+            "--device",
+            "auto",
+        ]
+        cwd = str(root)
+        cf = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if sys.platform == "win32" else 0
+        try:
+            subprocess.Popen(cmd, cwd=cwd, creationflags=cf)
+        except Exception as exc:
+            print(f"[Hub] Could not launch offline trainer: {exc}")
 
     # ---------------------------------------------------------------------------------------------
     #  Overview Tab
@@ -1040,14 +1099,16 @@ class Hub:
         )
         row_idx += 1
 
-        lbl_rl_train = ctk.CTkLabel(container, text="Enable RL Movement Training:", font=theme.ui_font(S(18)))
+        lbl_rl_train = ctk.CTkLabel(container, text="Record RL transitions (offline training):", font=theme.ui_font(S(18)))
         lbl_rl_train.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
         rl_train_var = tk.BooleanVar(
             value=(str(self.bot_config["enable_rl_movement_training"]).lower() in ["yes", "true"])
         )
 
         def toggle_rl_training():
-            self.bot_config["enable_rl_movement_training"] = "yes" if rl_train_var.get() else "no"
+            yn = "yes" if rl_train_var.get() else "no"
+            self.bot_config["enable_rl_movement_training"] = yn
+            self.bot_config["rl_record_transitions"] = yn
             save_dict_as_toml(self.bot_config, self.bot_config_path)
 
         rl_train_cb = ctk.CTkCheckBox(
@@ -1062,7 +1123,28 @@ class Hub:
         rl_train_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
         self.attach_tooltip(
             rl_train_cb,
-            "ON: collect rollouts and update RL movement weights. OFF: load pretrained policy for inference only. Requires Use RL Movement to be ON. Takes effect on next bot start."
+            "When ON while Use RL Movement is ON, saves executed (s,a,r,s') batches under rl_replay_dir for python tools/train_rl_offline.py. "
+            "The live bot no longer runs gradient updates. Takes effect on next bot start.",
+        )
+        row_idx += 1
+
+        lbl_train_offline = ctk.CTkLabel(
+            container, text="Train RL offline:", font=theme.ui_font(S(18))
+        )
+        lbl_train_offline.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+
+        train_offline_btn = ctk.CTkButton(
+            container,
+            text="Train RL Offline (200k steps)",
+            font=theme.ui_font(S(16)),
+            width=S(280),
+            height=S(36),
+            command=self._launch_train_rl_offline,
+        )
+        train_offline_btn.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            train_offline_btn,
+            "Runs tools/train_rl_offline.py in a new console using rl_replay_dir, rl_movement_model_path, and rl_sac_gamma from cfg/bot_config.toml.",
         )
         row_idx += 1
 

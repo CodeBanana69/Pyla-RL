@@ -20,23 +20,24 @@ Action: Box([-1, -1], [1, 1], dtype=float32). The policy bridge maps
 this 2D direction to either a joystick angle (showdown) or a WASD
 string (3v3 modes).
 
-Reward: shaped to match the user's brief:
-    +0.01 / step survival
-    + small bonus for staying in the safe band around the nearest enemy
-    + small bonus for staying near the closest teammate
-    -1.0 (default) on projectile-tracker hit OR on HealthMonitor HP drop
-         (controlled by RewardConfig.use_hp_drop_penalty)
-    episode-end terminal reward from ``episode_terminal_reward`` (showdown rank
-    or 3v3 victory/defeat), not mixed into ``compute_reward`` per frame.
+Reward (live SAC): ``compute_reward_v2`` combines survival, Gaussian
+enemy/teammate distance shaping, PBRS-style HP deltas, optional projectile
+/ HP-drop penalties, and fog / wall / stationary penalties scaled by real
+``dt``. Legacy ``compute_reward`` still mirrors the original 8+N-step-function
+layout for tests. Episode-end placement uses ``episode_terminal_reward`` on
+``RLMovementBridge.on_match_reset``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from rl.observation_builder import ObservationBuilderState
 
 try:  # pragma: no cover - import guarded for offline test environments
     import gymnasium as gym
@@ -94,6 +95,15 @@ class RewardConfig:
     use_hp_drop_penalty: bool = False
     rank_reward_table: Dict[str, float] = field(default_factory=_default_rank_reward_table)
     episode_end_fallback_reward: float = 0.0
+    # --- SAC / rich-obs shaping (compute_reward_v2) ---
+    hp_potential_coef: float = 1.0
+    stationary_penalty: float = 0.05
+    stationary_small_action_mag: float = 0.1
+    stationary_need_seconds: float = 2.0
+    wall_hug_penalty: float = 0.05
+    wall_hug_min_walls: int = 3
+    fog_proximity_penalty: float = 0.10
+    fog_proximity_threshold: float = 0.15
 
 
 @dataclass
@@ -204,6 +214,105 @@ def compute_reward(
     else:
         if projectile_hit:
             reward += cfg.projectile_hit_penalty
+
+    return float(reward)
+
+
+def _tail_rich_frame(obs: np.ndarray) -> np.ndarray:
+    from rl.observation_builder import SINGLE_OBS_DIM
+
+    tail = np.asarray(obs, dtype=np.float64).reshape(-1)
+    if tail.size >= SINGLE_OBS_DIM:
+        return tail[-SINGLE_OBS_DIM:]
+    out = np.zeros(SINGLE_OBS_DIM, dtype=np.float64)
+    if tail.size > 0:
+        out[-tail.size :] = tail
+    return out
+
+
+def compute_reward_v2(
+    obs: np.ndarray,
+    prev_obs: Optional[np.ndarray],
+    play: Any,
+    data: Dict[str, Any],
+    current_time: float,
+    dt: float,
+    cfg: Optional[RewardConfig] = None,
+    *,
+    projectile_hit: bool = False,
+    hp_damage: bool = False,
+    last_action: Optional[np.ndarray] = None,
+    ob_state: Optional["ObservationBuilderState"] = None,
+) -> float:
+    """Dense reward using the trailing rich observation frame (+ game context).
+
+    Gaussian distance shaping, PBRS on HP fraction, discrete damage penalty,
+    fog / wall / stationary penalties scaled by ``dt``.
+    """
+
+    cfg = cfg or RewardConfig()
+    reward = cfg.survival_per_step
+
+    tail = _tail_rich_frame(obs)
+    prev_tail = _tail_rich_frame(prev_obs) if prev_obs is not None else None
+
+    from rl.observation_builder import (
+        OB_ENEMY1_DIST,
+        OB_TEAM_DIST,
+        OB_FOG_NY,
+        OB_FOG_PX,
+        OB_HP_FRAC,
+        stationary_seconds,
+        wall_quadrant_counts,
+    )
+
+    # Gaussian enemy distance
+    d_en = float(tail[int(OB_ENEMY1_DIST)])
+    t_mid = (cfg.safe_distance_band_min + cfg.safe_distance_band_max) * 0.5
+    sigma_e = max(1e-6, (cfg.safe_distance_band_max - cfg.safe_distance_band_min) * 0.5)
+    reward += cfg.safe_distance_bonus * float(np.exp(-((d_en - t_mid) / sigma_e) ** 2))
+
+    d_tm = float(tail[int(OB_TEAM_DIST)])
+    t_mid_t = (cfg.teammate_band_min + cfg.teammate_band_max) * 0.5
+    sigma_t = max(1e-6, (cfg.teammate_band_max - cfg.teammate_band_min) * 0.5)
+    reward += cfg.teammate_proximity_bonus * float(np.exp(-((d_tm - t_mid_t) / sigma_t) ** 2))
+
+    hp_now = float(tail[int(OB_HP_FRAC)])
+    if cfg.hp_potential_coef != 0.0:
+        if prev_tail is not None:
+            hp_prev = float(prev_tail[int(OB_HP_FRAC)])
+        else:
+            hp_prev = hp_now
+        reward += cfg.hp_potential_coef * (hp_now - hp_prev)
+
+    if cfg.use_hp_drop_penalty:
+        if hp_damage:
+            reward += cfg.hp_drop_penalty
+    elif projectile_hit:
+        reward += cfg.projectile_hit_penalty
+
+    fmin = float(np.min(tail[int(OB_FOG_PX) : int(OB_FOG_NY) + 1]))
+    if fmin < cfg.fog_proximity_threshold:
+        reward -= cfg.fog_proximity_penalty * max(0.0, dt)
+
+    players = data.get("player") or []
+    if players and len(players[0]) >= 4:
+        box = players[0]
+        px = (float(box[0]) + float(box[2])) * 0.5
+        py = (float(box[1]) + float(box[3])) * 0.5
+        qs = wall_quadrant_counts(list(data.get("wall") or []), (px, py))
+        if sum(qs) >= cfg.wall_hug_min_walls:
+            reward -= cfg.wall_hug_penalty * max(0.0, dt)
+
+    if ob_state is not None and last_action is not None:
+        st = stationary_seconds(
+            ob_state,
+            current_time,
+            cfg.stationary_small_action_mag,
+            last_action,
+        )
+        if st >= cfg.stationary_need_seconds:
+            reward -= cfg.stationary_penalty * max(0.0, dt)
 
     return float(reward)
 

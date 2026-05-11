@@ -9,31 +9,49 @@ regardless of which mode is active.
 
 Why this fork exists:
 
-- Heuristic movement is brittle and brawler-specific. PPO learns
-  positioning that generalises across brawlers from live frames.
-- Projectile dodging is the single biggest source of damage — the
-  tracker + reward shaping in this folder is built for that.
-- All of this runs *on top of* the existing bot, so attacks/supers
-  remain stable while movement is learned online.
+- Heuristic movement is brittle and brawler-specific. **SAC** learns
+  positioning from **recorded** gameplay and dense shaped rewards.
+- Projectile dodging is the single biggest source of damage —
+  the tracker + reward shaping in this folder is built for that signal.
+- Live play is **inference-only** (`SAC.predict`), so there is no mismatch
+  between actions written to the rollout buffer and actions the game ran.
+
+## Two-stage pipeline
+
+1. **Live bot** (`use_rl_movement = "yes"`): builds a rich 27‑float/frame
+   observation (`ObservationBuilder`), runs **`stable_baselines3.SAC`** in
+   **deterministic** mode, executes the joystick / WASD action.
+2. **Recording** (`enable_rl_movement_training` / `rl_record_transitions`): appends **executed**
+   tuples `(obs, action, reward, next_obs, done)` to [`ReplayRecorder`](replay_recorder.py)
+   (`data/rl_replay/*.npz`, atomic `os.replace` after shard write).
+3. **Offline trainer** [`tools/train_rl_offline.py`](../tools/train_rl_offline.py): merges shards into a SB3 `ReplayBuffer`,
+   sets `learning_starts=0`, runs `learn(total_timesteps=…)`. TensorBoard
+   `--tensorboard` (default Hub launch: `<repo>/runs/rl_sac`).
 
 ## Settings (`cfg/bot_config.toml`)
 
+| Key | Default | Effect |
+| --- | --- | --- |
+| `use_rl_movement` | `"no"` | Master switch — SAC chooses movement angles / WASD. |
+| `enable_rl_movement_training` | `"no"` | **Repurposed gate:** `"yes"` records transitions while playing (offline gradient steps disabled). Same flag bound to Hub **Record RL transitions (offline training)** (also mirrors `rl_record_transitions`). |
+| `rl_record_transitions` | *(falls back to `enable_rl_movement_training` if omitted)* | Explicit `"yes"`/`"no"` in TOML when you want recording without renaming the checkbox key. Hub keeps both keys in sync. |
+| `rl_algorithm` | `"sac"` | Only SAC is wired; unsupported values raise in `compute_rl_movement`. |
+| `rl_movement_model_path` | `models/rl_movement_policy.zip` | Loaded SAC checkpoint. Recreated automatically if absent. |
+| `rl_replay_dir` | `data/rl_replay` | Compressed `.npz` batches + `*_meta.json` sidecars. |
+| `rl_replay_disk_budget_mb` | `2048` | Prune oldest `.npz` when total size overflows. |
+| `rl_replay_batch_size` | `1000` | Shard when buffered transitions exceed this count. |
+| `rl_replay_flush_seconds` | `30` | Periodic flush cadence (whichever triggers first vs batch cap). |
+| `rl_frame_stack` | `1` | Stacks last **K** frames → observation length **27·K**. |
+| `rl_obs_use_hp`, `rl_obs_use_fog`, `rl_obs_use_walls`, `rl_obs_use_super` | `"yes"` | Feature toggles; fog-off writes **`1.0`** ray distances so shaping penalties tied to fog min-distance stay inactive. |
+| `rl_fog_ray_max_px` / `rl_fog_ray_step_px` | `200` / `4` | Fog raycasts via [`Play._build_trusted_fog_mask`](../play.py). |
+| `rl_hp_potential_coef` | `1.0` | Potential-based shaping on observed HP fraction. |
+| `rl_stationary_penalty`, `rl_stationary_need_seconds`, `rl_stationary_small_action_mag` | `0.05` / `2.0` / `0.1` | Applied when microscopic actions persist (see [`stationary_seconds`](observation_builder.py)). |
+| `rl_wall_hug_penalty`, `rl_wall_hug_min_walls` | `0.05` / `3` | Penalize clustered walls around player quadrants (`wall_quadrant_counts`). |
+| `rl_fog_proximity_penalty`, `rl_fog_proximity_threshold` | `0.10` / `0.15` | Penalty × `Δt` when the nearest fog ray is below the threshold. |
+| `rl_sac_gamma` | `0.97` | Discount used by SAC + mirrored in offline `--gamma`. Lower than `0.99` improves credit to terminal placement rewards across long showdowns. |
+| `rl_train_steps_per_update` / `rl_save_every_seconds` | *(legacy leftovers)* | **Unused** by the SAC bridge; kept only for backwards-compatible config files / hub expectations. |
 
-| Key                           | Default                                        | Effect                                                                                                                                                                                                                                                                                           |
-| ----------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `use_rl_movement`             | `"no"`                                         | Master switch. When `"yes"`, the RL policy drives movement and the heuristic `get_movement` / `get_showdown_movement` / `enemy_pressure_movement_fallback` paths are bypassed. Combat (attacks, supers, gadgets) still runs heuristically.                                                       |
-| `enable_rl_movement_training` | `"no"`                                         | When `"yes"`, the bridge collects rollouts from live frames and runs `model.learn()` on a worker thread every `rl_train_steps_per_update` frames; weights are written back to `rl_movement_model_path`. When `"no"`, the policy runs in inference-only mode. Requires `use_rl_movement = "yes"`. |
-| `rl_movement_model_path`      | `models/rl_movement_policy.zip`                | SB3 PPO checkpoint location. Auto-created on first training start.                                                                                                                                                                                                                               |
-| `rl_max_projectiles`          | `6`                                            | K nearest projectiles included in the observation when `rl_use_projectile_features=yes` .                                                                                                                                                                                                   |
-| `rl_use_projectile_features` | `"yes"` *(when key omitted)* / `"no"` in repo default | When `"no"`, the RL policy uses `max_projectiles=0` (8-dim observation) and projectile boxes are skipped in `update_projectile_tracker` whenever `rl_show_projectile_debug=no` — saves CPU while RL-only movement trains on HP + placement rewards.                                                                             |
-| `rl_show_projectile_debug` | `"yes"` *(when key omitted)* / `"no"` in repo default | When `"no"`, projectile tracks are not drawn on the RL visual-debug overlay (`Play.show_visual_debug`).                                                                                                                                                                                         |
-| `rl_use_hp_drop_penalty`     | `"yes"` in repo default                        | When `"yes"`, per-step penalty uses `HealthMonitor.recent_damage_event` (generic HP loss: storm, melee, shots). Projectile-tracker gates are bypassed *for rewards* only (`compute_reward`).                                                                                                                                    |
-| `rl_hp_drop_penalty`          | `-1.0`                                         | Penalty magnitude when HP drop is detected in the damage-confirm window.                                                                                                                                                                                                                           |
-| `rl_rank_reward_1st` … `rl_rank_reward_4th` | `3.0 / 1.0 / 0.0 / -1.5` | Terminal PPO reward on match reset when showdown end screen resolves to `"1st"`–`"4th"` (`state_finder` templates).                                                                                                                                                                              |
-| `rl_result_reward_victory` / `defeat` / `draw` | `2.0 / -1.5 / 0.0` | Terminal rewards for `"victory"`, `"defeat"`, `"draw"` (`end_*` states in non-showdown modes).                                                                                                                                                                                                    |
-| `rl_episode_end_fallback_reward` | `0.0` | Used when `_pending_end_result` is unknown (disconnect, missing template). Older builds always paid `survival_episode_bonus`; this avoids paying a phantom win bonus.                                                                                                                                   |
-| `rl_projectile_classes`       | `["projectile","super","bullet","enemy_shot"]` | Detector class names that the projectile tracker treats as incoming hazards. Add/remove names here to match the names the YOLO model emits.                                                                                                                                                      |
-| `rl_combat_blend_dodge`       | `"yes"`                                        | When in attack range, still blend the existing `apply_combat_dodge` strafe on top of the RL angle so attacks look natural.                                                                                                                                                                       |
+`rl_use_projectile_features` continues to steer **whether projectile tracks are fused into movement heuristics & debug overlays**; the SAC observation is the fixed **ObservationBuilder** vector (projectile tensor layout is unrelated).
 
 ### Projectile tracking backend (`cfg/bot_config.toml`)
 
@@ -103,60 +121,87 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 | `red_flash_baseline_alpha` | `0.1` | EMA smoothing for the baseline when not flashing. |
 | `cross_reference_projectile_hits` | `"yes"` | If `"yes"`, RL hit signal is strict (see intercept table). With **`intercept_confirm_enabled = "yes"`**, uses [`HitConfirmer`](../rl/hit_confirmer.py). Otherwise: requires **`ProjectileTracker.is_player_hit`** **and** a recent `HealthMonitor` damage event within `damage_confirm_window_seconds`. |
 
-Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py), [`rl/hit_confirmer.py`](../rl/hit_confirmer.py), [`rl/byte_projectile_tracker.py`](../rl/byte_projectile_tracker.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); reward glue in [`rl/policy_bridge.py`](../rl/policy_bridge.py).
+Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py), [`rl/hit_confirmer.py`](../rl/hit_confirmer.py), [`rl/byte_projectile_tracker.py`](../rl/byte_projectile_tracker.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); hit + reward glue in [`rl/policy_bridge.py`](policy_bridge.py).
 
-The same toggles are exposed as checkboxes in `gui/hub.py` (the **Additional** settings tab), next to **Use RL Movement** and **Enable RL Movement Training**: **RL Projectile Observations**, **RL Projectile Debug Overlay**, and **RL HP Drop Penalty**. They persist to `cfg/bot_config.toml`; restart the bot for changes to apply.
+The same toggles are exposed as checkboxes in `gui/hub.py` (the **Additional** tab) next to **Use RL Movement**, **Record RL transitions**, **Train RL offline**, **RL Projectile Observations**, **RL Projectile Debug Overlay**, and **RL HP Drop Penalty**.
 
-## Architecture
+## Observation layout (27 floats / frame)
+
+Canonical indices live in [`observation_builder.py`](observation_builder.py) (`OB_*` constants):
+
+| Block | Description |
+| --- | --- |
+| 0–1 | Player normalized center. |
+| 2–3 | Velocity estimate (finite difference, diagonal-normalized). |
+| 4–5 | HP fraction + normalized time since last `DamageEvent` look-back. |
+| 6–7 | Super-ready + gadget-ready. |
+| 8–16 | Two nearest enemies (`dx`,`dy`,`dist_norm`) + nearest teammate. |
+| 17–20 | Fog clearance along cardinal rays (`1` ⇒ no fog within configured radius). |
+| 21–24 | Quadrant occupancy of wall tiles (counts normalized). |
+| 25–26 | Last SAC action clamped to `[-1,1]` (helps smooth locomotion).
+
+Multiply by `frame_stack` for stacked observations consumed by SAC + ReplayRecorder shards.
+
+## Live architecture snippet
 
 ```
-frame ─► Detect ─► data{player,enemy,teammate,wall,[projectile,super,...]}
-                              │
-              ┌────────────────┴────────────────┐
-              │ RedFlashDetector (optional)      │
-              │ HealthMonitor.update (HP % / OCR) │
-              └────────────────┬────────────────┘
-                              │
-                              ▼
-                       update_projectile_tracker()
-                         (skip motion/residual if flashing;
-                          after tracker.update: confirm tracks on damage,
-                          purge unconfirmed young motion/residual)
-                              │
-                              ▼
-       ┌──────────── Play.loop ────────────┐
-       │                                    │
-       │   if use_rl_movement:              │
-       │       compute_rl_movement()        │
-       │           └► RLMovementBridge       │
-       │                  ├─ build_observation
-       │                  ├─ model.predict   │
-       │                  ├─ submit_transition (training)
-       │                  └─ maybe learn() (worker thread)
-       │                                    │
-       │   run_combat(brawler, data, mvmt)   │
-       │       └► attack/super/gadget       │
-       │                                    │
-       └─► do_movement(mvmt) ── window controller (joystick / WASD)
+vision ─► data dict ─► Play.loop
+                       └► ObservationBuilder.build
+                       └► SAC.predict (deterministic)
+                       └► compute_reward_v2 (logging + replay label)
+                       └► ReplayRecorder.append (optional)
+                       └► run_combat ─► do_movement
 ```
 
-The Gym env (`rl/movement_env.py`) is **externally driven**: it does not
-own a simulator. The bridge submits one transition per frame
-(`submit_transition`) and SB3 PPO consumes them through the standard
-`reset()` / `step()` interface, so the public surface looks like a
-normal Gym env from the trainer's perspective.
+[`MovementEnv`](movement_env.py) remains useful for isolated SB3 sandboxing / unit smoke tests, **not** mounted by the SAC bridge anymore.
 
-## Reward shaping
+### Offline CLI quick reference
+
+```bash
+python tools/train_rl_offline.py ^
+  --replay-dir data/rl_replay ^
+  --model-path models/rl_movement_policy.zip ^
+  --total-steps 200000 ^
+  --batch-size 512 ^
+  --gamma 0.97 ^
+  --tensorboard runs/rl_sac ^
+  --device auto
+```
+
+### TensorBoard cheatsheet
+
+Inspect `runs/rl_sac/` (or whichever `--tensorboard` path you chose) for:
+
+- **Actor / critic losses** (`train/actor_loss_*`, critic losses reported by SAC).
+- **Entropy** (`train/entropy_*`) when using `ent_coef="auto"`.
+- **Estimated Q-values** (`train/critic_*` depending on SB3 version).
+
+Pure replay training means episodic rollout metrics remain flat — focus on the loss/Q curves.
 
 
-| Component                  | Default                                                                | Notes                                                                                                                                                                                                                                                  |
-| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Survival                   | `+0.01` per step                                                       | Continuous bonus for staying alive.                                                                                                                                                                                                                    |
-| Safe band vs nearest enemy | `+0.02` when enemy distance is in `[0.35, 0.75] * frame_diagonal/2`    | Encourages "in attack range, out of danger" positioning.                                                                                                                                                                                               |
-| Teammate proximity         | `+0.01` when teammate distance is in `[0.05, 0.30] * frame_diagonal/2` | Encourages staying near teammates as the user requested.                                                                                                                                                                                               |
-| Projectile / intercept hit (`rl_use_hp_drop_penalty=no`) | `-1.0`                                                                 | Tracker + `HitConfirmer` / cross-reference semantics described in [`policy_bridge.py`](policy_bridge.py) (matches the older projectile-focused mode).                                                                             |
-| HP drop penalty (`rl_use_hp_drop_penalty=yes`)           | `-1.0` (see `rl_hp_drop_penalty`)                                      | Applies when [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) fires inside `damage_confirm_window_seconds`. Encourages storm avoidance / generic survivability without projectile geometry in the observation.          |
-| Episode-end placement / result                           | showdown `1st/2nd/3rd/4th` + `victory/defeat/draw` (configurable)       | Dispatched via `Play._pending_end_result` (`main.py` records `state.split("_", 1)[1]` for `end_*` states). [`episode_terminal_reward()`](movement_env.py) picks the SB3 terminal reward consumed by [`RLMovementBridge.on_match_reset()`](policy_bridge.py). Inference (`train=no`) keeps terminal bonus at `0` like the legacy rollout path. |
+## Checkpoint compatibility notes
+
+| Scenario | Guidance |
+| --- | --- |
+| Legacy **PPO** checkpoints | Algorithm + observation layout mismatched vs SAC — delete or rename and start fresh. |
+| SAC shape mismatch (`frame_stack`, toggles changing padding) | `train_rl_offline.py` rebuilds SAC if loaded policy dim ≠ replay `obs_dim`. |
+
+## Reward shaping (`compute_reward_v2`)
+
+Per-frame reward (see [`movement_env.py`](movement_env.py)):
+
+| Term | Notes |
+| --- | --- |
+| Survival | `RewardConfig.survival_per_step` (+0.01). |
+| Enemy / teammate Gaussian | `safe_distance_bonus`, `teammate_proximity_bonus` modulate Gaussians centered in the configured distance bands. |
+| HP potential | `hp_potential_coef * Δhp` from the trailing observation frame (PBRS-style). |
+| Hit signal | `projectile_hit_penalty` **or** HP-drop penalty mirrors `use_hp_drop_penalty` with the same cross-reference / `HitConfirmer` semantics as `policy_bridge.compute_reward_v2`. |
+| Fog proximity | Scaled by real frame `dt`; uses min fog ray stored in the observation tail. |
+| Wall hug | Uses live `data["wall"]` boxes binned by quadrant; triggers when enough walls surround the player. |
+| Stationary | Penalizes microscopic actions held longer than `stationary_need_seconds`. |
+
+Terminal showdown / 3v3 placement still flows through `episode_terminal_reward()` invoked from `RLMovementBridge.on_match_reset`.
+
 
 ## Health bar and damage events
 
@@ -242,31 +287,19 @@ Relevant config in `cfg/bot_config.toml`:
 
 ## Score / telemetry
 
-`RLMovementBridge` keeps running counters and prints a one-line summary
-every ~3 seconds (and on every match reset). All `print` output is
-mirrored into `logs/pyla_<timestamp>.log` by `logger_setup.py`, so the
-RL score is on disk for every run with no extra setup.
+The SAC bridge logs match summaries (e.g., `[RL SAC] episode_end … terminal_reward=…`) whenever a match resets. General `print` traffic is still mirrored into `logs/pyla_<timestamp>.log` by `logger_setup.py`.
 
-Format:
-
-```
-[RL] step=12345 ep_steps=812 ep_reward=+5.273 reward/step=+0.006 mean100ep=+3.84 penalty_hit=False
-[RL] episode_end ep_reward=+8.273 ep_len=812 result=1st rank_bonus=+3.000 mean100ep=+3.84
-```
-
-`mean100ep` is the trailing average of the last 100 episode returns —
-useful when training to see whether the policy is improving without
-having to load TensorBoard.
+For optimization signal while iterating on reward math, prefer **TensorBoard** from the offline trainer; the live loop no longer prints dense PPO-style rollout stats.
 
 ## Running with no projectile model yet
 
-The vision model in `models/mainInGameModel.onnx` ships with the
-classes `enemy / teammate / player`. None of `rl_projectile_classes`
-will appear in the per-frame `data` dict, so the projectile tracker
-stays empty and the projectile slots in the observation are zero-padded
-correctly. The RL policy can still learn from player/enemy/teammate
-geometry; you only get the dodge-aware reward signal once projectiles
-are detectable.
+The vision model in `models/mainInGameModel.onnx` ships with the classes
+`enemy / teammate / player`. None of `rl_projectile_classes` will
+appear in the per-frame `data` dict unless you retrain, so the
+projectile tracker may stay empty **while the SAC observation still
+covers players, enemies, teammates, fog, and walls**. You still get HP
++ placement + storm-adjacent shaping; projectile-specific hit logic
+ramps up once YOLO emits the configured classes.
 
 To enable real projectile tracking:
 
@@ -281,8 +314,8 @@ To enable real projectile tracking:
 
 After that the per-frame `data` dict will contain
 `data["projectile"]` / `data["super"]` boxes, the tracker will assign
-IDs and velocities, and the reward function will start penalizing
-collisions automatically.
+IDs and velocities, and `compute_reward_v2` gains a stronger
+projectile-aligned hit channel (when `rl_use_hp_drop_penalty=no`).
 
 ## Tests
 
@@ -291,10 +324,13 @@ Unit tests live in `tests/test_rl_*.py` and related setup tests:
 - `test_rl_projectile_tracker.py`: matching, velocity estimation,
 history pruning, hit detection (with and without lookahead),
 observation feature shape and ordering, **`purge_unconfirmed_recent_tracks` / confirmed tracks**.
-- `test_rl_movement_env.py`: observation layout / clipping / size and
-reward components (penalty, episode bonus).
+- `test_rl_observation_builder.py`: vector layout, stacking, fog ablations, Gaussian + HP-potential tails (`compute_reward_v2`).
+- `test_rl_replay_recorder.py`: atomic-ish `.npz` writer round-trip (`load_replay_npzs`).
+- `test_rl_offline_trainer.py`: SAC smoke on synthetic shards (skipped if SB3 missing).
+- `test_rl_movement_env.py`: legacy 8+N projectile observation helper + dense reward helper tests.
 - `test_rl_action_mapping.py`: 2D action → showdown angle / WASD string
 mapping.
+- `test_rl_training_smoke.py`: optional `MovementEnv` step smoke + SAC shape check (SB3 required).
 - `test_health_monitor.py`: HSV band ratios, adaptive search, debounced drops, insufficient-pixel guard, sharp drop vs gradual drift damage events.
 - `test_byte_projectile_tracker.py`: ByteTrack ID continuity (skipped if `supervision` missing).
 - `test_intercept_confirmer.py`: tolerance matching for `HitConfirmer`.
@@ -304,23 +340,18 @@ mapping.
 Run them in isolation with:
 
 ```
-python -m unittest tests.test_rl_projectile_tracker tests.test_rl_movement_env tests.test_rl_action_mapping tests.test_health_monitor tests.test_red_flash
+python -m unittest tests.test_rl_projectile_tracker tests.test_rl_observation_builder tests.test_rl_replay_recorder tests.test_rl_movement_env tests.test_rl_action_mapping tests.test_rl_training_smoke tests.test_rl_offline_trainer tests.test_health_monitor tests.test_red_flash
 ```
 
-These tests do **not** require `stable-baselines3`; they only exercise
-the pure-Python helpers and the projectile tracker. Importing
-`rl/policy_bridge.py` for a live run does require `stable-baselines3`
-and `gymnasium` (added to `setup.py`).
+Core geometry / replay tests avoid `stable-baselines3`. Anything importing SAC requires SB3 + `torch` + `gymnasium` (see `setup.py`).
 
 ## Known gaps / follow-ups
 
 - HP bar geometry assumes the default **1920×1080**-style HUD; extreme resolutions or skins may need tuning `health_bar_*` keys.
 - OCR depends on **EasyOCR** cold start and CPU/GPU load; it is throttled and optional (`health_ocr_enabled`).
-- Without retrained vision, projectile tracks are always empty when YOLO never emits projectile classes — the projectile slots pad with zeros (`rl_use_projectile_features=yes`) or shrink away entirely (`=no`). With **`rl_use_hp_drop_penalty=yes`**, HP drops carry the avoidance signal regardless.
-- Turning **projectiles on/off**, changing **`rl_max_projectiles`**, or swapping outcome wiring changes the Gym observation size / terminal returns — reuse an SB3 checkpoint only when those hyper-parameters match what it was trained on (otherwise delete / pick a fresh `rl_movement_model_path`).
-- The Gym env is single-environment (one `MovementEnv` per process).
-A future change could vectorize it across multiple parallel
-emulator instances if you want faster training throughput.
+- Without retrained vision, projectile tracks may stay empty when YOLO never emits projectile classes — lean on HP / fog / placement shaping or enable `rl_use_hp_drop_penalty=yes`.
+- Changing **`rl_frame_stack`** or toggling observation features changes the observation length — clear old SAC checkpoints or let the offline trainer rebuild automatically when dims disagree.
+- The Gym env is single-environment (one `MovementEnv` per process) and is **not** used for live SAC anymore; vectorized training would require new plumbing.
 - `enemy_pressure_movement_fallback` is intentionally bypassed when RL
 drives movement — it is a heuristic. Wall-stuck detection /
 semicircle escape is kept as a safety net.

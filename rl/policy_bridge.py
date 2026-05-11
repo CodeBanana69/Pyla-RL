@@ -1,43 +1,17 @@
-"""Stable-Baselines3 policy bridge used by Play.loop().
-
-The bridge is responsible for:
-  - Building an observation from the live game data (uses the same
-    helpers as the Gym env so train/inference observations match).
-  - Loading or initializing a PPO policy and running ``predict`` per
-    frame to choose movement.
-  - Mapping the 2D action vector back to either a joystick angle
-    (showdown) or a WASD string (3v3 modes), so the rest of play.py
-    keeps using the existing ``do_movement`` path unchanged.
-  - When training is enabled, publishing transitions to the env and
-    triggering periodic ``learn(total_timesteps=N)`` calls on a worker
-    thread so the game frame loop never blocks on gradient steps.
-
-If stable-baselines3 / gymnasium are unavailable, importing this
-module raises ImportError; ``Play.compute_rl_movement`` catches that
-and falls back to the heuristic movement path with a one-time warning.
-"""
+"""SAC movement policy + optional transition recording for offline RL training."""
 
 from __future__ import annotations
 
 import math
 import os
-import threading
 import time
-from collections import deque
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from rl.movement_env import (
-    MovementEnv,
-    MovementTransition,
-    RewardConfig,
-    build_observation,
-    compute_reward,
-    episode_terminal_reward,
-    observation_size,
-)
-from rl.projectile_tracker import FEATURES_PER_TRACK
+from rl.movement_env import RewardConfig, compute_reward_v2, episode_terminal_reward
+from rl.observation_builder import ObservationBuilder, ObservationConfig, stacked_observation_size
+from rl.replay_recorder import ReplayRecorder, ReplayRecorderConfig
 
 
 def _action_to_angle(action: np.ndarray) -> Optional[float]:
@@ -50,7 +24,6 @@ def _action_to_angle(action: np.ndarray) -> Optional[float]:
 
 
 def _angle_to_wasd(angle_degrees: float) -> str:
-    """Convert a 0-360 angle (0=right, 90=down) to a WASD string."""
     angle = angle_degrees % 360
     parts = []
     if angle < 67.5 or angle >= 292.5:
@@ -75,7 +48,7 @@ def _action_to_movement(action: np.ndarray, is_showdown: bool):
     return _angle_to_wasd(angle)
 
 
-def _player_box_from_data(data) -> Optional[Tuple[float, float, float, float]]:
+def _player_box_from_data(data: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float, float, float]]:
     if not data:
         return None
     players = data.get("player") or []
@@ -85,269 +58,197 @@ def _player_box_from_data(data) -> Optional[Tuple[float, float, float, float]]:
     return (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
 
 
-def _player_pos_from_box(box) -> Tuple[float, float]:
-    return (box[0] + box[2]) * 0.5, (box[1] + box[3]) * 0.5
+def _make_vec_stub(obs_dim: int, act_dim: int = 2):
+    import gymnasium as gym
+    from gymnasium import spaces
+    from stable_baselines3.common.vec_env import DummyVecEnv
 
+    class _StubMovementEnv(gym.Env):
+        metadata = {"render_modes": []}
 
-def _nearest_offset_distance(
-    boxes,
-    player_pos: Tuple[float, float],
-) -> Optional[Tuple[float, float, float]]:
-    if not boxes:
-        return None
-    best = None
-    best_d = float("inf")
-    px, py = player_pos
-    for box in boxes:
-        cx = (box[0] + box[2]) * 0.5
-        cy = (box[1] + box[3]) * 0.5
-        dx, dy = cx - px, cy - py
-        d = math.hypot(dx, dy)
-        if d < best_d:
-            best_d = d
-            best = (dx, dy, d)
-    return best
+        def __init__(self) -> None:
+            super().__init__()
+            self.observation_space = spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(obs_dim,),
+                dtype=np.float32,
+            )
+            self.action_space = spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(act_dim,),
+                dtype=np.float32,
+            )
+
+        def reset(self, *, seed=None, options=None):
+            super().reset(seed=seed)
+            return np.zeros(self.observation_space.shape, dtype=np.float32), {}
+
+        def step(self, action):
+            obs = np.zeros(self.observation_space.shape, dtype=np.float32)
+            return obs, 0.0, False, False, {}
+
+    return DummyVecEnv([lambda: _StubMovementEnv()])
 
 
 class RLMovementBridge:
-    """Glue between Play.loop and Stable-Baselines3 PPO."""
+    """SAC inference; records executed transitions when ``record_transitions`` is on."""
 
     def __init__(
         self,
+        *,
         model_path: str,
         is_showdown: bool,
-        train: bool,
-        train_steps_per_update: int = 256,
-        save_every_seconds: float = 120.0,
-        max_projectiles: int = 6,
-        use_projectile_features: bool = True,
+        record_transitions: bool,
+        replay_dir: str,
+        replay_batch_size: int = 1000,
+        replay_flush_seconds: float = 30.0,
+        replay_disk_budget_mb: float = 2048.0,
         reward_cfg: Optional[RewardConfig] = None,
+        obs_cfg: Optional[ObservationConfig] = None,
     ) -> None:
         try:
-            from stable_baselines3 import PPO  # noqa: F401
+            from stable_baselines3 import SAC  # noqa: F401
         except ImportError as exc:
             raise ImportError(
-                "stable-baselines3 is required for use_rl_movement=yes. "
-                "Run python setup.py --pyla-install or pip install stable-baselines3 gymnasium."
+                "stable-baselines3 is required for RL movement (SAC). "
+                "pip install stable-baselines3 gymnasium"
             ) from exc
 
-        self.model_path = model_path
+        self.model_path = str(model_path)
         self.is_showdown = bool(is_showdown)
-        self.train = bool(train)
-        self.train_steps_per_update = int(train_steps_per_update)
-        self.save_every_seconds = float(save_every_seconds)
-        self.rl_max_projectiles_config = int(max_projectiles)
-        self.use_projectile_features = bool(use_projectile_features)
-        self.max_projectiles = (
-            self.rl_max_projectiles_config if self.use_projectile_features else 0
-        )
         self.reward_cfg = reward_cfg or RewardConfig()
 
-        self.env = MovementEnv(max_projectiles=self.max_projectiles, reward_cfg=self.reward_cfg)
-        self.model = self._load_or_create_model()
+        self.obs_builder = ObservationBuilder(obs_cfg or ObservationConfig())
+        self._obs_cfg = obs_cfg or ObservationConfig()
+        self.obs_dim = stacked_observation_size(self._obs_cfg)
 
-        self._last_action = np.zeros(2, dtype=np.float32)
-        self._last_obs: Optional[np.ndarray] = None
-        self._steps_since_update = 0
-        self._last_save_time = time.time()
-        self._train_thread: Optional[threading.Thread] = None
-        self._train_lock = threading.Lock()
-        self._train_busy = False
+        self.record_transitions = bool(record_transitions)
+        self.recorder: Optional[ReplayRecorder] = None
+        if self.record_transitions:
+            self.recorder = ReplayRecorder(
+                cfg=ReplayRecorderConfig(
+                    replay_dir=replay_dir,
+                    batch_size_transitions=replay_batch_size,
+                    flush_interval_seconds=replay_flush_seconds,
+                    disk_budget_mb=replay_disk_budget_mb,
+                    compress=True,
+                ),
+                session_id=self.obs_builder.session_id,
+                metadata={"obs_dim": int(self.obs_dim), "algorithm": "sac"},
+            )
 
-        # Score telemetry: live in stdout (mirrored into logs/ by
-        # logger_setup.py) so training/inference progress is visible.
-        self._episode_steps = 0
-        self._episode_reward = 0.0
-        self._total_steps = 0
-        self._total_reward = 0.0
-        self._recent_rewards: deque = deque(maxlen=100)
-        self._last_score_print = time.time()
-        self._score_print_interval = 3.0
+        self._stub_vec = _make_vec_stub(self.obs_dim, 2)
+        self.model = self._load_or_create_sac()
+
+        self._last_obs_full: Optional[np.ndarray] = None
+        self._prev_obs_reward: Optional[np.ndarray] = None
+        self._last_action_exec: Optional[np.ndarray] = None
+        self._last_reward_time = time.time()
 
         print(
-            f"RL movement bridge ready (showdown={self.is_showdown}, train={self.train}, "
-            f"model={self.model_path}, max_projectiles={self.max_projectiles}, "
-            f"projectile_features={self.use_projectile_features})."
+            f"RL SAC bridge (obs_dim={self.obs_dim}, record={self.record_transitions}, "
+            f"model={self.model_path})"
         )
 
-    def _load_or_create_model(self):
-        from stable_baselines3 import PPO
+    def _load_or_create_sac(self):
+        from stable_baselines3 import SAC
 
         if self.model_path and os.path.exists(self.model_path):
             try:
-                model = PPO.load(self.model_path, env=self.env, device="cpu")
-                print(f"Loaded RL movement policy from {self.model_path}")
+                model = SAC.load(
+                    self.model_path,
+                    env=self._stub_vec,
+                    device="auto",
+                    print_system_info=False,
+                )
+                print(f"Loaded SAC from {self.model_path}")
                 return model
             except Exception as exc:
-                print(
-                    f"Failed to load RL policy at {self.model_path}: {exc}; creating a fresh policy "
-                    "(obs dims / reward wiring may differ from checkpoint — train a new checkpoint if needed)."
-                )
+                print(f"SAC load failed ({exc}); creating new policy.")
 
-        model = PPO(
+        buf = max(100_000, self.obs_dim * 500)
+        model = SAC(
             "MlpPolicy",
-            self.env,
-            n_steps=max(64, self.train_steps_per_update),
-            batch_size=64,
+            self._stub_vec,
             verbose=0,
-            device="cpu",
+            learning_rate=3e-4,
+            buffer_size=buf,
+            batch_size=min(512, max(128, buf // 2000)),
+            gamma=0.97,
+            tau=0.005,
+            train_freq=1,
+            gradient_steps=1,
+            ent_coef="auto",
+            policy_kwargs={"net_arch": [256, 256]},
+            device="auto",
         )
-        if self.train and self.model_path:
+        if self.model_path:
             try:
                 os.makedirs(os.path.dirname(self.model_path) or ".", exist_ok=True)
                 model.save(self.model_path)
-                print(f"Saved freshly initialised RL movement policy to {self.model_path}")
+                print(f"Saved initial SAC to {self.model_path}")
             except Exception as exc:
-                print(f"Could not save initial RL policy: {exc}")
+                print(f"Could not save initial SAC: {exc}")
         return model
 
     def on_match_reset(self, result: Optional[str] = None) -> None:
-        end_bonus = (
-            episode_terminal_reward(result, self.reward_cfg) if self.train else 0.0
-        )
-        result_str = str(result) if result is not None else "unknown"
-        if self._last_obs is not None:
-            transition = MovementTransition(
-                obs=self._last_obs.copy(),
-                reward=end_bonus,
-                done=True,
-                info={
-                    "reason": "match_reset",
-                    "result": result,
-                    "rank_bonus": end_bonus,
-                },
+        term_r = float(episode_terminal_reward(result, self.reward_cfg))
+        if self.recorder is not None and self._last_obs_full is not None:
+            za = np.zeros(2, dtype=np.float32)
+            a_exec = (
+                za
+                if self._last_action_exec is None
+                else np.asarray(self._last_action_exec, dtype=np.float32).reshape(-1)[:2]
             )
-            self.env.submit_transition(transition)
-        self._steps_since_update = 0
-        ep_reward = self._episode_reward + end_bonus
-        ep_len = self._episode_steps
-        self._recent_rewards.append(ep_reward)
-        self._total_reward += end_bonus
-        mean100 = (
-            sum(self._recent_rewards) / len(self._recent_rewards)
-            if self._recent_rewards
-            else 0.0
-        )
-        print(
-            f"[RL] episode_end ep_reward={ep_reward:+.3f} ep_len={ep_len} "
-            f"result={result_str} rank_bonus={end_bonus:+.3f} mean100ep={mean100:+.3f}"
-        )
-        self._episode_reward = 0.0
-        self._episode_steps = 0
-        self._last_score_print = time.time()
+            self.recorder.append(
+                self._last_obs_full.copy(),
+                a_exec,
+                term_r,
+                self._last_obs_full.copy(),
+                True,
+                {"reason": "match_reset", "result": result},
+            )
+            self.recorder.flush()
+        self.obs_builder.reset_match()
+        self._prev_obs_reward = None
+        self._last_obs_full = None
+        self._last_action_exec = None
+        print(f"[RL SAC] episode_end result={result!s} terminal_reward={term_r:+.4f}")
 
-    def _maybe_print_score(self, penalty_hit: bool, force: bool = False) -> None:
-        now = time.time()
-        if not force and now - self._last_score_print < self._score_print_interval:
-            return
-        self._last_score_print = now
-        mean100 = (
-            sum(self._recent_rewards) / len(self._recent_rewards)
-            if self._recent_rewards
-            else 0.0
-        )
-        reward_per_step = (
-            self._episode_reward / self._episode_steps
-            if self._episode_steps
-            else 0.0
-        )
-        mode = "train" if self.train else "infer"
-        print(
-            f"[RL] {mode} step={self._total_steps} ep_steps={self._episode_steps} "
-            f"ep_reward={self._episode_reward:+.3f} reward/step={reward_per_step:+.4f} "
-            f"mean100ep={mean100:+.3f} penalty_hit={penalty_hit}"
+    def predict(self, play: Any, data: Dict[str, Any], current_time: float):
+        now_wall = time.time()
+        dt = max(1e-4, float(now_wall - self._last_reward_time))
+        self._last_reward_time = now_wall
+
+        obs = self.obs_builder.build(
+            play,
+            data,
+            current_time,
+            self._last_action_exec,
+            track_small_action=True,
+            small_mag=self.reward_cfg.stationary_small_action_mag,
+            small_needed_seconds=self.reward_cfg.stationary_need_seconds,
         )
 
-    def _build_observation(self, play, data) -> Tuple[np.ndarray, Optional[Tuple[float, float, float, float]]]:
+        action_vec, _ = self.model.predict(obs, deterministic=True)
+        action_vec = np.asarray(action_vec, dtype=np.float32).reshape(-1)[:2]
+
         player_box = _player_box_from_data(data)
-        if player_box is None:
-            return np.zeros(observation_size(self.max_projectiles), dtype=np.float32), None
-
-        player_pos = _player_pos_from_box(player_box)
-        frame = play.current_frame
-        if frame is not None:
-            height, width = frame.shape[:2]
-        else:
-            width, height = 1920, 1080
-        frame_size = (width, height)
-
-        enemy_offset = _nearest_offset_distance(data.get("enemy") or [], player_pos)
-        teammate_offset = _nearest_offset_distance(data.get("teammate") or [], player_pos)
-
-        if (
-            self.use_projectile_features
-            and play.projectile_tracker is not None
-            and self.max_projectiles > 0
-        ):
-            projectile_features = play.projectile_tracker.observation_features(
-                player_pos=player_pos,
-                k=self.max_projectiles,
-                frame_size=frame_size,
-            )
-        elif self.use_projectile_features:
-            projectile_features = np.zeros(
-                self.max_projectiles * FEATURES_PER_TRACK,
-                dtype=np.float32,
-            )
-        else:
-            projectile_features = np.zeros(0, dtype=np.float32)
-
-        obs = build_observation(
-            player_pos=player_pos,
-            nearest_enemy_offset_distance=enemy_offset,
-            nearest_teammate_offset_distance=teammate_offset,
-            projectile_features=projectile_features,
-            frame_size=frame_size,
-            max_projectiles=self.max_projectiles,
-        )
-        return obs, player_box
-
-    def _maybe_kick_training(self):
-        if not self.train:
-            return
-        with self._train_lock:
-            if self._train_busy:
-                return
-            if self._steps_since_update < self.train_steps_per_update:
-                return
-            self._train_busy = True
-            steps = self._steps_since_update
-            self._steps_since_update = 0
-
-        def _run_training():
-            try:
-                self.model.learn(
-                    total_timesteps=steps,
-                    reset_num_timesteps=False,
-                    progress_bar=False,
-                )
-                now = time.time()
-                if self.model_path and now - self._last_save_time >= self.save_every_seconds:
-                    try:
-                        self.model.save(self.model_path)
-                        self._last_save_time = now
-                    except Exception as exc:
-                        print(f"Saving RL movement policy failed: {exc}")
-            except Exception as exc:
-                print(f"RL movement training step failed: {exc}")
-            finally:
-                with self._train_lock:
-                    self._train_busy = False
-
-        self._train_thread = threading.Thread(target=_run_training, name="rl-train", daemon=True)
-        self._train_thread.start()
-
-    def predict(self, play, data, current_time):
-        obs, player_box = self._build_observation(play, data)
-
         tracker_hit = False
-        if player_box is not None and play.projectile_tracker is not None:
-            tracker_hit = play.projectile_tracker.is_player_hit(
-                player_box,
-                now=current_time,
-                padding=play.rl_projectile_hit_radius_padding,
-                lookahead_seconds=0.15,
-            )
+        if player_box is not None and getattr(play, "projectile_tracker", None) is not None:
+            try:
+                tracker_hit = bool(
+                    play.projectile_tracker.is_player_hit(
+                        player_box,
+                        now=current_time,
+                        padding=getattr(play, "rl_projectile_hit_radius_padding", 18.0),
+                        lookahead_seconds=0.15,
+                    )
+                )
+            except Exception:
+                tracker_hit = False
 
         dmg_hit = False
         hm = getattr(play, "health_monitor", None)
@@ -357,56 +258,43 @@ class RLMovementBridge:
 
         cross = getattr(play, "cross_reference_projectile_hits", True)
         use_intercept = bool(
-            cross
-            and getattr(play, "intercept_confirm_enabled", True)
+            cross and getattr(play, "intercept_confirm_enabled", True)
         )
         hc = getattr(play, "hit_confirmer", None)
         if cross and use_intercept and hc is not None:
             win = float(getattr(play, "damage_confirm_window_seconds", 0.5))
-            projectile_hit = hc.is_recent_confirmed_hit(current_time, win)
+            projectile_hit = bool(hc.is_recent_confirmed_hit(current_time, win))
         elif cross:
-            projectile_hit = (tracker_hit and dmg_hit)
+            projectile_hit = tracker_hit and dmg_hit
         else:
             projectile_hit = tracker_hit
 
-        penalty_hit = (
-            dmg_hit if self.reward_cfg.use_hp_drop_penalty else projectile_hit
-        )
-
-        # Compute reward in both training and inference so the score line
-        # reflects what the policy is doing right now.
-        reward = compute_reward(
+        reward = compute_reward_v2(
             obs,
+            self._prev_obs_reward,
+            play,
+            data,
+            current_time,
+            dt,
+            self.reward_cfg,
             projectile_hit=projectile_hit,
-            cfg=self.reward_cfg,
             hp_damage=dmg_hit,
+            last_action=self._last_action_exec,
+            ob_state=self.obs_builder.state,
         )
 
-        if self.train and self._last_obs is not None:
-            transition = MovementTransition(
-                obs=obs,
-                reward=reward,
-                done=False,
-                info={
-                    "projectile_tracker_hit": projectile_hit,
-                    "hp_damage": dmg_hit,
-                },
+        if self.recorder is not None and self._prev_obs_reward is not None and self._last_action_exec is not None:
+            self.recorder.append(
+                self._prev_obs_reward.copy(),
+                self._last_action_exec.copy(),
+                float(reward),
+                obs.copy(),
+                False,
+                {"penalty_hit": dmg_hit if self.reward_cfg.use_hp_drop_penalty else projectile_hit},
             )
-            self.env.submit_transition(transition)
-            self._steps_since_update += 1
-            self._maybe_kick_training()
 
-        if self._last_obs is not None:
-            self._episode_reward += float(reward)
-            self._episode_steps += 1
-            self._total_reward += float(reward)
-            self._total_steps += 1
-            self._maybe_print_score(penalty_hit=penalty_hit)
+        self._prev_obs_reward = obs.copy()
+        self._last_obs_full = obs.copy()
+        self._last_action_exec = action_vec.copy()
 
-        action, _ = self.model.predict(obs, deterministic=not self.train)
-        action = np.asarray(action, dtype=np.float32).reshape(-1)
-        self._last_action = action.copy()
-        self._last_obs = obs.copy()
-
-        movement = _action_to_movement(action, self.is_showdown)
-        return movement
+        return _action_to_movement(action_vec, self.is_showdown)

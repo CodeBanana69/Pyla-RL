@@ -39,23 +39,26 @@ class MovementEnvTrainingSmokeTests(unittest.TestCase):
 
 def _have_sb3():
     try:
-        from stable_baselines3 import PPO  # noqa: F401
+        from stable_baselines3 import SAC  # noqa: F401
+
         return True
     except Exception:
         return False
 
 
 @unittest.skipUnless(_have_gymnasium() and _have_sb3(), "sb3/gymnasium not installed")
-class PPOBridgeShapeTests(unittest.TestCase):
-    def test_ppo_predict_matches_observation_space(self):
-        from stable_baselines3 import PPO
+class SACBridgeShapeTests(unittest.TestCase):
+    def test_sac_predict_matches_rich_obs_dim(self):
+        from stable_baselines3 import SAC
 
-        from rl.movement_env import MovementEnv, observation_size
+        from rl.observation_builder import ObservationConfig, stacked_observation_size
+        from rl.policy_bridge import _make_vec_stub
 
-        k = 4
-        env = MovementEnv(max_projectiles=k)
-        model = PPO("MlpPolicy", env, n_steps=64, batch_size=32, verbose=0)
-        obs = np.zeros(observation_size(k), dtype=np.float32)
+        cfg = ObservationConfig(frame_stack=2)
+        dim = stacked_observation_size(cfg)
+        vec = _make_vec_stub(dim, 2)
+        model = SAC("MlpPolicy", vec, verbose=0, learning_starts=1000, train_freq=999_999)
+        obs = np.zeros(dim, dtype=np.float32)
         action, _ = model.predict(obs, deterministic=True)
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         self.assertEqual(action.shape, (2,))

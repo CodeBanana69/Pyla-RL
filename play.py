@@ -156,6 +156,56 @@ class Movement:
         self.rl_episode_end_fallback_reward = float(
             bot_config.get("rl_episode_end_fallback_reward", 0.0)
         )
+        self.rl_algorithm = str(bot_config.get("rl_algorithm", "sac")).lower()
+        self.rl_record_transitions = str(
+            bot_config.get(
+                "rl_record_transitions",
+                bot_config.get("enable_rl_movement_training", "no"),
+            )
+        ).lower() in ("yes", "true", "1")
+        self.rl_replay_dir = str(bot_config.get("rl_replay_dir", "data/rl_replay"))
+        self.rl_replay_disk_budget_mb = float(bot_config.get("rl_replay_disk_budget_mb", 2048.0))
+        self.rl_replay_batch_size = int(bot_config.get("rl_replay_batch_size", 1000))
+        self.rl_replay_flush_seconds = float(bot_config.get("rl_replay_flush_seconds", 30.0))
+        self.rl_frame_stack = max(1, int(bot_config.get("rl_frame_stack", 1)))
+        self.rl_obs_use_hp = str(bot_config.get("rl_obs_use_hp", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_obs_use_fog = str(bot_config.get("rl_obs_use_fog", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_obs_use_walls = str(bot_config.get("rl_obs_use_walls", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_obs_use_super = str(bot_config.get("rl_obs_use_super", "yes")).lower() in (
+            "yes",
+            "true",
+            "1",
+        )
+        self.rl_fog_ray_max_px = float(bot_config.get("rl_fog_ray_max_px", 200.0))
+        self.rl_fog_ray_step_px = float(bot_config.get("rl_fog_ray_step_px", 4.0))
+        self.rl_damage_lookback_norm_seconds = float(
+            bot_config.get("rl_damage_lookback_norm_seconds", 5.0)
+        )
+        self.rl_hp_potential_coef = float(bot_config.get("rl_hp_potential_coef", 1.0))
+        self.rl_stationary_penalty = float(bot_config.get("rl_stationary_penalty", 0.05))
+        self.rl_stationary_need_seconds = float(bot_config.get("rl_stationary_need_seconds", 2.0))
+        self.rl_stationary_small_action_mag = float(
+            bot_config.get("rl_stationary_small_action_mag", 0.1)
+        )
+        self.rl_wall_hug_penalty = float(bot_config.get("rl_wall_hug_penalty", 0.05))
+        self.rl_wall_hug_min_walls = int(bot_config.get("rl_wall_hug_min_walls", 3))
+        self.rl_fog_proximity_penalty = float(bot_config.get("rl_fog_proximity_penalty", 0.10))
+        self.rl_fog_proximity_threshold = float(
+            bot_config.get("rl_fog_proximity_threshold", 0.15)
+        )
+        self.rl_sac_gamma = float(bot_config.get("rl_sac_gamma", 0.97))
         self._pending_end_result = None
         self.rl_universal_projectiles = str(bot_config.get("rl_universal_projectiles", "yes")).lower() in ("yes", "true", "1")
         self.rl_motion_scale_width = int(bot_config.get("rl_motion_scale_width", 480))
@@ -1870,6 +1920,10 @@ class Play(Movement):
                         f"{self.entity_detection_retry_confidence:.2f}"
                     )
                 data = retry_data
+        # Spectator / respawn camera: YOLO often still emits ``player`` hits on
+        # allies or UI — that poisons HP crop + RL obs. Drop them while dead.
+        if self.is_respawning_overlay(frame):
+            data["player"] = []
         data = self.stabilize_entity_roles(frame, data)
 
         # Run the dedicated projectile detector (if installed) and merge its
@@ -2159,7 +2213,13 @@ class Play(Movement):
         if bridge is None:
             try:
                 from rl.movement_env import RewardConfig
+                from rl.observation_builder import ObservationConfig
                 from rl.policy_bridge import RLMovementBridge
+
+                if getattr(self, "rl_algorithm", "sac") != "sac":
+                    raise RuntimeError(
+                        f"Unsupported rl_algorithm={self.rl_algorithm!r} (only 'sac' is implemented)."
+                    )
 
                 rl_rank_reward_table = {
                     "1st": float(self.rl_rank_reward_1st),
@@ -2175,16 +2235,35 @@ class Play(Movement):
                     hp_drop_penalty=self.rl_hp_drop_penalty,
                     rank_reward_table=dict(rl_rank_reward_table),
                     episode_end_fallback_reward=self.rl_episode_end_fallback_reward,
+                    hp_potential_coef=self.rl_hp_potential_coef,
+                    stationary_penalty=self.rl_stationary_penalty,
+                    stationary_small_action_mag=self.rl_stationary_small_action_mag,
+                    stationary_need_seconds=self.rl_stationary_need_seconds,
+                    wall_hug_penalty=self.rl_wall_hug_penalty,
+                    wall_hug_min_walls=self.rl_wall_hug_min_walls,
+                    fog_proximity_penalty=self.rl_fog_proximity_penalty,
+                    fog_proximity_threshold=self.rl_fog_proximity_threshold,
+                )
+                obs_cfg = ObservationConfig(
+                    fog_ray_max_px=self.rl_fog_ray_max_px,
+                    fog_ray_step_px=self.rl_fog_ray_step_px,
+                    damage_lookback_norm_seconds=self.rl_damage_lookback_norm_seconds,
+                    use_hp=self.rl_obs_use_hp,
+                    use_fog=self.rl_obs_use_fog,
+                    use_walls=self.rl_obs_use_walls,
+                    use_super_gadget=self.rl_obs_use_super,
+                    frame_stack=self.rl_frame_stack,
                 )
                 bridge = RLMovementBridge(
                     model_path=self.rl_movement_model_path,
                     is_showdown=self.is_showdown,
-                    train=self.rl_training_enabled,
-                    train_steps_per_update=self.rl_train_steps_per_update,
-                    save_every_seconds=self.rl_save_every_seconds,
-                    max_projectiles=self.rl_max_projectiles,
-                    use_projectile_features=self.rl_use_projectile_features,
+                    record_transitions=self.rl_record_transitions,
+                    replay_dir=self.rl_replay_dir,
+                    replay_batch_size=self.rl_replay_batch_size,
+                    replay_flush_seconds=self.rl_replay_flush_seconds,
+                    replay_disk_budget_mb=self.rl_replay_disk_budget_mb,
                     reward_cfg=reward_cfg,
+                    obs_cfg=obs_cfg,
                 )
             except Exception as exc:
                 if not getattr(self, "_rl_bridge_warned", False):
