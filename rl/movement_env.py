@@ -24,15 +24,17 @@ Reward: shaped to match the user's brief:
     +0.01 / step survival
     + small bonus for staying in the safe band around the nearest enemy
     + small bonus for staying near the closest teammate
-    -1.0 (default) when a tracked projectile/super overlaps the player box
-    +0.5 episode-end survival bonus on `done`
+    -1.0 (default) on projectile-tracker hit OR on HealthMonitor HP drop
+         (controlled by RewardConfig.use_hp_drop_penalty)
+    episode-end terminal reward from ``episode_terminal_reward`` (showdown rank
+    or 3v3 victory/defeat), not mixed into ``compute_reward`` per frame.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
@@ -63,6 +65,19 @@ def observation_size(max_projectiles: int) -> int:
     )
 
 
+def _default_rank_reward_table() -> Dict[str, float]:
+    """Keys match state_finder showdown places and 3v3 results (no ``end_`` prefix)."""
+    return {
+        "1st": 3.0,
+        "2nd": 1.0,
+        "3rd": 0.0,
+        "4th": -1.5,
+        "victory": 2.0,
+        "defeat": -1.5,
+        "draw": 0.0,
+    }
+
+
 @dataclass
 class RewardConfig:
     survival_per_step: float = 0.01
@@ -73,7 +88,12 @@ class RewardConfig:
     teammate_band_min: float = 0.05
     teammate_band_max: float = 0.30
     projectile_hit_penalty: float = -1.0
+    #: Legacy flat bonus kept for callers that omit rank tables / tests.
     survival_episode_bonus: float = 0.5
+    hp_drop_penalty: float = -1.0
+    use_hp_drop_penalty: bool = False
+    rank_reward_table: Dict[str, float] = field(default_factory=_default_rank_reward_table)
+    episode_end_fallback_reward: float = 0.0
 
 
 @dataclass
@@ -135,13 +155,37 @@ def build_observation(
     return obs
 
 
+def episode_terminal_reward(
+    episode_result: Optional[str],
+    cfg: Optional[RewardConfig] = None,
+) -> float:
+    """Terminal reward injected on match_reset (not part of ``compute_reward`` per step)."""
+
+    cfg = cfg or RewardConfig()
+    if episode_result is not None:
+        key = str(episode_result).strip()
+        tbl = getattr(cfg, "rank_reward_table", {}) or {}
+        if key and key in tbl:
+            return float(tbl[key])
+        low = key.lower()
+        # Accept ``End_3rd``-style crumbs if any caller passes mixed case.
+        for k in tbl:
+            if k.lower() == low:
+                return float(tbl[k])
+    return float(getattr(cfg, "episode_end_fallback_reward", cfg.survival_episode_bonus))
+
+
 def compute_reward(
     obs: np.ndarray,
     projectile_hit: bool,
     cfg: Optional[RewardConfig] = None,
-    done: bool = False,
+    hp_damage: bool = False,
 ) -> float:
-    """Reward function used both online (bridge) and inside step()."""
+    """Reward for one gameplay frame (no terminal rank bonus).
+
+    When ``use_hp_drop_penalty`` is true, ``hp_damage`` applies ``hp_drop_penalty``.
+    Otherwise ``projectile_hit`` applies ``projectile_hit_penalty``.
+    """
     cfg = cfg or RewardConfig()
 
     reward = cfg.survival_per_step
@@ -154,11 +198,13 @@ def compute_reward(
     if cfg.teammate_band_min <= teammate_dist_norm <= cfg.teammate_band_max:
         reward += cfg.teammate_proximity_bonus
 
-    if projectile_hit:
-        reward += cfg.projectile_hit_penalty
+    if cfg.use_hp_drop_penalty:
+        if hp_damage:
+            reward += cfg.hp_drop_penalty
+    else:
+        if projectile_hit:
+            reward += cfg.projectile_hit_penalty
 
-    if done:
-        reward += cfg.survival_episode_bonus
     return float(reward)
 
 

@@ -637,6 +637,8 @@ def pyla_main(data):
                 if state != "match":
                     self.Play.time_since_last_proceeding = time.time()
                 if previous_state == "match" and state != "match":
+                    if state.startswith("end_"):
+                        self.Play._pending_end_result = state.split("_", 1)[1]
                     self.Play.reset_match_control_state()
                     self.Stage_manager.adaptive_brain.apply_to_play(self.Play)
                 elif previous_state != "match" and state == "match":

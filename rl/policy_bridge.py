@@ -34,6 +34,7 @@ from rl.movement_env import (
     RewardConfig,
     build_observation,
     compute_reward,
+    episode_terminal_reward,
     observation_size,
 )
 from rl.projectile_tracker import FEATURES_PER_TRACK
@@ -119,6 +120,7 @@ class RLMovementBridge:
         train_steps_per_update: int = 256,
         save_every_seconds: float = 120.0,
         max_projectiles: int = 6,
+        use_projectile_features: bool = True,
         reward_cfg: Optional[RewardConfig] = None,
     ) -> None:
         try:
@@ -134,7 +136,11 @@ class RLMovementBridge:
         self.train = bool(train)
         self.train_steps_per_update = int(train_steps_per_update)
         self.save_every_seconds = float(save_every_seconds)
-        self.max_projectiles = int(max_projectiles)
+        self.rl_max_projectiles_config = int(max_projectiles)
+        self.use_projectile_features = bool(use_projectile_features)
+        self.max_projectiles = (
+            self.rl_max_projectiles_config if self.use_projectile_features else 0
+        )
         self.reward_cfg = reward_cfg or RewardConfig()
 
         self.env = MovementEnv(max_projectiles=self.max_projectiles, reward_cfg=self.reward_cfg)
@@ -160,7 +166,8 @@ class RLMovementBridge:
 
         print(
             f"RL movement bridge ready (showdown={self.is_showdown}, train={self.train}, "
-            f"model={self.model_path}, max_projectiles={self.max_projectiles})."
+            f"model={self.model_path}, max_projectiles={self.max_projectiles}, "
+            f"projectile_features={self.use_projectile_features})."
         )
 
     def _load_or_create_model(self):
@@ -172,7 +179,10 @@ class RLMovementBridge:
                 print(f"Loaded RL movement policy from {self.model_path}")
                 return model
             except Exception as exc:
-                print(f"Failed to load RL policy at {self.model_path}: {exc}; creating a fresh policy.")
+                print(
+                    f"Failed to load RL policy at {self.model_path}: {exc}; creating a fresh policy "
+                    "(obs dims / reward wiring may differ from checkpoint — train a new checkpoint if needed)."
+                )
 
         model = PPO(
             "MlpPolicy",
@@ -191,14 +201,21 @@ class RLMovementBridge:
                 print(f"Could not save initial RL policy: {exc}")
         return model
 
-    def on_match_reset(self) -> None:
-        end_bonus = self.reward_cfg.survival_episode_bonus if self.train else 0.0
+    def on_match_reset(self, result: Optional[str] = None) -> None:
+        end_bonus = (
+            episode_terminal_reward(result, self.reward_cfg) if self.train else 0.0
+        )
+        result_str = str(result) if result is not None else "unknown"
         if self._last_obs is not None:
             transition = MovementTransition(
                 obs=self._last_obs.copy(),
                 reward=end_bonus,
                 done=True,
-                info={"reason": "match_reset"},
+                info={
+                    "reason": "match_reset",
+                    "result": result,
+                    "rank_bonus": end_bonus,
+                },
             )
             self.env.submit_transition(transition)
         self._steps_since_update = 0
@@ -212,14 +229,14 @@ class RLMovementBridge:
             else 0.0
         )
         print(
-            f"[RL] episode_end ep_reward={ep_reward:+.3f} "
-            f"ep_len={ep_len} mean100ep={mean100:+.3f}"
+            f"[RL] episode_end ep_reward={ep_reward:+.3f} ep_len={ep_len} "
+            f"result={result_str} rank_bonus={end_bonus:+.3f} mean100ep={mean100:+.3f}"
         )
         self._episode_reward = 0.0
         self._episode_steps = 0
         self._last_score_print = time.time()
 
-    def _maybe_print_score(self, projectile_hit: bool, force: bool = False) -> None:
+    def _maybe_print_score(self, penalty_hit: bool, force: bool = False) -> None:
         now = time.time()
         if not force and now - self._last_score_print < self._score_print_interval:
             return
@@ -238,7 +255,7 @@ class RLMovementBridge:
         print(
             f"[RL] {mode} step={self._total_steps} ep_steps={self._episode_steps} "
             f"ep_reward={self._episode_reward:+.3f} reward/step={reward_per_step:+.4f} "
-            f"mean100ep={mean100:+.3f} projectile_hit={projectile_hit}"
+            f"mean100ep={mean100:+.3f} penalty_hit={penalty_hit}"
         )
 
     def _build_observation(self, play, data) -> Tuple[np.ndarray, Optional[Tuple[float, float, float, float]]]:
@@ -257,14 +274,23 @@ class RLMovementBridge:
         enemy_offset = _nearest_offset_distance(data.get("enemy") or [], player_pos)
         teammate_offset = _nearest_offset_distance(data.get("teammate") or [], player_pos)
 
-        if play.projectile_tracker is not None:
+        if (
+            self.use_projectile_features
+            and play.projectile_tracker is not None
+            and self.max_projectiles > 0
+        ):
             projectile_features = play.projectile_tracker.observation_features(
                 player_pos=player_pos,
                 k=self.max_projectiles,
                 frame_size=frame_size,
             )
+        elif self.use_projectile_features:
+            projectile_features = np.zeros(
+                self.max_projectiles * FEATURES_PER_TRACK,
+                dtype=np.float32,
+            )
         else:
-            projectile_features = np.zeros(self.max_projectiles * FEATURES_PER_TRACK, dtype=np.float32)
+            projectile_features = np.zeros(0, dtype=np.float32)
 
         obs = build_observation(
             player_pos=player_pos,
@@ -343,13 +369,17 @@ class RLMovementBridge:
         else:
             projectile_hit = tracker_hit
 
+        penalty_hit = (
+            dmg_hit if self.reward_cfg.use_hp_drop_penalty else projectile_hit
+        )
+
         # Compute reward in both training and inference so the score line
         # reflects what the policy is doing right now.
         reward = compute_reward(
             obs,
             projectile_hit=projectile_hit,
             cfg=self.reward_cfg,
-            done=False,
+            hp_damage=dmg_hit,
         )
 
         if self.train and self._last_obs is not None:
@@ -357,7 +387,10 @@ class RLMovementBridge:
                 obs=obs,
                 reward=reward,
                 done=False,
-                info={"projectile_hit": projectile_hit},
+                info={
+                    "projectile_tracker_hit": projectile_hit,
+                    "hp_damage": dmg_hit,
+                },
             )
             self.env.submit_transition(transition)
             self._steps_since_update += 1
@@ -368,7 +401,7 @@ class RLMovementBridge:
             self._episode_steps += 1
             self._total_reward += float(reward)
             self._total_steps += 1
-            self._maybe_print_score(projectile_hit=projectile_hit)
+            self._maybe_print_score(penalty_hit=penalty_hit)
 
         action, _ = self.model.predict(obs, deterministic=not self.train)
         action = np.asarray(action, dtype=np.float32).reshape(-1)

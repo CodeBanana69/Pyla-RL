@@ -66,6 +66,21 @@ angle_smooth_factor = 0.28
 use_rl_movement = "no"
 enable_rl_movement_training = "no"
 rl_movement_model_path = "models/rl_movement_policy.zip"
+# When no, RL obs omits projectile features (max_projectiles=0); detector may still run for combat/debug via rl_show_projectile_debug.
+rl_use_projectile_features = "no"
+rl_show_projectile_debug = "no"
+rl_use_hp_drop_penalty = "yes"
+rl_hp_drop_penalty = -1.0
+# Showdown placements (state end_1st ... end_4th) — terminal RL reward after match_reset.
+rl_rank_reward_1st = 3.0
+rl_rank_reward_2nd = 1.0
+rl_rank_reward_3rd = 0.0
+rl_rank_reward_4th = -1.5
+rl_result_reward_victory = 2.0
+rl_result_reward_defeat = -1.5
+rl_result_reward_draw = 0.0
+# When leaving match without known end_* template (disconnect, etc.).
+rl_episode_end_fallback_reward = 0.0
 rl_combat_blend_dodge = "yes"
 rl_max_projectiles = 6
 rl_projectile_classes = [ "projectile", "super", "bullet", "enemy_shot",]

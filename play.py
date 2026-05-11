@@ -132,6 +132,31 @@ class Movement:
         self.rl_projectile_hit_radius_padding = float(bot_config.get("rl_projectile_hit_radius_padding", 18))
         self.rl_train_steps_per_update = int(bot_config.get("rl_train_steps_per_update", 256))
         self.rl_save_every_seconds = float(bot_config.get("rl_save_every_seconds", 120))
+        self.rl_use_projectile_features = str(
+            bot_config.get("rl_use_projectile_features", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.rl_show_projectile_debug = str(
+            bot_config.get("rl_show_projectile_debug", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.rl_use_hp_drop_penalty = str(
+            bot_config.get("rl_use_hp_drop_penalty", "no")
+        ).lower() in ("yes", "true", "1")
+        self.rl_hp_drop_penalty = float(bot_config.get("rl_hp_drop_penalty", -1.0))
+        self.rl_rank_reward_1st = float(bot_config.get("rl_rank_reward_1st", 3.0))
+        self.rl_rank_reward_2nd = float(bot_config.get("rl_rank_reward_2nd", 1.0))
+        self.rl_rank_reward_3rd = float(bot_config.get("rl_rank_reward_3rd", 0.0))
+        self.rl_rank_reward_4th = float(bot_config.get("rl_rank_reward_4th", -1.5))
+        self.rl_result_reward_victory = float(
+            bot_config.get("rl_result_reward_victory", 2.0)
+        )
+        self.rl_result_reward_defeat = float(
+            bot_config.get("rl_result_reward_defeat", -1.5)
+        )
+        self.rl_result_reward_draw = float(bot_config.get("rl_result_reward_draw", 0.0))
+        self.rl_episode_end_fallback_reward = float(
+            bot_config.get("rl_episode_end_fallback_reward", 0.0)
+        )
+        self._pending_end_result = None
         self.rl_universal_projectiles = str(bot_config.get("rl_universal_projectiles", "yes")).lower() in ("yes", "true", "1")
         self.rl_motion_scale_width = int(bot_config.get("rl_motion_scale_width", 480))
         self.rl_motion_diff_threshold = int(bot_config.get("rl_motion_diff_threshold", 25))
@@ -1063,9 +1088,10 @@ class Play(Movement):
         bridge = getattr(self, "_rl_bridge", None)
         if bridge and bridge is not False and hasattr(bridge, "on_match_reset"):
             try:
-                bridge.on_match_reset()
+                bridge.on_match_reset(result=getattr(self, "_pending_end_result", None))
             except Exception as exc:
                 print(f"RL bridge match reset failed: {exc}")
+        self._pending_end_result = None
 
     def load_brawler_ranges(self, brawlers_info=None):
         if not brawlers_info:
@@ -2132,7 +2158,24 @@ class Play(Movement):
         bridge = getattr(self, "_rl_bridge", None)
         if bridge is None:
             try:
+                from rl.movement_env import RewardConfig
                 from rl.policy_bridge import RLMovementBridge
+
+                rl_rank_reward_table = {
+                    "1st": float(self.rl_rank_reward_1st),
+                    "2nd": float(self.rl_rank_reward_2nd),
+                    "3rd": float(self.rl_rank_reward_3rd),
+                    "4th": float(self.rl_rank_reward_4th),
+                    "victory": float(self.rl_result_reward_victory),
+                    "defeat": float(self.rl_result_reward_defeat),
+                    "draw": float(self.rl_result_reward_draw),
+                }
+                reward_cfg = RewardConfig(
+                    use_hp_drop_penalty=self.rl_use_hp_drop_penalty,
+                    hp_drop_penalty=self.rl_hp_drop_penalty,
+                    rank_reward_table=dict(rl_rank_reward_table),
+                    episode_end_fallback_reward=self.rl_episode_end_fallback_reward,
+                )
                 bridge = RLMovementBridge(
                     model_path=self.rl_movement_model_path,
                     is_showdown=self.is_showdown,
@@ -2140,6 +2183,8 @@ class Play(Movement):
                     train_steps_per_update=self.rl_train_steps_per_update,
                     save_every_seconds=self.rl_save_every_seconds,
                     max_projectiles=self.rl_max_projectiles,
+                    use_projectile_features=self.rl_use_projectile_features,
+                    reward_cfg=reward_cfg,
                 )
             except Exception as exc:
                 if not getattr(self, "_rl_bridge_warned", False):
@@ -2676,6 +2721,15 @@ class Play(Movement):
                 self.projectile_tracker.reset()
             except Exception:
                 pass
+            return []
+
+        skip_tracker_for_rl = (
+            getattr(self, "use_rl_movement", False)
+            and not getattr(self, "rl_use_projectile_features", True)
+            and not getattr(self, "rl_show_projectile_debug", True)
+        )
+        if skip_tracker_for_rl:
+            data["projectile"] = []
             return []
 
         from rl.projectile_tracker import extract_projectile_boxes
@@ -3273,7 +3327,8 @@ class Play(Movement):
                 boxes_drawn += 1
 
         projectile_tracker = getattr(self, "projectile_tracker", None)
-        if projectile_tracker is not None:
+        show_proj_dbg = getattr(self, "rl_show_projectile_debug", True)
+        if projectile_tracker is not None and show_proj_dbg:
             from rl.projectile_tracker import (
                 cluster_bounding_box,
                 cluster_tracks_by_distance,

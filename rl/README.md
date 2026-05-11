@@ -24,7 +24,14 @@ Why this fork exists:
 | `use_rl_movement`             | `"no"`                                         | Master switch. When `"yes"`, the RL policy drives movement and the heuristic `get_movement` / `get_showdown_movement` / `enemy_pressure_movement_fallback` paths are bypassed. Combat (attacks, supers, gadgets) still runs heuristically.                                                       |
 | `enable_rl_movement_training` | `"no"`                                         | When `"yes"`, the bridge collects rollouts from live frames and runs `model.learn()` on a worker thread every `rl_train_steps_per_update` frames; weights are written back to `rl_movement_model_path`. When `"no"`, the policy runs in inference-only mode. Requires `use_rl_movement = "yes"`. |
 | `rl_movement_model_path`      | `models/rl_movement_policy.zip`                | SB3 PPO checkpoint location. Auto-created on first training start.                                                                                                                                                                                                                               |
-| `rl_max_projectiles`          | `6`                                            | K nearest projectiles included in the observation (top of the file lists exact feature layout).                                                                                                                                                                                                  |
+| `rl_max_projectiles`          | `6`                                            | K nearest projectiles included in the observation when `rl_use_projectile_features=yes` .                                                                                                                                                                                                   |
+| `rl_use_projectile_features` | `"yes"` *(when key omitted)* / `"no"` in repo default | When `"no"`, the RL policy uses `max_projectiles=0` (8-dim observation) and projectile boxes are skipped in `update_projectile_tracker` whenever `rl_show_projectile_debug=no` — saves CPU while RL-only movement trains on HP + placement rewards.                                                                             |
+| `rl_show_projectile_debug` | `"yes"` *(when key omitted)* / `"no"` in repo default | When `"no"`, projectile tracks are not drawn on the RL visual-debug overlay (`Play.show_visual_debug`).                                                                                                                                                                                         |
+| `rl_use_hp_drop_penalty`     | `"yes"` in repo default                        | When `"yes"`, per-step penalty uses `HealthMonitor.recent_damage_event` (generic HP loss: storm, melee, shots). Projectile-tracker gates are bypassed *for rewards* only (`compute_reward`).                                                                                                                                    |
+| `rl_hp_drop_penalty`          | `-1.0`                                         | Penalty magnitude when HP drop is detected in the damage-confirm window.                                                                                                                                                                                                                           |
+| `rl_rank_reward_1st` … `rl_rank_reward_4th` | `3.0 / 1.0 / 0.0 / -1.5` | Terminal PPO reward on match reset when showdown end screen resolves to `"1st"`–`"4th"` (`state_finder` templates).                                                                                                                                                                              |
+| `rl_result_reward_victory` / `defeat` / `draw` | `2.0 / -1.5 / 0.0` | Terminal rewards for `"victory"`, `"defeat"`, `"draw"` (`end_*` states in non-showdown modes).                                                                                                                                                                                                    |
+| `rl_episode_end_fallback_reward` | `0.0` | Used when `_pending_end_result` is unknown (disconnect, missing template). Older builds always paid `survival_episode_bonus`; this avoids paying a phantom win bonus.                                                                                                                                   |
 | `rl_projectile_classes`       | `["projectile","super","bullet","enemy_shot"]` | Detector class names that the projectile tracker treats as incoming hazards. Add/remove names here to match the names the YOLO model emits.                                                                                                                                                      |
 | `rl_combat_blend_dodge`       | `"yes"`                                        | When in attack range, still blend the existing `apply_combat_dodge` strafe on top of the RL angle so attacks look natural.                                                                                                                                                                       |
 
@@ -147,8 +154,9 @@ normal Gym env from the trainer's perspective.
 | Survival                   | `+0.01` per step                                                       | Continuous bonus for staying alive.                                                                                                                                                                                                                    |
 | Safe band vs nearest enemy | `+0.02` when enemy distance is in `[0.35, 0.75] * frame_diagonal/2`    | Encourages "in attack range, out of danger" positioning.                                                                                                                                                                                               |
 | Teammate proximity         | `+0.01` when teammate distance is in `[0.05, 0.30] * frame_diagonal/2` | Encourages staying near teammates as the user requested.                                                                                                                                                                                               |
-| Projectile hit             | `-1.0`                                                                 | With **`cross_reference_projectile_hits = "yes"`** and **`intercept_confirm_enabled = "yes"`** (default): penalty when [`HitConfirmer.is_recent_confirmed_hit`](../rl/hit_confirmer.py) is true inside **`damage_confirm_window_seconds`**. With cross-reference on and intercept off: penalty when **`is_player_hit`** is true **and** [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) is non-null. With **`cross_reference_projectile_hits = "no"`**, penalty whenever `is_player_hit` is true. |
-| Episode end survival bonus | `+0.5`                                                                 | Added on `done` when the match resets.                                                                                                                                                                                                                 |
+| Projectile / intercept hit (`rl_use_hp_drop_penalty=no`) | `-1.0`                                                                 | Tracker + `HitConfirmer` / cross-reference semantics described in [`policy_bridge.py`](policy_bridge.py) (matches the older projectile-focused mode).                                                                             |
+| HP drop penalty (`rl_use_hp_drop_penalty=yes`)           | `-1.0` (see `rl_hp_drop_penalty`)                                      | Applies when [`HealthMonitor.recent_damage_event`](../rl/health_monitor.py) fires inside `damage_confirm_window_seconds`. Encourages storm avoidance / generic survivability without projectile geometry in the observation.          |
+| Episode-end placement / result                           | showdown `1st/2nd/3rd/4th` + `victory/defeat/draw` (configurable)       | Dispatched via `Play._pending_end_result` (`main.py` records `state.split("_", 1)[1]` for `end_*` states). [`episode_terminal_reward()`](movement_env.py) picks the SB3 terminal reward consumed by [`RLMovementBridge.on_match_reset()`](policy_bridge.py). Inference (`train=no`) keeps terminal bonus at `0` like the legacy rollout path. |
 
 ## Health bar and damage events
 
@@ -176,7 +184,7 @@ With visual debug enabled in [`cfg/general_config.toml`](../cfg/general_config.t
 
 - An **HP bar** strip and OCR-derived **`HP cur/max`** when available.
 - A top **RED FLASH** banner while the red-flash detector is active.
-- Projectile labels **`proj{id}*`** when **`confidence_confirmed`** is true.
+- Projectile labels **`proj{id}*`** when **`confidence_confirmed`** is true **and `rl_show_projectile_debug=yes`**.
 
 ## Projectile direction gate
 
@@ -242,8 +250,8 @@ RL score is on disk for every run with no extra setup.
 Format:
 
 ```
-[RL] step=12345 ep_steps=812 ep_reward=+5.273 reward/step=+0.006 mean100ep=+3.84 projectile_hit=False
-[RL] episode_end ep_reward=+5.273 ep_len=812 mean100ep=+3.84
+[RL] step=12345 ep_steps=812 ep_reward=+5.273 reward/step=+0.006 mean100ep=+3.84 penalty_hit=False
+[RL] episode_end ep_reward=+8.273 ep_len=812 result=1st rank_bonus=+3.000 mean100ep=+3.84
 ```
 
 `mean100ep` is the trailing average of the last 100 episode returns —
@@ -308,10 +316,8 @@ and `gymnasium` (added to `setup.py`).
 
 - HP bar geometry assumes the default **1920×1080**-style HUD; extreme resolutions or skins may need tuning `health_bar_*` keys.
 - OCR depends on **EasyOCR** cold start and CPU/GPU load; it is throttled and optional (`health_ocr_enabled`).
-- Without retrained vision, projectile tracks are always empty and the
-`projectile_hit_penalty` term never fires. The policy will still
-optimize survival shaping, but the dodging signal it learns from is
-weak until the model is updated.
+- Without retrained vision, projectile tracks are always empty when YOLO never emits projectile classes — the projectile slots pad with zeros (`rl_use_projectile_features=yes`) or shrink away entirely (`=no`). With **`rl_use_hp_drop_penalty=yes`**, HP drops carry the avoidance signal regardless.
+- Turning **projectiles on/off**, changing **`rl_max_projectiles`**, or swapping outcome wiring changes the Gym observation size / terminal returns — reuse an SB3 checkpoint only when those hyper-parameters match what it was trained on (otherwise delete / pick a fresh `rl_movement_model_path`).
 - The Gym env is single-environment (one `MovementEnv` per process).
 A future change could vectorize it across multiple parallel
 emulator instances if you want faster training throughput.
