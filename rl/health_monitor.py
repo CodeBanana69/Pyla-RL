@@ -113,6 +113,13 @@ class _OcrWorker:
                 self._latest = _OcrResult(value=val, prob=prob, done_at=_time.time())
 
 
+def format_power_cube_bonus_suffix(max_hp: int, cubes: int, hp_each: int) -> str:
+    """Human-readable cube bonus for terminal logs (Showdown)."""
+    bonus = int(cubes) * int(hp_each)
+    base = int(max_hp) - bonus
+    return f" cubes={int(cubes)} base≈{base} (+{bonus} from cubes)"
+
+
 def _cuda_available() -> bool:
     try:  # torch is an optional dep for the OCR path
         import torch  # type: ignore
@@ -156,11 +163,17 @@ class HealthMonitor:
         ocr_poll_hz: float = 5.0,
         ocr_run_in_thread: str = "auto",         # "auto" | "yes" | "no"
         ocr_full_hp_lock_repeats: int = 2,
-        ocr_min_confidence: float = 0.35,
+        ocr_min_confidence: float = 0.25,
         ocr_log_terminal: bool = True,
         ocr_damage_drop_min: int = 1,
         hsv_fallback_enabled: bool = True,
         ocr_reader: Optional[Any] = None,        # injected (tests / custom factory)
+        # Showdown Power Cube count (OCR strip above numeric HP; +hp_each max HP per cube)
+        ocr_power_cubes: str = "auto",           # auto | yes | no
+        power_cube_hp_each: int = 400,
+        ocr_cube_poll_hz: float = 1.0,
+        power_cube_max_hp_gate: int = 3500,    # auto: only OCR cubes when max_hp >= this
+        power_cube_strip_px: float = 34.0,     # vertical height of strip above HP digits
     ) -> None:
         # HSV/geometry knobs
         self.band_offset_px = float(band_offset_px)
@@ -200,6 +213,18 @@ class HealthMonitor:
         self.hsv_fallback_enabled = bool(hsv_fallback_enabled)
         self._ocr_reader_override = ocr_reader
 
+        pc = str(ocr_power_cubes).strip().lower()
+        if pc in ("yes", "true", "1"):
+            self._ocr_power_cubes_mode = "yes"
+        elif pc in ("no", "false", "0"):
+            self._ocr_power_cubes_mode = "no"
+        else:
+            self._ocr_power_cubes_mode = "auto"
+        self.power_cube_hp_each = max(1, int(power_cube_hp_each))
+        self.ocr_cube_poll_hz = max(0.2, float(ocr_cube_poll_hz))
+        self.power_cube_max_hp_gate = max(500, int(power_cube_max_hp_gate))
+        self.power_cube_strip_px = float(power_cube_strip_px)
+
         # Threading decision
         choice = str(ocr_run_in_thread).strip().lower()
         if choice == "yes":
@@ -226,6 +251,16 @@ class HealthMonitor:
         self._last_log_value: Optional[int] = None
         self._worker: Optional[_OcrWorker] = None
         self._first_after_reset: bool = True
+        # Pending diagnostics + soft-latch state
+        self._pending_started_at: Optional[float] = None
+        self._pending_last_log_at: float = 0.0
+        self._pending_read_count: int = 0
+        self._pending_max_seen: int = 0
+        # After this many seconds in "ocr_pending" with at least N reads, latch to
+        # the largest read so far so RL stops fighting the visual-debug overlay.
+        self._soft_latch_after_seconds: float = 6.0
+        self._soft_latch_min_reads: int = 3
+        self._last_cube_ocr_t: float = 0.0
 
         # Public state (also read by RL / visual debug)
         self.last_hp_pct: Optional[float] = None
@@ -234,6 +269,7 @@ class HealthMonitor:
         self.hp_value: Optional[int] = None
         self.observed_max_hp: int = 0
         self.last_green_red: Tuple[int, int] = (0, 0)
+        self.power_cube_count: Optional[int] = None
 
     # ──────────────────────────────────────────────────────────────────────
     # Match lifecycle
@@ -251,12 +287,18 @@ class HealthMonitor:
         self._prev_hp_value = None
         self._last_log_value = None
         self._first_after_reset = True
+        self._pending_started_at = None
+        self._pending_last_log_at = 0.0
+        self._pending_read_count = 0
+        self._pending_max_seen = 0
         self.last_hp_pct = None
         self.last_hp_ok = False
         self.last_hp_status = "unknown"
         self.hp_value = None
         self.observed_max_hp = 0
         self.last_green_red = (0, 0)
+        self.power_cube_count = None
+        self._last_cube_ocr_t = 0.0
 
     def close(self) -> None:
         if self._worker is not None:
@@ -278,6 +320,32 @@ class HealthMonitor:
         bx1 = max(0, int(round(cx - half_w - extra)))
         bx2 = min(int(w), int(round(cx + half_w + extra)))
         return bx1, bx2
+
+    def _hp_digit_band_bounds(
+        self,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> Optional[Tuple[int, int, int, int, int, int]]:
+        """(h, w, bx1, bx2, digit_top, digit_bot) for HP number strip above the bar."""
+        if frame_rgb is None or frame_rgb.size == 0 or len(player_box) < 4:
+            return None
+        h, w = frame_rgb.shape[:2]
+        sf = max(0.25, float(scale_factor))
+        x1, y1, x2, y2 = map(float, player_box[:4])
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        bx1, bx2 = self._horizontal_crop_x(x1, x2, w, sf)
+        extra = max(8.0, self.digit_band_extra_px * sf)
+        off = max(2.0, self.band_offset_px * sf)
+        bh = max(4.0, self.band_height_px * sf)
+        digit_top = max(0, int(y1 - off - bh - extra))
+        digit_bot = min(h, max(digit_top + 4, int(y1 - off + 4)))
+        if digit_bot - digit_top < 6 or bx2 - bx1 < 10:
+            return None
+        return h, w, bx1, bx2, digit_top, digit_bot
 
     def _count_fill_pixels(
         self, hsv: np.ndarray, *, relaxed: bool = False
@@ -455,23 +523,10 @@ class HealthMonitor:
         scale_factor: float,
     ) -> Optional[np.ndarray]:
         """Tiny grayscale crop above the player's HP bar, upscaled for OCR."""
-        if frame_rgb is None or frame_rgb.size == 0 or len(player_box) < 4:
+        b = self._hp_digit_band_bounds(frame_rgb, player_box, scale_factor)
+        if b is None:
             return None
-        h, w = frame_rgb.shape[:2]
-        sf = max(0.25, float(scale_factor))
-        x1, y1, x2, y2 = map(float, player_box[:4])
-        if x2 < x1:
-            x1, x2 = x2, x1
-        if y2 < y1:
-            y1, y2 = y2, y1
-        bx1, bx2 = self._horizontal_crop_x(x1, x2, w, sf)
-        extra = max(8.0, self.digit_band_extra_px * sf)
-        off = max(2.0, self.band_offset_px * sf)
-        bh = max(4.0, self.band_height_px * sf)
-        digit_top = max(0, int(y1 - off - bh - extra))
-        digit_bot = min(h, max(digit_top + 4, int(y1 - off + 4)))
-        if digit_bot - digit_top < 6 or bx2 - bx1 < 10:
-            return None
+        _h, _w, bx1, bx2, digit_top, digit_bot = b
         crop = frame_rgb[digit_top:digit_bot, bx1:bx2]
         if crop.size == 0:
             return None
@@ -485,6 +540,91 @@ class HealthMonitor:
             return up
         except Exception:
             return None
+
+    def _build_power_cube_count_crop(
+        self,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> Optional[np.ndarray]:
+        """Strip above numeric HP (Showdown Power Cube count). Same width as HP digits."""
+        b = self._hp_digit_band_bounds(frame_rgb, player_box, scale_factor)
+        if b is None:
+            return None
+        _h, _w, bx1, bx2, digit_top, _digit_bot = b
+        sf = max(0.25, float(scale_factor))
+        strip = max(14.0, self.power_cube_strip_px * sf)
+        cube_bot = max(0, digit_top - 1)
+        cube_top = max(0, int(cube_bot - strip))
+        if cube_bot <= cube_top or bx2 - bx1 < 10:
+            return None
+        crop = frame_rgb[cube_top:cube_bot, bx1:bx2]
+        if crop.size == 0:
+            return None
+        try:
+            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+            gray = clahe.apply(gray)
+            up = cv2.resize(
+                gray, (gray.shape[1] * 2, gray.shape[0] * 2), interpolation=cv2.INTER_CUBIC
+            )
+            return up
+        except Exception:
+            return None
+
+    def _power_cubes_ocr_enabled(self) -> bool:
+        if self._ocr_power_cubes_mode == "no":
+            return False
+        if self._ocr_power_cubes_mode == "yes":
+            return bool(self.ocr_enabled and self.ocr_primary)
+        # auto
+        return bool(
+            self.ocr_enabled
+            and self.ocr_primary
+            and self._max_hp_locked
+            and int(self.observed_max_hp) >= int(self.power_cube_max_hp_gate)
+        )
+
+    def _maybe_update_power_cube_count(
+        self,
+        now: float,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> None:
+        if not self._power_cubes_ocr_enabled():
+            return
+        period = 1.0 / self.ocr_cube_poll_hz
+        if (now - self._last_cube_ocr_t) < period:
+            return
+        self._last_cube_ocr_t = now
+        crop = self._build_power_cube_count_crop(frame_rgb, player_box, scale_factor)
+        if crop is None:
+            return
+        val, prob = self._run_ocr_inline(crop)
+        if val is None:
+            return
+        min_conf = max(0.12, float(self.ocr_min_confidence) * 0.85)
+        if prob < min_conf:
+            return
+        cubes = int(val)
+        if cubes < 1 or cubes > 150:
+            return
+        full = int(self.observed_max_hp)
+        bonus = cubes * int(self.power_cube_hp_each)
+        if bonus >= full - 200:
+            return
+        self.power_cube_count = cubes
+
+    def _cube_suffix_for_log(self) -> str:
+        if self.power_cube_count is None or not self._max_hp_locked:
+            return ""
+        full = int(self.observed_max_hp)
+        if full <= 0:
+            return ""
+        return " " + format_power_cube_bonus_suffix(
+            full, int(self.power_cube_count), int(self.power_cube_hp_each)
+        )
 
     def _get_reader(self) -> Optional[Any]:
         if self._ocr_reader_override is not None:
@@ -586,18 +726,71 @@ class HealthMonitor:
         return val, prob
 
     def _try_latch_max_hp(self, val: int) -> None:
+        """Latch ``max_hp`` on N near-equal reads (tolerance ~2%).
+
+        Exact integer equality is too strict — EasyOCR on small HP digits jitters
+        by a few HP between frames (e.g. 47900 / 47800 / 47901). We accept reads
+        within ~2% (or ±50 HP, whichever is larger) and latch to the maximum
+        seen, which mirrors how the HUD shows full HP at match start.
+        """
         if self._max_hp_locked:
             return
-        if self._latch_repeat_val == val:
-            self._latch_repeat_count += 1
+        prev = self._latch_repeat_val
+        if prev is not None:
+            tolerance = max(50, int(prev * 0.02))
+            if abs(int(val) - int(prev)) <= tolerance:
+                self._latch_repeat_count += 1
+                self._latch_repeat_val = max(int(prev), int(val))
+            else:
+                self._latch_repeat_val = int(val)
+                self._latch_repeat_count = 1
         else:
-            self._latch_repeat_val = val
+            self._latch_repeat_val = int(val)
             self._latch_repeat_count = 1
+
         if self._latch_repeat_count >= self.ocr_full_hp_lock_repeats:
-            self.observed_max_hp = int(val)
+            self.observed_max_hp = int(self._latch_repeat_val)
             self._max_hp_locked = True
             if self.ocr_log_terminal:
-                print(f"[HP] match start full_hp={self.observed_max_hp}")
+                line = f"[HP] match start full_hp={self.observed_max_hp}{self._cube_suffix_for_log()}"
+                print(line)
+
+    def _maybe_soft_latch_max_hp(self, now: float) -> None:
+        """Last-resort latch if OCR keeps drifting but values are plausible."""
+        if self._max_hp_locked or self._pending_started_at is None:
+            return
+        if self._pending_read_count < self._soft_latch_min_reads:
+            return
+        if (now - self._pending_started_at) < self._soft_latch_after_seconds:
+            return
+        if self._pending_max_seen <= 0:
+            return
+        self.observed_max_hp = int(self._pending_max_seen)
+        self._max_hp_locked = True
+        if self.ocr_log_terminal:
+            print(
+                "[HP] soft-latch full_hp="
+                f"{self.observed_max_hp} (after {self._pending_read_count} OCR reads;"
+                " values were not stable enough for hard latch)"
+                f"{self._cube_suffix_for_log()}"
+            )
+
+    def _log_pending_diag(self, now: float, ocr_val: Optional[int]) -> None:
+        if not self.ocr_log_terminal:
+            return
+        if (now - self._pending_last_log_at) < 3.0:
+            return
+        self._pending_last_log_at = now
+        pending_for = (
+            now - self._pending_started_at if self._pending_started_at else 0.0
+        )
+        cur = ocr_val if ocr_val is not None else self.hp_value
+        print(
+            "[HP] ocr_pending t="
+            f"{pending_for:.1f}s reads={self._pending_read_count}"
+            f" latest={cur} repeat_val={self._latch_repeat_val}"
+            f"x{self._latch_repeat_count} max_seen={self._pending_max_seen}"
+        )
 
     def _log_terminal(self, cur: int) -> None:
         if not self.ocr_log_terminal:
@@ -608,7 +801,7 @@ class HealthMonitor:
         full = max(1, int(self.observed_max_hp))
         dmg = max(0, full - int(cur))
         pct = 100.0 * float(cur) / float(full)
-        print(f"[HP] full={full} cur={cur} dmg={dmg} ({pct:.1f}%)")
+        print(f"[HP] full={full} cur={cur} dmg={dmg} ({pct:.1f}%){self._cube_suffix_for_log()}")
 
     # ──────────────────────────────────────────────────────────────────────
     # Main update
@@ -660,7 +853,12 @@ class HealthMonitor:
         emitted: Optional[DamageEvent] = None
         if ocr_val is not None:
             if not self._max_hp_locked:
+                if self._pending_started_at is None:
+                    self._pending_started_at = now
+                self._pending_read_count += 1
+                self._pending_max_seen = max(self._pending_max_seen, int(ocr_val))
                 self._try_latch_max_hp(ocr_val)
+                self._maybe_soft_latch_max_hp(now)
             if self._max_hp_locked:
                 full = int(self.observed_max_hp)
                 cur = int(ocr_val)
@@ -686,11 +884,12 @@ class HealthMonitor:
                         emitted = ev
                 self._prev_hp_value = cur
             else:
-                # Seen one OCR digit, still latching — surface partial state
+                # Seen one OCR digit, still latching — surface partial state.
                 self.last_hp_pct = 1.0
                 self.last_hp_ok = False
                 self.last_hp_status = "ocr_pending"
                 self.hp_value = ocr_val
+                self._log_pending_diag(now, ocr_val)
         else:
             # No OCR this tick: use HSV fallback if enabled and OCR has never latched.
             if (
@@ -713,6 +912,12 @@ class HealthMonitor:
                 self.last_hp_ok = False
                 if self.last_hp_status not in ("respawn", "unknown"):
                     self.last_hp_status = "ocr_pending"
+                self._log_pending_diag(now, None)
+                # Try soft-latch even on no-OCR ticks once enough reads piled up.
+                self._maybe_soft_latch_max_hp(now)
+
+        if self._max_hp_locked:
+            self._maybe_update_power_cube_count(now, frame_rgb, player_box, scale_factor)
 
         return emitted
 

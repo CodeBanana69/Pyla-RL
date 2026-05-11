@@ -6,17 +6,16 @@ wall_stuck_debug = "no"
 cpu_or_gpu = "auto"
 directml_device_id = "auto"
 max_ips = 0
-scrcpy_max_fps = 0
+scrcpy_max_fps = 60
 scrcpy_max_width = 960
 scrcpy_bitrate = 3000000
 onnx_cpu_threads = 4
-used_threads = 4
+used_threads = 6
 pyla_version = "0.8.1"
 long_press_star_drop = "no"
-# EasyOCR: auto = NVIDIA CUDA only (skip ROCm/AMD); yes = torch GPU when cuda.available; no = CPU
 easyocr_torch_gpu = "auto"
-# Starr Nova chest: hold lengths (seconds); longer later steps cover variable fill-ring timing.
-starr_nova_long_press_seconds = [1.9, 2.85, 3.95, 9.5]
+starr_nova_long_press_seconds = [2.0, 3.5, 5.5, 8.0, 11.0, 14.0]
+starr_nova_open_log = "no"
 terminal_logging = "no"
 capture_bad_vision_frames = "no"
 pause_menu_ips_tracker = "yes"
@@ -26,7 +25,6 @@ bad_vision_capture_max = 500
 visual_debug_scale = 0.6
 visual_debug_max_fps = 30
 visual_debug_max_boxes = 120
-# Walls drawn separately so they stay visible when many entities fill max_boxes above.
 visual_debug_max_wall_boxes = 250
 visual_debug_motion_boxes = "no"
 ocr_scale_down_factor = 0.5

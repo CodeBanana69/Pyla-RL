@@ -183,12 +183,15 @@ health_bar_shield_enabled = "yes"
 health_bar_min_consecutive_drops = 2
 health_ocr_validate_against_hsv = "yes"
 health_ocr_max_relative_jump = 0.4
-# OCR-first HP detection (replaces HSV-primary path; HSV is now a fallback)
 health_ocr_primary = "yes"
 health_ocr_poll_hz = 5.0
 health_ocr_run_in_thread = "auto"
 health_ocr_full_hp_lock_repeats = 2
-health_ocr_min_confidence = 0.35
+health_ocr_min_confidence = 0.25
 health_ocr_log_terminal = "yes"
 health_ocr_damage_drop_min = 1
 health_hsv_fallback_enabled = "yes"
+health_ocr_power_cubes = "auto"
+health_power_cube_hp_each = 400
+health_ocr_cube_poll_hz = 1.0
+health_power_cube_gate_max_hp = 3500

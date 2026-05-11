@@ -152,15 +152,39 @@ class StarDropHandlingTests(unittest.TestCase):
     )
     @patch("stage_manager.get_star_drop_type", return_value="starr_nova_hold")
     def test_starr_nova_full_schedule_when_screen_stalls(self, *_):
+        """Main ladder + tail holds when template never clears."""
         manager = object.__new__(StageManager)
         manager.window_controller = DummyDropWindowController()
         manager.handle_star_drop()
 
-        self.assertEqual(len(manager.window_controller.long_presses), 4)
-        self.assertEqual(
-            [p[2] for p in manager.window_controller.long_presses],
-            [1.9, 2.85, 3.95, 9.5],
-        )
+        presses = manager.window_controller.long_presses
+        self.assertEqual(len(presses), 8)  # 4 main + 4 tail
+        self.assertEqual([p[2] for p in presses[:4]], [1.9, 2.85, 3.95, 9.5])
+        tail_dur = 12.0  # max(12, last schedule step 9.5)
+        self.assertEqual([p[2] for p in presses[4:]], [tail_dur] * 4)
+
+    @patch("stage_manager.time.sleep", return_value=None)
+    @patch(
+        "stage_manager._load_starr_nova_long_press_schedule",
+        return_value=[2.0, 3.0],
+    )
+    def test_starr_nova_tail_stops_when_template_clears_mid_tail(self, *_):
+        calls = []
+
+        def _type(img):
+            calls.append(1)
+            # Stay on nova through main ladder + 1 tail, then clear.
+            return "starr_nova_hold" if len(calls) <= 4 else None
+
+        manager = object.__new__(StageManager)
+        manager.window_controller = DummyDropWindowController()
+        with patch("stage_manager.get_star_drop_type", side_effect=_type):
+            manager.handle_star_drop()
+
+        presses = [p[2] for p in manager.window_controller.long_presses]
+        self.assertEqual(presses[:2], [2.0, 3.0])
+        self.assertEqual(presses[2], 12.0)  # first tail only
+        self.assertEqual(len(presses), 3)
 
     @patch("stage_manager.time.sleep", return_value=None)
     @patch("stage_manager.get_star_drop_type", return_value="standard")

@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from rl.health_monitor import HealthMonitor
+from rl.health_monitor import HealthMonitor, format_power_cube_bonus_suffix
 
 
 def _fill_hp_band_green(frame: np.ndarray, player_box, *, green_ratio: float = 1.0) -> None:
@@ -83,6 +83,14 @@ def _ocr_hm(seq, **overrides) -> HealthMonitor:
 # ─────────────────────────────────────────────────────────────────────────────
 # HSV pipeline (unchanged behavior, still tested directly)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+class FormatPowerCubeSuffixTests(unittest.TestCase):
+    def test_showdown_frank_example(self):
+        s = format_power_cube_bonus_suffix(47900, 84, 400)
+        self.assertIn("cubes=84", s)
+        self.assertIn("base≈14300", s)
+        self.assertIn("+33600", s)
 
 
 class HsvReadHpBandTests(unittest.TestCase):
@@ -277,6 +285,24 @@ class OcrFirstTests(unittest.TestCase):
         self.assertIsNone(ev)
         self.assertEqual(hm.last_hp_status, "respawn")
         self.assertFalse(hm.max_hp_locked)
+
+    def test_near_equal_reads_latch_to_max(self):
+        """EasyOCR jitter within ~2% should still latch (legacy strict-eq stuck)."""
+        hm = _ocr_hm([47800, 47900])
+        hm.update(0.0, self.frame, self.player, 1.0, None)
+        hm.update(0.25, self.frame, self.player, 1.0, None)
+        self.assertTrue(hm.max_hp_locked)
+        self.assertEqual(hm.observed_max_hp, 47900)
+
+    def test_soft_latch_when_reads_drift(self):
+        """If reads keep drifting > tolerance, soft-latch after grace period."""
+        hm = _ocr_hm([42000, 47000, 51000, 48000, 49000, 49000])
+        # Drive enough ticks past the 6.0s soft-latch threshold.
+        for i, t in enumerate([0.0, 0.25, 0.5, 1.0, 6.5, 6.9]):
+            hm.update(t, self.frame, self.player, 1.0, None)
+        self.assertTrue(hm.max_hp_locked)
+        # Soft latch picks the max value seen (51000), not the median.
+        self.assertEqual(hm.observed_max_hp, 51000)
 
 
 if __name__ == "__main__":

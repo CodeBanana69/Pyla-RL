@@ -128,10 +128,14 @@ class Hub:
         self.bot_config.setdefault("health_ocr_poll_hz", 5.0)
         self.bot_config.setdefault("health_ocr_run_in_thread", "auto")
         self.bot_config.setdefault("health_ocr_full_hp_lock_repeats", 2)
-        self.bot_config.setdefault("health_ocr_min_confidence", 0.35)
+        self.bot_config.setdefault("health_ocr_min_confidence", 0.25)
         self.bot_config.setdefault("health_ocr_log_terminal", "yes")
         self.bot_config.setdefault("health_ocr_damage_drop_min", 1)
         self.bot_config.setdefault("health_hsv_fallback_enabled", "yes")
+        self.bot_config.setdefault("health_ocr_power_cubes", "auto")
+        self.bot_config.setdefault("health_power_cube_hp_each", 400)
+        self.bot_config.setdefault("health_ocr_cube_poll_hz", 1.0)
+        self.bot_config.setdefault("health_power_cube_gate_max_hp", 3500)
 
         # Time thresholds defaults
         self.time_tresholds.setdefault("state_check", 3)
@@ -152,8 +156,9 @@ class Hub:
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("easyocr_torch_gpu", "auto")
         self.general_config.setdefault(
-            "starr_nova_long_press_seconds", [1.9, 2.85, 3.95, 9.5]
+            "starr_nova_long_press_seconds", [2.0, 3.5, 5.5, 8.0, 11.0, 14.0]
         )
+        self.general_config.setdefault("starr_nova_open_log", "no")
         self.general_config.setdefault("trophies_multiplier", 1.0)
         self.general_config.setdefault("ocr_scale_down_factor", 0.5)
         self.general_config.setdefault("current_emulator", "LDPlayer")

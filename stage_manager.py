@@ -25,9 +25,23 @@ debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 
 # Starr Nova “hold to open” can need longer / variable press than Daily Wins —
 # escalate until the nova template disappears or this schedule completes.
-DEFAULT_STARR_NOVA_LONG_PRESS_SEC: List[float] = [1.9, 2.85, 3.95, 9.5]
+DEFAULT_STARR_NOVA_LONG_PRESS_SEC: List[float] = [2.0, 3.5, 5.5, 8.0, 11.0, 14.0]
 
-_STARR_NOVA_HOLD_MAX_SEC = 15.0  # clamp; allows long final press (e.g. 9.5s)
+_STARR_NOVA_HOLD_MAX_SEC = 25.0  # clamp for per-step and tail holds
+_STARR_NOVA_TAIL_MAX_ATTEMPTS = 4
+_STARR_NOVA_TAIL_MIN_SEC = 12.0
+_STARR_NOVA_SETTLE_SEC = 0.58
+_STARR_NOVA_TAIL_SETTLE_EXTRA = 0.15
+
+
+def _starr_nova_open_log_enabled() -> bool:
+    try:
+        gc = load_toml_as_dict("cfg/general_config.toml")
+        if str(gc.get("starr_nova_open_log", "no")).lower() in ("yes", "true", "1"):
+            return True
+        return str(gc.get("super_debug", "no")).lower() in ("yes", "true", "1")
+    except Exception:
+        return False
 
 
 def _parse_starr_nova_long_press_schedule(raw: Any) -> List[float]:
@@ -586,15 +600,41 @@ class StageManager:
                 time.sleep(0.25)
 
         elif drop_type == "starr_nova_hold":
+            nova_log = _starr_nova_open_log_enabled()
+            settle = _STARR_NOVA_SETTLE_SEC
             schedule = _load_starr_nova_long_press_schedule()
-            for dur in schedule:
+            n_main = len(schedule)
+            for i, dur in enumerate(schedule, start=1):
+                if nova_log:
+                    print(f"[Nova] hold {dur:.2f}s main {i}/{n_main}")
                 _safe_long_press(x, y, dur)
-                # Let the HUD register the hold before we check / repeat.
-                time.sleep(0.38)
+                time.sleep(settle)
                 after = self.window_controller.screenshot()
                 after_bgr = cv2.cvtColor(after, cv2.COLOR_RGB2BGR)
                 if get_star_drop_type(after_bgr) != "starr_nova_hold":
                     break
+
+            # Tail: ring can need longer than the main ladder; repeat a long hold
+            # until the template clears or we exhaust attempts.
+            tail_dur = min(
+                _STARR_NOVA_HOLD_MAX_SEC,
+                max(_STARR_NOVA_TAIL_MIN_SEC, float(schedule[-1]) if schedule else _STARR_NOVA_TAIL_MIN_SEC),
+            )
+            tail_settle = settle + _STARR_NOVA_TAIL_SETTLE_EXTRA
+            after = self.window_controller.screenshot()
+            after_bgr = cv2.cvtColor(after, cv2.COLOR_RGB2BGR)
+            for tail_i in range(_STARR_NOVA_TAIL_MAX_ATTEMPTS):
+                if get_star_drop_type(after_bgr) != "starr_nova_hold":
+                    break
+                if nova_log:
+                    print(
+                        f"[Nova] tail hold {tail_dur:.2f}s attempt {tail_i + 1}/"
+                        f"{_STARR_NOVA_TAIL_MAX_ATTEMPTS} still=starr_nova_hold"
+                    )
+                _safe_long_press(x, y, tail_dur)
+                time.sleep(tail_settle)
+                after = self.window_controller.screenshot()
+                after_bgr = cv2.cvtColor(after, cv2.COLOR_RGB2BGR)
 
         else:
             for _ in range(5):

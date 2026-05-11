@@ -416,6 +416,16 @@ class Movement:
         self.health_hsv_fallback_enabled = str(
             bot_config.get("health_hsv_fallback_enabled", "yes")
         ).lower() in ("yes", "true", "1")
+        self.health_ocr_power_cubes = str(
+            bot_config.get("health_ocr_power_cubes", "auto")
+        ).strip().lower()
+        self.health_power_cube_hp_each = max(
+            1, int(bot_config.get("health_power_cube_hp_each", 400))
+        )
+        self.health_ocr_cube_poll_hz = float(bot_config.get("health_ocr_cube_poll_hz", 1.0))
+        self.health_power_cube_gate_max_hp = max(
+            500, int(bot_config.get("health_power_cube_gate_max_hp", 3500))
+        )
 
     @staticmethod
     def get_enemy_pos(enemy):
@@ -989,6 +999,10 @@ class Play(Movement):
                 ocr_log_terminal=self.health_ocr_log_terminal,
                 ocr_damage_drop_min=self.health_ocr_damage_drop_min,
                 hsv_fallback_enabled=self.health_hsv_fallback_enabled,
+                ocr_power_cubes=self.health_ocr_power_cubes,
+                power_cube_hp_each=self.health_power_cube_hp_each,
+                ocr_cube_poll_hz=self.health_ocr_cube_poll_hz,
+                power_cube_max_hp_gate=self.health_power_cube_gate_max_hp,
             )
             self.red_flash_detector = RedFlashDetector(
                 threshold=self.red_flash_red_dom_threshold,

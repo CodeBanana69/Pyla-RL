@@ -123,10 +123,14 @@ HSV is still computed cheaply and is used as a fallback **only until OCR latches
 | `health_ocr_poll_hz` | `5.0` | Per-second OCR cadence. Slider in the Hub Additional tab (1–15 Hz, 0.5 step). Higher = more CPU, lower = laggier damage signal. |
 | `health_ocr_run_in_thread` | `"auto"` | `"auto"` (background thread when no CUDA), `"yes"`, or `"no"` (inline; preferred on GPU). |
 | `health_ocr_full_hp_lock_repeats` | `2` | Consecutive identical reads before `max_hp` latches at match start. |
-| `health_ocr_min_confidence` | `0.35` | Reject OCR reads with EasyOCR confidence below this. |
-| `health_ocr_log_terminal` | `"yes"` | Print `[HP] full=… cur=… dmg=… (xx.x%)` whenever the value changes. |
+| `health_ocr_min_confidence` | `0.25` | Reject OCR reads with EasyOCR confidence below this. Small HP digits on CPU EasyOCR often score 0.3–0.5, so the floor stays conservative. |
+| `health_ocr_log_terminal` | `"yes"` | Print `[HP] full=… cur=… dmg=… (xx.x%)` when HP changes; with Power Cube OCR also appends `cubes=N base≈… (+… from cubes)` (Showdown). |
 | `health_ocr_damage_drop_min` | `1` | Minimum absolute HP drop (in HP, not %) before an OCR-driven `DamageEvent` fires. |
 | `health_hsv_fallback_enabled` | `"yes"` | When OCR has nothing to say (typically the first few frames), fall back to the HSV fill ratio for `last_hp_pct` and event detection. |
+| `health_ocr_power_cubes` | `"auto"` | `"yes"` / `"no"` / `"auto"`. **auto**: OCR cube count only after `max_hp` is latched and `observed_max_hp >= health_power_cube_gate_max_hp` (default 3500). |
+| `health_power_cube_hp_each` | `400` | Brawl Stars rule: each Power Cube adds this much to **maximum** HP; used for `base≈ max_hp - cubes × 400` in logs. |
+| `health_ocr_cube_poll_hz` | `1.0` | How often to OCR the strip **above** the numeric HP (cube icon row). |
+| `health_power_cube_gate_max_hp` | `3500` | In **auto** mode, skip cube OCR below this latched max HP (avoids junk reads in 3v3). |
 | `health_ocr_enabled` | `"yes"` | Master OCR switch. When `"no"`, behaves like the legacy HSV-only path. |
 | `health_ocr_interval_seconds` | `0.5` | Legacy minimum interval; only honored when `health_ocr_poll_hz <= 0`. |
 | `health_ocr_validate_against_hsv` | `"yes"` | Legacy HSV cross-check (kept for old configs; the OCR-first path ignores HSV after latch). |
