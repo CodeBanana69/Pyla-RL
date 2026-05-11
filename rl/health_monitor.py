@@ -514,6 +514,59 @@ class HealthMonitor:
         return pct, True, (alive, r)
 
     # ──────────────────────────────────────────────────────────────────────
+    # OCR preprocessing (small HUD digits)
+    # ──────────────────────────────────────────────────────────────────────
+    def _preprocess_for_ocr(self, crop_rgb: np.ndarray) -> Optional[np.ndarray]:
+        """Bilateral denoise → 4× upscale → unsharp → Otsu binarize → morph open → pad.
+
+        Produces dark digits on light background when possible. Falls back to the
+        legacy CLAHE + 2× path if anything fails so degenerate crops still return something.
+        """
+        if crop_rgb is None or crop_rgb.size == 0:
+            return None
+        try:
+            gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
+            gray = cv2.bilateralFilter(gray, d=5, sigmaColor=35, sigmaSpace=35)
+            rh, rw = int(gray.shape[0]), int(gray.shape[1])
+            up = cv2.resize(
+                gray, (rw * 4, rh * 4), interpolation=cv2.INTER_CUBIC
+            )
+            blur = cv2.GaussianBlur(up, (0, 0), 1.0)
+            sharpened = cv2.addWeighted(up, 1.5, blur, -0.5, 0.0)
+
+            mu = float(np.mean(sharpened))
+            if mu < 128.0:
+                thresh_kind = cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU
+            else:
+                thresh_kind = cv2.THRESH_BINARY | cv2.THRESH_OTSU
+            _, binary = cv2.threshold(sharpened, 0, 255, thresh_kind)
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            opened = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
+            bordered = cv2.copyMakeBorder(
+                opened,
+                top=16,
+                bottom=16,
+                left=16,
+                right=16,
+                borderType=cv2.BORDER_CONSTANT,
+                value=255,
+            )
+            return bordered
+        except Exception:
+            try:
+                gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+                gray = clahe.apply(gray)
+                return cv2.resize(
+                    gray,
+                    (gray.shape[1] * 2, gray.shape[0] * 2),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+            except Exception:
+                return None
+
+    # ──────────────────────────────────────────────────────────────────────
     # OCR pipeline (primary)
     # ──────────────────────────────────────────────────────────────────────
     def _build_digit_crop(
@@ -530,16 +583,7 @@ class HealthMonitor:
         crop = frame_rgb[digit_top:digit_bot, bx1:bx2]
         if crop.size == 0:
             return None
-        try:
-            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-            gray = clahe.apply(gray)
-            up = cv2.resize(
-                gray, (gray.shape[1] * 2, gray.shape[0] * 2), interpolation=cv2.INTER_CUBIC
-            )
-            return up
-        except Exception:
-            return None
+        return self._preprocess_for_ocr(crop)
 
     def _build_power_cube_count_crop(
         self,
@@ -561,16 +605,7 @@ class HealthMonitor:
         crop = frame_rgb[cube_top:cube_bot, bx1:bx2]
         if crop.size == 0:
             return None
-        try:
-            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-            gray = clahe.apply(gray)
-            up = cv2.resize(
-                gray, (gray.shape[1] * 2, gray.shape[0] * 2), interpolation=cv2.INTER_CUBIC
-            )
-            return up
-        except Exception:
-            return None
+        return self._preprocess_for_ocr(crop)
 
     def _power_cubes_ocr_enabled(self) -> bool:
         if self._ocr_power_cubes_mode == "no":
@@ -641,17 +676,34 @@ class HealthMonitor:
         reader = self._get_reader()
         if reader is None:
             return None, 0.0
+        _ocr_kw = dict(
+            allowlist="0123456789",
+            paragraph=False,
+            detail=1,
+            mag_ratio=2.0,
+            text_threshold=0.5,
+            low_text=0.3,
+            link_threshold=0.3,
+            width_ths=0.7,
+            contrast_ths=0.05,
+            adjust_contrast=0.7,
+        )
         try:
-            results = reader.readtext(
-                crop,
-                allowlist="0123456789",
-                paragraph=False,
-                detail=1,
-            )
+            results = reader.readtext(crop, **_ocr_kw)
         except TypeError:
-            # Test stubs / older readers may not accept the kwargs.
+            # Narrower kwargs (some EasyOCR / stub versions omit detector tuning keys).
             try:
-                results = reader.readtext(crop)
+                results = reader.readtext(
+                    crop,
+                    allowlist=_ocr_kw["allowlist"],
+                    paragraph=_ocr_kw["paragraph"],
+                    detail=_ocr_kw["detail"],
+                )
+            except TypeError:
+                try:
+                    results = reader.readtext(crop)
+                except Exception:
+                    return None, 0.0
             except Exception:
                 return None, 0.0
         except Exception:
