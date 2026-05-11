@@ -127,6 +127,41 @@ class Movement:
         self.approach_flank_blend = float(bot_config.get("approach_flank_blend", 0.12))
         self.multi_enemy_flee_weight = float(bot_config.get("multi_enemy_flee_weight", 0.45))
         self.angle_smooth_factor = float(bot_config.get("angle_smooth_factor", 0.28))
+        self.heuristic_path_grid_enabled = str(
+            bot_config.get("heuristic_path_grid_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.heuristic_path_grid_radius_tiles = int(
+            bot_config.get("heuristic_path_grid_radius_tiles", 4)
+        )
+        self.heuristic_path_grid_step_deg = float(
+            bot_config.get("heuristic_path_grid_step_deg", 5.0)
+        )
+        self.heuristic_path_grid_max_iters = int(
+            bot_config.get("heuristic_path_grid_max_iters", 256)
+        )
+        self.heuristic_dodge_enabled = str(
+            bot_config.get("heuristic_dodge_enabled", "yes")
+        ).lower() in ("yes", "true", "1")
+        self.heuristic_dodge_scope = str(
+            bot_config.get("heuristic_dodge_scope", "all")
+        ).lower()
+        self.heuristic_dodge_max_tracks = int(
+            bot_config.get("heuristic_dodge_max_tracks", 6)
+        )
+        self.heuristic_dodge_horizon_seconds = float(
+            bot_config.get("heuristic_dodge_horizon_seconds", 0.35)
+        )
+        self.heuristic_dodge_min_alignment = float(
+            bot_config.get("heuristic_dodge_min_alignment", 0.35)
+        )
+        self.heuristic_dodge_min_speed_px_s = float(
+            bot_config.get("heuristic_dodge_min_speed_px_s", 90.0)
+        )
+        self.heuristic_dodge_blend = float(bot_config.get("heuristic_dodge_blend", 0.8))
+        from rl.heuristic_pathfinder import LocalGridPlanner
+
+        self._local_planner = LocalGridPlanner(step_deg=self.heuristic_path_grid_step_deg)
+        self._pathfind_debug = None
 
         self.use_rl_movement = str(bot_config.get("use_rl_movement", "no")).lower() in ("yes", "true", "1")
         self.rl_training_enabled = str(bot_config.get("enable_rl_movement_training", "no")).lower() in ("yes", "true", "1")
@@ -1669,7 +1704,11 @@ class Play(Movement):
                     new_angle = candidate
                     break
             if new_angle is None:
-                new_angle = self.find_best_angle(player_pos, (self._roam_angle + 180) % 360, walls)
+                new_angle = self.plan_movement_angle(
+                    player_pos,
+                    (self._roam_angle + 180) % 360,
+                    walls,
+                )
 
             if self.roam_center_bias > 0:
                 screen_cx, screen_cy = 960.0, 540.0
@@ -2060,7 +2099,19 @@ class Play(Movement):
                         desired = self.blend_angles(desired, team_angle, team_weight)
                         vlog(f"combat teammate pull -> desired={desired:.1f}° (team dist={int(teammate_distance)}px, weight={team_weight:.2f})")
 
-                angle = self.find_best_angle(player_pos, desired, walls)
+                if fog_flee_angle is None:
+                    dodge_angle = self.compute_projectile_dodge_angle(
+                        player_pos,
+                        desired,
+                        walls,
+                        now_t,
+                        player_box=player_data,
+                    )
+                    if dodge_angle is not None:
+                        desired = dodge_angle
+                        vlog(f"projectile dodge blend -> desired={desired:.1f}°")
+
+                angle = self.plan_movement_angle(player_pos, desired, walls)
                 vlog(f"showdown: movement angle={angle:.1f}° (desired={desired:.1f}°)")
 
         if (
@@ -2096,7 +2147,7 @@ class Play(Movement):
                 angle = jump_pad_angle
                 vlog(f"showdown: fog override -> jump pad angle={angle:.1f}°")
             elif fog_flee_angle is not None:
-                angle = self.find_best_angle(player_pos, fog_flee_angle, walls)
+                angle = self.plan_movement_angle(player_pos, fog_flee_angle, walls)
                 vlog(f"showdown: fog override → angle={angle:.1f}°")
 
         # --- Skills (only when an attackable enemy was found) ---
@@ -2327,6 +2378,225 @@ class Play(Movement):
 
         # Nothing clear found — return desired anyway (better than stopping)
         return desired_angle
+
+    def plan_movement_angle(self, player_pos, desired_angle, walls):
+        desired_angle = float(desired_angle) % 360.0
+        tile_px = self.TILE_SIZE * self.window_controller.scale_factor
+        mode = "sweep"
+        plan = None
+        chosen_angle = None
+
+        if self.heuristic_path_grid_enabled:
+            plan = self._local_planner.plan_step_debug(
+                player_pos,
+                desired_angle,
+                walls,
+                tile_px=tile_px,
+                padding_px=self.wall_path_padding,
+                radius_tiles=self.heuristic_path_grid_radius_tiles,
+                max_iters=self.heuristic_path_grid_max_iters,
+                blocked_fn=self.walls_block_line_of_sight,
+            )
+            chosen_angle = plan.step_angle
+            if chosen_angle is not None:
+                mode = "grid"
+
+        if chosen_angle is None:
+            chosen_angle = self.find_best_angle(player_pos, desired_angle, walls)
+
+        if visual_debug:
+            self._pathfind_debug = {
+                "player_pos": (float(player_pos[0]), float(player_pos[1])),
+                "desired_angle": desired_angle,
+                "chosen_angle": float(chosen_angle),
+                "mode": mode,
+                "tile_px": float(tile_px),
+                "grid_cells": list(plan.grid_cells) if plan is not None else [],
+                "path_world": list(plan.path_world) if plan is not None else [],
+                "goal_world": plan.goal_world if plan is not None else None,
+            }
+        return chosen_angle
+
+    @staticmethod
+    def _angle_ray_end(origin, angle_degrees, length):
+        rad = math.radians(angle_degrees)
+        return (
+            origin[0] + math.cos(rad) * length,
+            origin[1] + math.sin(rad) * length,
+        )
+
+    def _draw_pathfind_debug(self, img, scale):
+        dbg = getattr(self, "_pathfind_debug", None)
+        if not dbg:
+            return
+
+        def sp(point):
+            return int(point[0] * scale), int(point[1] * scale)
+
+        tile_px = float(dbg.get("tile_px", 0.0) or 0.0)
+        half = max(3, int(tile_px * scale * 0.42))
+        free_col = (90, 170, 230)
+        blocked_col = (220, 70, 70)
+        path_col = (255, 220, 50)
+        goal_col = (255, 150, 40)
+        desired_col = (230, 230, 255)
+        chosen_col = (50, 255, 120)
+
+        for cx, cy, blocked in dbg.get("grid_cells") or []:
+            sx, sy = sp((cx, cy))
+            color = blocked_col if blocked else free_col
+            thickness = -1 if blocked else 1
+            cv2.rectangle(
+                img,
+                (sx - half, sy - half),
+                (sx + half, sy + half),
+                color,
+                thickness,
+            )
+
+        path_world = dbg.get("path_world") or []
+        if len(path_world) >= 2:
+            pts = np.array([sp(pt) for pt in path_world], dtype=np.int32)
+            cv2.polylines(img, [pts], False, path_col, max(2, int(2 * scale)), cv2.LINE_AA)
+
+        goal_world = dbg.get("goal_world")
+        if goal_world is not None:
+            cv2.circle(img, sp(goal_world), max(4, int(6 * scale)), goal_col, max(1, int(2 * scale)))
+
+        origin = dbg.get("player_pos")
+        if origin is None:
+            return
+        ray_len = max(tile_px * 1.35, 55.0)
+        desired_end = self._angle_ray_end(origin, dbg.get("desired_angle", 0.0), ray_len)
+        chosen_end = self._angle_ray_end(origin, dbg.get("chosen_angle", 0.0), ray_len)
+        cv2.arrowedLine(
+            img,
+            sp(origin),
+            sp(desired_end),
+            desired_col,
+            max(1, int(2 * scale)),
+            tipLength=0.18,
+        )
+        cv2.arrowedLine(
+            img,
+            sp(origin),
+            sp(chosen_end),
+            chosen_col,
+            max(2, int(3 * scale)),
+            tipLength=0.22,
+        )
+        mode = str(dbg.get("mode", "sweep"))
+        label = f"path {mode}"
+        cv2.putText(
+            img,
+            label,
+            sp((origin[0] + 12, origin[1] - 18)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            max(0.35, 0.55 * scale),
+            chosen_col,
+            max(1, int(2 * scale)),
+        )
+
+    def _heuristic_dodge_candidate_tracks(self, player_pos):
+        tracker = getattr(self, "projectile_tracker", None)
+        if tracker is None:
+            return []
+
+        scope = str(getattr(self, "heuristic_dodge_scope", "all")).lower()
+        if scope == "incoming":
+            return tracker.incoming_tracks(
+                player_pos,
+                min_alignment=self.heuristic_dodge_min_alignment,
+                min_speed_px_s=self.heuristic_dodge_min_speed_px_s,
+            )
+
+        candidates = tracker.nearest_tracks(
+            player_pos,
+            self.heuristic_dodge_max_tracks,
+            only_incoming=False,
+        )
+        min_speed = float(self.heuristic_dodge_min_speed_px_s)
+        return [tr for tr in candidates if math.hypot(tr.vx, tr.vy) >= min_speed]
+
+    def _pick_perpendicular_dodge_angle(self, player_pos, track, walls):
+        speed = math.hypot(track.vx, track.vy)
+        if speed < 1e-6:
+            return None
+        base = self.angle_from_direction(track.vx, track.vy)
+        left = (base + 90.0) % 360.0
+        right = (base - 90.0) % 360.0
+        left_blocked = self.is_path_blocked_angle(player_pos, left, walls)
+        right_blocked = self.is_path_blocked_angle(player_pos, right, walls)
+        if not left_blocked and right_blocked:
+            return left
+        if left_blocked and not right_blocked:
+            return right
+        if not left_blocked and not right_blocked:
+            return left
+        return left
+
+    def compute_projectile_dodge_angle(
+        self,
+        player_pos,
+        desired_angle,
+        walls,
+        current_time,
+        player_box=None,
+    ):
+        if not self.heuristic_dodge_enabled:
+            return None
+        if self.use_rl_movement:
+            return None
+        if player_box is None or len(player_box) < 4:
+            return None
+
+        candidates = self._heuristic_dodge_candidate_tracks(player_pos)
+        if not candidates:
+            return None
+
+        horizon = float(self.heuristic_dodge_horizon_seconds)
+        padding = float(self.rl_projectile_hit_radius_padding)
+        best_track = None
+        best_eta = float("inf")
+        best_distance = float("inf")
+        best_confidence = -1.0
+        px, py = player_pos
+
+        for track in candidates:
+            eta = track.time_to_player_box(
+                player_box,
+                padding=padding,
+                max_seconds=horizon,
+            )
+            if eta is None:
+                continue
+            distance = math.hypot(track.cx - px, track.cy - py)
+            confidence = track.confidence_score(player_pos)
+            if (
+                eta < best_eta
+                or (
+                    math.isclose(eta, best_eta)
+                    and (
+                        distance < best_distance
+                        or (
+                            math.isclose(distance, best_distance)
+                            and confidence > best_confidence
+                        )
+                    )
+                )
+            ):
+                best_eta = eta
+                best_distance = distance
+                best_confidence = confidence
+                best_track = track
+
+        if best_track is None:
+            return None
+
+        dodge_angle = self._pick_perpendicular_dodge_angle(player_pos, best_track, walls)
+        if dodge_angle is None:
+            return None
+        return self.blend_angles(desired_angle, dodge_angle, self.heuristic_dodge_blend)
 
     @staticmethod
     def validate_game_data(data):
@@ -4008,6 +4278,9 @@ class Play(Movement):
                     1,
                 )
                 boxes_drawn += 1
+
+        if data.get("player"):
+            self._draw_pathfind_debug(img, scale)
 
         # Draw attack/super ranges around the player based on brawlers_info.json.
         if brawler and data.get("player"):

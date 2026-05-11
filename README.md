@@ -21,6 +21,7 @@ See [`rl/README.md`](rl/README.md) for RL architecture, observation/action layou
 What the bot does in Showdown:
 
 - **Analog joystick movement.** Brawlers are moved by a continuous angle, not WASD taps, so pathing and dodging are smoother than in the stock client-agnostic modes.
+- **Heuristic showdown pathfinding (default when RL movement is off).** With `use_rl_movement = "no"`, showdown uses a small local wall grid (`heuristic_path_grid_*` in `cfg/bot_config.toml`) instead of only sweeping for the first clear angle. Optional projectile dodge (`heuristic_dodge_*`) reuses the same tracker as RL; by default `heuristic_dodge_scope = "all"` reacts to nearby enemy-origin shots, while `"incoming"` keeps the stricter velocity cone. Hub **Additional** tab: **Heuristic path grid**, **Heuristic projectile dodge**, and **Heuristic dodge scope**.
 - **Follows teammates in trio** when there's no enemy to chase, with hysteresis so it doesn't ping-pong between two nearby teammates.
 - **Trio team spacing.** The bot avoids stacking directly on teammates, orbits when grouped, and biases back toward the team instead of chasing too far alone.
 - **Passive roam** when alone and safe — slow rotation of standing still.

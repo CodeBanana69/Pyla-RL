@@ -81,6 +81,17 @@ class Hub:
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
         self.bot_config.setdefault("play_again_on_win", "no")
         self.bot_config.setdefault("current_playstyle", "default.pyla")
+        self.bot_config.setdefault("heuristic_path_grid_enabled", "yes")
+        self.bot_config.setdefault("heuristic_path_grid_radius_tiles", 4)
+        self.bot_config.setdefault("heuristic_path_grid_step_deg", 5)
+        self.bot_config.setdefault("heuristic_path_grid_max_iters", 256)
+        self.bot_config.setdefault("heuristic_dodge_enabled", "yes")
+        self.bot_config.setdefault("heuristic_dodge_scope", "all")
+        self.bot_config.setdefault("heuristic_dodge_max_tracks", 6)
+        self.bot_config.setdefault("heuristic_dodge_horizon_seconds", 0.35)
+        self.bot_config.setdefault("heuristic_dodge_min_alignment", 0.35)
+        self.bot_config.setdefault("heuristic_dodge_min_speed_px_s", 90.0)
+        self.bot_config.setdefault("heuristic_dodge_blend", 0.8)
         self.bot_config.setdefault("use_rl_movement", "no")
         self.bot_config.setdefault("enable_rl_movement_training", "no")
         self.bot_config.setdefault("rl_algorithm", "sac")
@@ -1127,6 +1138,100 @@ class Hub:
         self.attach_tooltip(
             rl_movement_cb,
             "If enabled, movement is driven by the RL policy. Heuristic attacks/supers/gadgets stay on. Takes effect on next bot start."
+        )
+        row_idx += 1
+
+        lbl_heuristic_grid = ctk.CTkLabel(
+            container, text="Heuristic path grid:", font=theme.ui_font(S(18))
+        )
+        lbl_heuristic_grid.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        heuristic_grid_var = tk.BooleanVar(
+            value=(
+                str(self.bot_config.get("heuristic_path_grid_enabled", "yes")).lower()
+                in ("yes", "true", "1")
+            )
+        )
+
+        def toggle_heuristic_grid():
+            self.bot_config["heuristic_path_grid_enabled"] = (
+                "yes" if heuristic_grid_var.get() else "no"
+            )
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        heuristic_grid_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=heuristic_grid_var,
+            command=toggle_heuristic_grid,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        heuristic_grid_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            heuristic_grid_cb,
+            "When Use RL Movement is OFF, showdown movement plans around nearby walls with a small local grid instead of only sweeping angles. Restart the bot.",
+        )
+        row_idx += 1
+
+        lbl_heuristic_dodge = ctk.CTkLabel(
+            container, text="Heuristic projectile dodge:", font=theme.ui_font(S(18))
+        )
+        lbl_heuristic_dodge.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        heuristic_dodge_var = tk.BooleanVar(
+            value=(
+                str(self.bot_config.get("heuristic_dodge_enabled", "yes")).lower()
+                in ("yes", "true", "1")
+            )
+        )
+
+        def toggle_heuristic_dodge():
+            self.bot_config["heuristic_dodge_enabled"] = (
+                "yes" if heuristic_dodge_var.get() else "no"
+            )
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        heuristic_dodge_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=heuristic_dodge_var,
+            command=toggle_heuristic_dodge,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        heuristic_dodge_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            heuristic_dodge_cb,
+            "When Use RL Movement is OFF, showdown movement can sidestep tracked enemy projectiles using the same projectile tracker as RL. Restart the bot.",
+        )
+        row_idx += 1
+
+        lbl_heuristic_scope = ctk.CTkLabel(
+            container, text="Heuristic dodge scope:", font=theme.ui_font(S(18))
+        )
+        lbl_heuristic_scope.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        scope_value = str(self.bot_config.get("heuristic_dodge_scope", "all")).lower()
+        if scope_value not in ("all", "incoming"):
+            scope_value = "all"
+        heuristic_scope_var = tk.StringVar(value=scope_value)
+
+        def on_heuristic_scope_change(choice):
+            self.bot_config["heuristic_dodge_scope"] = str(choice).lower()
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        heuristic_scope_menu = ctk.CTkOptionMenu(
+            container,
+            values=["all", "incoming"],
+            variable=heuristic_scope_var,
+            command=on_heuristic_scope_change,
+            width=S(180),
+            font=theme.ui_font(S(16)),
+        )
+        heuristic_scope_menu.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            heuristic_scope_menu,
+            "all = dodge any nearby enemy-origin projectile track. incoming = only shots whose velocity is aimed at you. Restart the bot.",
         )
         row_idx += 1
 

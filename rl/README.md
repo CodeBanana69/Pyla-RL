@@ -53,6 +53,26 @@ Why this fork exists:
 
 `rl_use_projectile_features` continues to steer **whether projectile tracks are fused into movement heuristics & debug overlays**; the SAC observation is the fixed **ObservationBuilder** vector (projectile tensor layout is unrelated).
 
+### Heuristic showdown movement (`use_rl_movement = "no"`)
+
+When RL movement is off, showdown still runs through [`Play.get_showdown_movement`](../play.py): approach / retreat / strafe / fog logic produces a desired angle, then [`LocalGridPlanner`](heuristic_pathfinder.py) plans a short path on a local tile grid (`heuristic_path_grid_*`) and falls back to [`find_best_angle`](../play.py) when no route is found.
+
+Projectile dodge (`heuristic_dodge_enabled`) reads the same [`ProjectileTracker`](../rl/projectile_tracker.py) / ByteTrack backend as RL, but only steers heuristic movement. `heuristic_dodge_scope = "all"` (default) considers promoted enemy-origin tracks near the player; `"incoming"` matches the RL direction gate (`incoming_tracks` + `heuristic_dodge_min_alignment`). RL observation gating and `projectile_detection_confidence` are unchanged and apply only when `use_rl_movement = "yes"`.
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `heuristic_path_grid_enabled` | `"yes"` | Local A* step vs legacy angle sweep only. |
+| `heuristic_path_grid_radius_tiles` | `4` | Half-width of the planning grid. |
+| `heuristic_path_grid_step_deg` | `5` | Quantize planned step angles. |
+| `heuristic_path_grid_max_iters` | `256` | A* iteration cap. |
+| `heuristic_dodge_enabled` | `"yes"` | Master dodge switch for heuristic showdown. |
+| `heuristic_dodge_scope` | `"all"` | `"all"` or `"incoming"`. |
+| `heuristic_dodge_max_tracks` | `6` | Cap when scope is `"all"`. |
+| `heuristic_dodge_horizon_seconds` | `0.35` | Max time-to-hit to react. |
+| `heuristic_dodge_min_alignment` | `0.35` | Used when scope is `"incoming"`. |
+| `heuristic_dodge_min_speed_px_s` | `90.0` | Ignore slow tracks. |
+| `heuristic_dodge_blend` | `0.8` | Blend dodge vs combat movement. |
+
 ### Projectile tracking backend (`cfg/bot_config.toml`)
 
 | Key | Default | Effect |
