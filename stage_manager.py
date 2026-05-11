@@ -3,6 +3,7 @@ import sys
 
 import asyncio
 import time
+from typing import Any, List
 
 import cv2
 import numpy as np
@@ -21,6 +22,58 @@ from utils import find_template_center, load_toml_as_dict, async_notify_user, \
 from adaptive_brain import AdaptiveBrain
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
+
+# Starr Nova “hold to open” can need longer / variable press than Daily Wins —
+# escalate until the nova template disappears or this schedule completes.
+DEFAULT_STARR_NOVA_LONG_PRESS_SEC: List[float] = [1.9, 2.85, 3.95, 9.5]
+
+_STARR_NOVA_HOLD_MAX_SEC = 15.0  # clamp; allows long final press (e.g. 9.5s)
+
+
+def _parse_starr_nova_long_press_schedule(raw: Any) -> List[float]:
+    """Return ordered hold durations (seconds) for Starr Nova opening."""
+    schedule: List[float] = []
+    if raw is None:
+        schedule = list(DEFAULT_STARR_NOVA_LONG_PRESS_SEC)
+    elif isinstance(raw, (list, tuple)):
+        schedule = []
+        for x in raw:
+            try:
+                d = float(x)
+                if d > 0:
+                    schedule.append(min(_STARR_NOVA_HOLD_MAX_SEC, max(0.55, d)))
+            except (TypeError, ValueError):
+                continue
+    elif isinstance(raw, str):
+        for part in raw.replace(",", " ").split():
+            try:
+                d = float(part)
+                if d > 0:
+                    schedule.append(min(_STARR_NOVA_HOLD_MAX_SEC, max(0.55, d)))
+            except ValueError:
+                continue
+    else:
+        try:
+            d = float(raw)
+            if d > 0:
+                schedule = [min(_STARR_NOVA_HOLD_MAX_SEC, max(0.55, d))]
+        except (TypeError, ValueError):
+            schedule = []
+
+    if not schedule:
+        schedule = list(DEFAULT_STARR_NOVA_LONG_PRESS_SEC)
+    # Cap fan-out length so a bad config can't stall forever
+    return schedule[:10]
+
+
+def _load_starr_nova_long_press_schedule() -> List[float]:
+    try:
+        cfg = load_toml_as_dict("cfg/general_config.toml")
+        return _parse_starr_nova_long_press_schedule(
+            cfg.get("starr_nova_long_press_seconds")
+        )
+    except Exception:
+        return list(DEFAULT_STARR_NOVA_LONG_PRESS_SEC)
 
 
 def load_image(image_path, scale_factor):
@@ -518,13 +571,31 @@ class StageManager:
         height_ratio = current_height / 1080
         x = int(965 * width_ratio)
         y = int(525 * height_ratio)
-        if drop_type in ("angelic", "demonic", "daily_hold", "starr_nova_hold"):
+
+        hold_duration_standard = 1.15
+
+        def _safe_long_press(px: int, py: int, dur: float) -> None:
+            if hasattr(self.window_controller, "long_press"):
+                self.window_controller.long_press(px, py, duration=float(dur))
+            else:
+                self.window_controller.click(px, py, delay=float(dur))
+
+        if drop_type in ("angelic", "demonic", "daily_hold"):
             for _ in range(2):
-                if hasattr(self.window_controller, "long_press"):
-                    self.window_controller.long_press(x, y, duration=1.15)
-                else:
-                    self.window_controller.click(x, y, delay=1.15)
+                _safe_long_press(x, y, hold_duration_standard)
                 time.sleep(0.25)
+
+        elif drop_type == "starr_nova_hold":
+            schedule = _load_starr_nova_long_press_schedule()
+            for dur in schedule:
+                _safe_long_press(x, y, dur)
+                # Let the HUD register the hold before we check / repeat.
+                time.sleep(0.38)
+                after = self.window_controller.screenshot()
+                after_bgr = cv2.cvtColor(after, cv2.COLOR_RGB2BGR)
+                if get_star_drop_type(after_bgr) != "starr_nova_hold":
+                    break
+
         else:
             for _ in range(5):
                 self.window_controller.click(x, y, delay=0.04)

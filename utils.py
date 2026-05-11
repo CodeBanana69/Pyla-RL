@@ -15,7 +15,7 @@ import discord
 import cv2
 import numpy as np
 from packaging import version
-from typing import Optional
+from typing import Optional, Tuple
 
 DEVELOPER_API_BASE_URL = "https://developer.brawlstars.com/api/"
 _brawl_stars_api_refresh_done = False
@@ -176,31 +176,164 @@ def refresh_brawl_stars_api_token_if_enabled(config, file_path="cfg/brawl_stars_
     return config
 
 
+def _easyocr_torch_gpu_pref_from_config() -> str:
+    """Read ``easyocr_torch_gpu`` from general_config: ``auto`` | ``yes`` | ``no``."""
+    try:
+        gc = load_toml_as_dict("cfg/general_config.toml")
+        raw = str(gc.get("easyocr_torch_gpu", "auto")).lower().strip()
+        if raw in ("yes", "true", "1", "cuda", "gpu"):
+            return "yes"
+        if raw in ("no", "false", "0", "cpu"):
+            return "no"
+        return "auto"
+    except Exception:
+        return "auto"
+
+
+def _easyocr_gpu_env_override() -> Optional[bool]:
+    """PYLA_EASYOCR_GPU: force ``1`` / ``cuda`` / ``yes`` vs ``0`` / ``cpu`` / ``no``."""
+    raw = os.environ.get("PYLA_EASYOCR_GPU", "").strip().lower()
+    if raw in ("1", "true", "yes", "cuda", "gpu"):
+        return True
+    if raw in ("0", "false", "no", "cpu"):
+        return False
+    return None
+
+
+def _torch_backend_safe_for_easyocr_gpu() -> bool:
+    """True only for stacks where EasyOCR's cuDNN path is reliable.
+
+    ROCm/HIP builds often advertise ``cuda.is_available`` but MiOpen then fails at
+    runtime (e.g. gfx1100 missing headers / kernel compile errors). Prefer CPU
+    there unless ``easyocr_torch_gpu=yes``.
+    """
+    try:
+        import torch  # type: ignore
+
+        if not torch.cuda.is_available():
+            return False
+
+        hip = getattr(torch.version, "hip", None)
+        if hip is not None and str(hip).strip():
+            return False
+
+        name = ""
+        try:
+            name = str(torch.cuda.get_device_name(0)).lower()
+        except Exception:
+            pass
+
+        for token in ("amd", "radeon", "intel", "arc", "gfx10", "gfx11"):
+            if token in name:
+                return False
+
+        cuda_ver = getattr(torch.version, "cuda", None)
+        if cuda_ver is not None and str(cuda_ver).strip():
+            return True
+
+        for nv in ("nvidia", "geforce", "rtx", "quadro", "tesla"):
+            if nv in name:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _resolve_easyocr_use_torch_gpu(kwargs_gpu: Optional[bool]) -> Tuple[bool, str]:
+    """Return (gpu flag for Reader, short reason for debug)."""
+    if kwargs_gpu is not None:
+        return bool(kwargs_gpu), "caller"
+
+    env = _easyocr_gpu_env_override()
+    if env is not None:
+        return env, "PYLA_EASYOCR_GPU"
+
+    mode = _easyocr_torch_gpu_pref_from_config()
+    if mode == "no":
+        return False, "easyocr_torch_gpu=no"
+    if mode == "yes":
+        ok = False
+        try:
+            import torch  # type: ignore
+
+            ok = bool(torch.cuda.is_available())
+        except Exception:
+            ok = False
+        return ok, "easyocr_torch_gpu=yes"
+
+    ok = _torch_backend_safe_for_easyocr_gpu()
+    return ok, "auto(nvidia_cuda)"
+
+
+def _easyocr_failure_needs_cpu_fallback(exc: BaseException) -> bool:
+    msg = f"{type(exc).__name__} {exc}".lower()
+    needles = (
+        "miopen",
+        "hiprtc",
+        "hip ",
+        "rocm",
+        "gfx1100",
+        "gfx1030",
+        "hiprtc_error",
+        "unexpected error from hip",
+    )
+    return any(n in msg for n in needles)
+
+
 class DefaultEasyOCR:
-    def __init__(self, *, gpu: Optional[bool] = None, languages: Optional[list] = None):
+    def __init__(
+        self,
+        *,
+        gpu: Optional[bool] = None,
+        languages: Optional[list] = None,
+    ):
         import easyocr
 
-        if gpu is None:
-            gpu = False
-            try:
-                import torch  # type: ignore
+        self._langs = list(languages) if languages else ["en"]
+        self._kwargs_gpu_explicit = gpu
+        use_gpu, self._gpu_reason = _resolve_easyocr_use_torch_gpu(gpu)
+        self._using_torch_gpu = use_gpu
 
-                gpu = bool(torch.cuda.is_available())
-            except Exception:
-                gpu = False
-        langs = list(languages) if languages else ["en"]
         try:
-            self.reader = easyocr.Reader(langs, gpu=gpu)
+            self.reader = easyocr.Reader(self._langs, gpu=use_gpu)
         except TypeError:
-            # Older EasyOCR signatures that don't accept gpu=
-            self.reader = easyocr.Reader(langs)
+            self.reader = easyocr.Reader(self._langs)
+            self._using_torch_gpu = False
+        except Exception as exc_init:
+            if use_gpu:
+                print(
+                    f"EasyOCR Reader init failed with gpu=True ({exc_init!r}); retrying gpu=False."
+                )
+                self.reader = easyocr.Reader(self._langs, gpu=False)
+                self._using_torch_gpu = False
+            else:
+                raise
 
     def readtext(self, image_input, **kwargs):
-        return self.reader.readtext(image_input, **kwargs)
+        try:
+            return self.reader.readtext(image_input, **kwargs)
+        except RuntimeError as exc:
+            if not self._using_torch_gpu:
+                raise
+            if not _easyocr_failure_needs_cpu_fallback(exc):
+                raise
+            print(
+                "EasyOCR GPU inference failed "
+                f"({type(exc).__name__}); reloading reader on CPU "
+                f"(policy: {self._gpu_reason})."
+            )
+            self._fallback_cpu_reader()
+            return self.reader.readtext(image_input, **kwargs)
+
+    def _fallback_cpu_reader(self) -> None:
+        import easyocr
+
+        self._using_torch_gpu = False
+        self.reader = easyocr.Reader(self._langs, gpu=False)
 
 
 def make_digit_ocr_reader():
-    """Factory for a digit-only EasyOCR reader (auto-GPU if torch+CUDA present)."""
+    """Factory for an EasyOCR reader (CUDA GPU when safe; ROCm skips by default)."""
     return DefaultEasyOCR()
 
 

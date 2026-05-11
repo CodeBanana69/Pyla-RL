@@ -13,6 +13,10 @@ onnx_cpu_threads = 4
 used_threads = 4
 pyla_version = "0.8.1"
 long_press_star_drop = "no"
+# EasyOCR: auto = NVIDIA CUDA only (skip ROCm/AMD); yes = torch GPU when cuda.available; no = CPU
+easyocr_torch_gpu = "auto"
+# Starr Nova chest: hold lengths (seconds); longer later steps cover variable fill-ring timing.
+starr_nova_long_press_seconds = [1.9, 2.85, 3.95, 9.5]
 terminal_logging = "no"
 capture_bad_vision_frames = "no"
 pause_menu_ips_tracker = "yes"

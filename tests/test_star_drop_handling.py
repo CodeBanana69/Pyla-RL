@@ -117,17 +117,50 @@ class StarDropHandlingTests(unittest.TestCase):
         self.assertEqual(manager.window_controller.keys_released, [list("wasd")])
 
     @patch("stage_manager.time.sleep", return_value=None)
+    @patch(
+        "stage_manager._load_starr_nova_long_press_schedule",
+        return_value=[1.9, 2.85, 3.95],
+    )
     @patch("stage_manager.get_star_drop_type", return_value="starr_nova_hold")
-    def test_starr_nova_drop_uses_long_presses(self, *_):
+    def test_starr_nova_drop_escalates_hold_until_cleared(self, *_):
+        """Opens with increasing hold durations; verifies after each until template gone."""
+        manager = object.__new__(StageManager)
+        ctrl = DummyDropWindowController()
+        manager.window_controller = ctrl
+
+        calls = []
+
+        def _tracked_star_type(image):
+            calls.append(1)
+            # 1st call: initial classify. 2nd: still on nova after first hold. 3rd: cleared.
+            return "starr_nova_hold" if len(calls) <= 2 else None
+
+        with patch(
+            "stage_manager.get_star_drop_type", side_effect=_tracked_star_type
+        ):
+            manager.handle_star_drop()
+
+        self.assertEqual(ctrl.clicks, [])
+        self.assertEqual(len(ctrl.long_presses), 2)
+        self.assertEqual([p[2] for p in ctrl.long_presses], [1.9, 2.85])
+        self.assertEqual(ctrl.keys_released, [list("wasd")])
+
+    @patch("stage_manager.time.sleep", return_value=None)
+    @patch(
+        "stage_manager._load_starr_nova_long_press_schedule",
+        return_value=[1.9, 2.85, 3.95, 9.5],
+    )
+    @patch("stage_manager.get_star_drop_type", return_value="starr_nova_hold")
+    def test_starr_nova_full_schedule_when_screen_stalls(self, *_):
         manager = object.__new__(StageManager)
         manager.window_controller = DummyDropWindowController()
-
         manager.handle_star_drop()
 
-        self.assertEqual(manager.window_controller.clicks, [])
-        self.assertEqual(len(manager.window_controller.long_presses), 2)
-        self.assertTrue(all(press[2] == 1.15 for press in manager.window_controller.long_presses))
-        self.assertEqual(manager.window_controller.keys_released, [list("wasd")])
+        self.assertEqual(len(manager.window_controller.long_presses), 4)
+        self.assertEqual(
+            [p[2] for p in manager.window_controller.long_presses],
+            [1.9, 2.85, 3.95, 9.5],
+        )
 
     @patch("stage_manager.time.sleep", return_value=None)
     @patch("stage_manager.get_star_drop_type", return_value="standard")

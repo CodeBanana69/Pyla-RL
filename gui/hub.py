@@ -150,6 +150,10 @@ class Hub:
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
         self.general_config.setdefault("long_press_star_drop", "no")
+        self.general_config.setdefault("easyocr_torch_gpu", "auto")
+        self.general_config.setdefault(
+            "starr_nova_long_press_seconds", [1.9, 2.85, 3.95, 9.5]
+        )
         self.general_config.setdefault("trophies_multiplier", 1.0)
         self.general_config.setdefault("ocr_scale_down_factor", 0.5)
         self.general_config.setdefault("current_emulator", "LDPlayer")

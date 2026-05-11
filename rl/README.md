@@ -104,7 +104,7 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 [HP] full=47900 cur=39700 dmg=8200 (82.9%)
 ```
 
-HSV is still computed cheaply and is used as a fallback **only until OCR latches**. To keep IPS healthy the OCR call runs on a single background worker thread when CUDA is not detected (`utils.DefaultEasyOCR` now auto-passes `gpu=True` if `torch.cuda.is_available()`) and the digit crop is tiny + grayscale + CLAHE + `allowlist="0123456789"`. The poll cadence is configurable via the **HP OCR poll rate (Hz)** slider in the Hub **Additional** tab (default 5 Hz, range 1–15).
+HSV is still computed cheaply and is used as a fallback **only until OCR latches**. To keep IPS healthy the OCR call runs on a single background worker thread unless CUDA-backed GPU is in use (`utils.DefaultEasyOCR`: **NVIDIA CUDA `gpu=true` by policy** via `easyocr_torch_gpu=auto` in `cfg/general_config.toml`; ROCm/AMD HIP is skipped by default because MiOpen/EasyOCR often crashes there, with automatic CPU downgrade if a MiOpen/`HIPRTC` runtime error slips through). Digit crop stays tiny + grayscale + CLAHE + `allowlist="0123456789"`. Poll cadence: **HP OCR poll rate (Hz)** in Hub **Additional** (default 5 Hz, range 1–15).
 
 | Key | Default | Effect |
 | --- | ------- | ------ |
