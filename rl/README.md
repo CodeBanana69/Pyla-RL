@@ -105,7 +105,7 @@ These tighten projectile **perception** and the RL **hit signal** when motion/re
 
 Implementation files: [`rl/health_monitor.py`](../rl/health_monitor.py), [`rl/red_flash.py`](../rl/red_flash.py), [`rl/hit_confirmer.py`](../rl/hit_confirmer.py), [`rl/byte_projectile_tracker.py`](../rl/byte_projectile_tracker.py); wiring in [`play.py`](../play.py) (`update_projectile_tracker`, visual debug); reward glue in [`rl/policy_bridge.py`](../rl/policy_bridge.py).
 
-The same toggles are exposed as checkboxes in `gui/hub.py` (`Use RL Movement`, `Enable RL Movement Training`).
+The same toggles are exposed as checkboxes in `gui/hub.py` (the **Additional** settings tab), next to **Use RL Movement** and **Enable RL Movement Training**: **RL Projectile Observations**, **RL Projectile Debug Overlay**, and **RL HP Drop Penalty**. They persist to `cfg/bot_config.toml`; restart the bot for changes to apply.
 
 ## Architecture
 

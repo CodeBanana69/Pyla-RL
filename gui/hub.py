@@ -82,7 +82,9 @@ class Hub:
         self.bot_config.setdefault("use_rl_movement", "no")
         self.bot_config.setdefault("enable_rl_movement_training", "no")
         self.bot_config.setdefault("rl_movement_model_path", "models/rl_movement_policy.zip")
-
+        self.bot_config.setdefault("rl_use_projectile_features", "yes")
+        self.bot_config.setdefault("rl_show_projectile_debug", "yes")
+        self.bot_config.setdefault("rl_use_hp_drop_penalty", "no")
 
         # Time thresholds defaults
         self.time_tresholds.setdefault("state_check", 3)
@@ -1061,6 +1063,111 @@ class Hub:
         self.attach_tooltip(
             rl_train_cb,
             "ON: collect rollouts and update RL movement weights. OFF: load pretrained policy for inference only. Requires Use RL Movement to be ON. Takes effect on next bot start."
+        )
+        row_idx += 1
+
+        lbl_rl_proj_obs = ctk.CTkLabel(
+            container,
+            text="RL Projectile Observations:",
+            font=theme.ui_font(S(18)),
+        )
+        lbl_rl_proj_obs.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        rl_proj_obs_var = tk.BooleanVar(
+            value=(
+                str(self.bot_config.get("rl_use_projectile_features", "yes")).lower()
+                in ("yes", "true", "1")
+            )
+        )
+
+        def toggle_rl_projectile_obs():
+            self.bot_config["rl_use_projectile_features"] = (
+                "yes" if rl_proj_obs_var.get() else "no"
+            )
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        rl_proj_obs_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=rl_proj_obs_var,
+            command=toggle_rl_projectile_obs,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        rl_proj_obs_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            rl_proj_obs_cb,
+            "When OFF, the RL observation omits projectile track features (smaller observation; less CPU tracking when RL Projectile Debug Overlay is OFF). ON matches the legacy dodge-aware policy layout. Restart the bot.",
+        )
+        row_idx += 1
+
+        lbl_rl_proj_dbg = ctk.CTkLabel(
+            container,
+            text="RL Projectile Debug Overlay:",
+            font=theme.ui_font(S(18)),
+        )
+        lbl_rl_proj_dbg.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        rl_proj_dbg_var = tk.BooleanVar(
+            value=(
+                str(self.bot_config.get("rl_show_projectile_debug", "yes")).lower()
+                in ("yes", "true", "1")
+            )
+        )
+
+        def toggle_rl_projectile_debug():
+            self.bot_config["rl_show_projectile_debug"] = (
+                "yes" if rl_proj_dbg_var.get() else "no"
+            )
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        rl_proj_dbg_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=rl_proj_dbg_var,
+            command=toggle_rl_projectile_debug,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        rl_proj_dbg_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            rl_proj_dbg_cb,
+            "When ON and Debug Screen is on, projectile tracks are drawn. When OFF together with Projectile Observations, tracking work is skipped for RL to save CPU. Restart the bot.",
+        )
+        row_idx += 1
+
+        lbl_rl_hp_pen = ctk.CTkLabel(
+            container,
+            text="RL HP Drop Penalty:",
+            font=theme.ui_font(S(18)),
+        )
+        lbl_rl_hp_pen.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+        rl_hp_pen_var = tk.BooleanVar(
+            value=(
+                str(self.bot_config.get("rl_use_hp_drop_penalty", "no")).lower()
+                in ("yes", "true", "1")
+            )
+        )
+
+        def toggle_rl_hp_drop_penalty():
+            self.bot_config["rl_use_hp_drop_penalty"] = (
+                "yes" if rl_hp_pen_var.get() else "no"
+            )
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
+
+        rl_hp_pen_cb = ctk.CTkCheckBox(
+            container,
+            text="",
+            variable=rl_hp_pen_var,
+            command=toggle_rl_hp_drop_penalty,
+            width=S(30),
+            height=S(30),
+            **theme.checkbox_kwargs(),
+        )
+        rl_hp_pen_cb.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+        self.attach_tooltip(
+            rl_hp_pen_cb,
+            "When ON, RL penalizes HP loss from HealthMonitor (storm, melee, shots) instead of the projectile/intercept detector. Restart the bot.",
         )
         row_idx += 1
 
