@@ -2,8 +2,11 @@
 
 OCR-first design
 ----------------
-EasyOCR is the source of truth. At match start, two stable identical reads of
-the numeric HP latch ``max_hp``. From then on every accepted read produces
+EasyOCR is the source of truth. Before ``max_hp`` is latched we OCR a HUD band
+aligned with the player box and interpret only plausible **3–5 digit** totals
+(and merged digit runs split by centroid gaps). Once latched we keep the tighter
+crop and the relaxed per-reading parser. Two stable-ish reads latch ``max_hp``.
+From then on every accepted read produces
 ``hp_value`` / ``hp_value_pct`` and feeds the per-frame damage detector. HSV
 fill ratio is still computed cheaply, but it is only used as a fallback when
 OCR has not yet produced a value (e.g. during the first frames of a match or
@@ -127,6 +130,117 @@ def _cuda_available() -> bool:
         return bool(torch.cuda.is_available())
     except Exception:
         return False
+
+
+# ── Match-start HP read: only interpret 3–5 digit plausible max-HP blobs ─────────
+_START_HP_MIN = 350
+_START_HP_MAX = 120_000
+_START_HP_LEN_MIN = 3
+_START_HP_LEN_MAX = 5
+
+
+def _bbox_mean_x(bbox: Any) -> float:
+    xs: List[float] = []
+    try:
+        for pt in bbox or []:
+            xs.append(float(pt[0]))
+    except Exception:
+        return 0.0
+    return float(sum(xs) / len(xs)) if xs else 0.0
+
+
+def _start_hp_plausible(total: int) -> bool:
+    return _START_HP_MIN <= int(total) <= _START_HP_MAX
+
+
+def extract_start_hp_from_easyocr_results(results: Any) -> Tuple[Optional[int], float]:
+    """Pick a match-start HP from EasyOCR ``readtext`` rows (digit-only blobs).
+
+    Accepts integers built from digit strings of length ``_START_HP_LEN_MIN .. _START_HP_LEN_MAX``
+    whose value lies in ``_START_HP_MIN .. _START_HP_MAX``. Multiple bbox rows are clustered
+    by horizontal centroid gaps; concatenated digits in one cluster are sliced (suffix-first,
+    then all windows). Among all valid candidates prefers the largest numeric HP, then probability.
+    """
+    items: List[Tuple[float, str, float]] = []
+    for item in results or []:
+        try:
+            bbox, text, prob = item
+        except (TypeError, ValueError):
+            continue
+        digits = re.sub(r"[^\d]", "", str(text))
+        if len(digits) < 1 or not digits.isdigit():
+            continue
+        items.append((_bbox_mean_x(bbox), digits, float(prob)))
+    if not items:
+        return None, 0.0
+
+    items.sort(key=lambda t: t[0])
+
+    singles: List[Tuple[int, float]] = []
+    for _cx, d, p in items:
+        ln = len(d)
+        if _START_HP_LEN_MIN <= ln <= _START_HP_LEN_MAX:
+            v = int(d)
+            if _start_hp_plausible(v):
+                singles.append((v, float(p)))
+
+    span = items[-1][0] - items[0][0] + 1e-6
+    gap_thresh = max(22.0, min(160.0, 0.12 * float(span) + 28.0))
+    runs: List[List[Tuple[float, str, float]]] = []
+    cur: List[Tuple[float, str, float]] = [items[0]]
+    for ia in range(1, len(items)):
+        ia_f, idg, ia_p = items[ia]
+        ib_f = items[ia - 1][0]
+        if (ia_f - ib_f) > gap_thresh:
+            runs.append(cur)
+            cur = [items[ia]]
+        else:
+            cur.append(items[ia])
+    runs.append(cur)
+
+    run_candidates: List[Tuple[int, float]] = []
+    for run in runs:
+        cat = "".join(t[1] for t in run)
+        if len(cat) < _START_HP_LEN_MIN:
+            continue
+        agg_p = float(np.mean([float(t[2]) for t in run])) if run else 0.0
+
+        picked: Optional[int] = None
+        ncat = len(cat)
+        if ncat <= _START_HP_LEN_MAX:
+            v = int(cat)
+            if _START_HP_LEN_MIN <= ncat <= _START_HP_LEN_MAX and _start_hp_plausible(v):
+                picked = v
+        if picked is None:
+            for lw in (_START_HP_LEN_MAX, _START_HP_LEN_MAX - 1, _START_HP_LEN_MIN):
+                if lw < _START_HP_LEN_MIN or lw > _START_HP_LEN_MAX:
+                    continue
+                if ncat >= lw:
+                    v = int(cat[-lw:])
+                    if _start_hp_plausible(v):
+                        picked = v
+                        break
+
+        best_scan: Optional[int] = None
+        if picked is None:
+            for lw in (_START_HP_LEN_MAX, _START_HP_LEN_MAX - 1, _START_HP_LEN_MIN):
+                if lw < _START_HP_LEN_MIN or lw > _START_HP_LEN_MAX:
+                    continue
+                for start_i in range(0, ncat - lw + 1):
+                    v = int(cat[start_i : start_i + lw])
+                    if _start_hp_plausible(v):
+                        if best_scan is None or v > best_scan:
+                            best_scan = int(v)
+
+        cand_v = picked if picked is not None else best_scan
+        if cand_v is not None:
+            run_candidates.append((cand_v, agg_p))
+
+    pool: List[Tuple[int, float]] = singles + run_candidates
+    if not pool:
+        return None, 0.0
+    pool.sort(key=lambda t: (-t[0], -t[1]))
+    return int(pool[0][0]), float(pool[0][1])
 
 
 class HealthMonitor:
@@ -569,6 +683,44 @@ class HealthMonitor:
     # ──────────────────────────────────────────────────────────────────────
     # OCR pipeline (primary)
     # ──────────────────────────────────────────────────────────────────────
+    def _build_start_hud_above_player_crop(
+        self,
+        frame_rgb: np.ndarray,
+        player_box: Sequence[float],
+        scale_factor: float,
+    ) -> Optional[np.ndarray]:
+        """Wide strip over the HUD above the detector box until full HP locks.
+
+        Horizontally clipped to ``player_box`` (small pad). Vertical span starts
+        well above ``y1`` and extends slightly below it so cube + numeric HP blobs
+        that sit outside the slim digit band are captured for 3–5 digit parsing.
+        """
+        if frame_rgb is None or frame_rgb.size == 0 or len(player_box) < 4:
+            return None
+        h, w_f = frame_rgb.shape[:2]
+        sf = max(0.25, float(scale_factor))
+        x1, y1, x2, y2 = map(float, player_box[:4])
+        if x2 < x1:
+            x1, x2 = x2, x1
+        if y2 < y1:
+            y1, y2 = y2, y1
+        bx1 = max(0, int(round(x1)))
+        bx2 = min(int(w_f), int(round(x2)))
+        pad = max(4, int(round(10.0 * sf)))
+        bx1 = max(0, bx1 - pad)
+        bx2 = min(int(w_f), bx2 + pad)
+        bh = abs(y2 - y1)
+        hud_above = max(44.0 * sf, min(140.0 * sf, bh * 0.55))
+        hud_below = max(12.0, min(54.0 * sf, bh * 0.18))
+        y_top = max(0, int(round(y1 - hud_above)))
+        y_bot = min(h, int(round(y1 + hud_below)))
+        if y_bot <= y_top + _START_HP_LEN_MIN or bx2 - bx1 < 14:
+            return None
+        crop = frame_rgb[y_top:y_bot, bx1:bx2]
+        if crop.size == 0:
+            return None
+        return self._preprocess_for_ocr(crop)
+
     def _build_digit_crop(
         self,
         frame_rgb: np.ndarray,
@@ -636,7 +788,7 @@ class HealthMonitor:
         crop = self._build_power_cube_count_crop(frame_rgb, player_box, scale_factor)
         if crop is None:
             return
-        val, prob = self._run_ocr_inline(crop)
+        val, prob = self._run_ocr_inline(crop, latch_parse=False)
         if val is None:
             return
         min_conf = max(0.12, float(self.ocr_min_confidence) * 0.85)
@@ -671,8 +823,43 @@ class HealthMonitor:
         except Exception:
             return None
 
-    def _run_ocr_inline(self, crop: np.ndarray) -> Tuple[Optional[int], float]:
-        """Synchronous OCR call. Returns (best_int_value, best_prob)."""
+    def _legacy_best_digit_read(
+        self, results: Any
+    ) -> Tuple[Optional[int], float]:
+        """Pick the strongest EasyOCR row by classifier confidence (digit merge)."""
+        best_val: Optional[int] = None
+        best_prob = 0.0
+        for item in results or []:
+            try:
+                _bbox, text, prob = item
+            except (TypeError, ValueError):
+                continue
+            digits = re.sub(r"[^\d]", "", str(text))
+            if not digits:
+                continue
+            try:
+                val = int(digits)
+            except ValueError:
+                continue
+            if val <= 0:
+                continue
+            if float(prob) > best_prob:
+                best_prob = float(prob)
+                best_val = val
+        return best_val, best_prob
+
+    def _run_ocr_inline(
+        self,
+        crop: np.ndarray,
+        *,
+        latch_parse: Optional[bool] = None,
+    ) -> Tuple[Optional[int], float]:
+        """Synchronous OCR call. Returns (best_int_value, best_prob).
+
+        When ``latch_parse`` resolves true (unset → ``not _max_hp_locked``), accept only
+        3–5 digit plausible totals from ``extract_start_hp_from_easyocr_results``. Power cube
+        reads pass ``latch_parse=False``.
+        """
         reader = self._get_reader()
         if reader is None:
             return None, 0.0
@@ -708,26 +895,17 @@ class HealthMonitor:
                 return None, 0.0
         except Exception:
             return None, 0.0
-        best_val: Optional[int] = None
-        best_prob = 0.0
-        for item in results or []:
-            try:
-                _bbox, text, prob = item
-            except (TypeError, ValueError):
-                continue
-            digits = re.sub(r"[^\d]", "", str(text))
-            if not digits:
-                continue
-            try:
-                val = int(digits)
-            except ValueError:
-                continue
-            if val <= 0:
-                continue
-            if float(prob) > best_prob:
-                best_prob = float(prob)
-                best_val = val
-        return best_val, best_prob
+
+        parse_start = latch_parse if latch_parse is not None else (
+            not self._max_hp_locked
+        )
+        if parse_start:
+            start_v, start_p = extract_start_hp_from_easyocr_results(results)
+            if start_v is not None:
+                return start_v, start_p
+            return None, 0.0
+
+        return self._legacy_best_digit_read(results)
 
     def _submit_or_read_ocr(
         self,
@@ -755,7 +933,14 @@ class HealthMonitor:
                         return res.value, res.prob
             return None
 
-        crop = self._build_digit_crop(frame_rgb, player_box, scale_factor)
+        if self._max_hp_locked:
+            crop = self._build_digit_crop(frame_rgb, player_box, scale_factor)
+        else:
+            crop = self._build_start_hud_above_player_crop(
+                frame_rgb, player_box, scale_factor
+            )
+            if crop is None:
+                crop = self._build_digit_crop(frame_rgb, player_box, scale_factor)
         self._last_ocr_submit_t = now
         self._first_after_reset = False
         if crop is None:

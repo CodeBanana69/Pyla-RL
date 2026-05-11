@@ -6,7 +6,11 @@ import unittest
 
 import numpy as np
 
-from rl.health_monitor import HealthMonitor, format_power_cube_bonus_suffix
+from rl.health_monitor import (
+    HealthMonitor,
+    extract_start_hp_from_easyocr_results,
+    format_power_cube_bonus_suffix,
+)
 
 
 def _fill_hp_band_green(frame: np.ndarray, player_box, *, green_ratio: float = 1.0) -> None:
@@ -83,6 +87,39 @@ def _ocr_hm(seq, **overrides) -> HealthMonitor:
 # ─────────────────────────────────────────────────────────────────────────────
 # HSV pipeline (unchanged behavior, still tested directly)
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def _square_bbox(left: float, top: float, w: float, h: float):
+    """Fake EasyOCR quad for centroid tests."""
+    r = left + w
+    b = top + h
+    return [[left, top], [r, top], [r, b], [left, b]]
+
+
+class ExtractStartHpFromOcrTests(unittest.TestCase):
+    def test_prefers_far_right_four_or_five_digit_run(self):
+        # Wide horizontal gap ⇒ two clusters: small cube-ish "84" ignored; latch on 47900.
+        rows = [
+            (_square_bbox(30.0, 10.0, 44.0, 18.0), "84", 0.91),
+            (_square_bbox(280.0, 12.0, 112.0, 20.0), "47900", 0.93),
+        ]
+        v, p = extract_start_hp_from_easyocr_results(rows)
+        self.assertEqual(v, 47900)
+        self.assertGreaterEqual(p, 0.92)
+
+    def test_suffix_inside_long_concatenated_string(self):
+        rows = [
+            (_square_bbox(120.0, 10.0, 260.0, 22.0), "849947900", 0.85),
+        ]
+        v, _p = extract_start_hp_from_easyocr_results(rows)
+        self.assertEqual(v, 47900)
+
+    def test_rejects_short_or_implausible_reads(self):
+        self.assertEqual(extract_start_hp_from_easyocr_results([])[0], None)
+        v2, _ = extract_start_hp_from_easyocr_results(
+            [(_square_bbox(0.0, 0.0, 20.0, 10.0), "12", 0.99)]
+        )
+        self.assertIsNone(v2)
 
 
 class FormatPowerCubeSuffixTests(unittest.TestCase):
