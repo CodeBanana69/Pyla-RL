@@ -227,6 +227,58 @@ class CombatAdaptationTests(unittest.TestCase):
 
         self.assertEqual(movement, 180.0)
 
+    def test_showdown_follow_mode_prioritizes_smoke_escape_over_teammate(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 999
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play.detect_fog_threat = lambda *_args, **_kwargs: 180.0
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: 270.0
+        play.current_frame = object()
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_follow_teammate = lambda *_args, **_kwargs: 0.0
+        play.showdown_roam = lambda *_args, **_kwargs: 90.0
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.showdown_playstyle_mode = "follow"
+        play.jump_pad_detection_enabled = False
+
+        movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
+
+        self.assertEqual(movement, 270.0)
+
+    def test_showdown_hide_mode_keeps_throttled_smoke_check(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 999
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play.detect_fog_threat = lambda *_args, **_kwargs: 180.0
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: 270.0
+        play.current_frame = object()
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_roam = lambda *_args, **_kwargs: 90.0
+        play.angle_points_into_fog = lambda *_args, **_kwargs: False
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.showdown_playstyle_mode = "hide"
+        play.jump_pad_detection_enabled = False
+
+        movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
+
+        self.assertEqual(movement, 90.0)
+
     def test_showdown_follow_teammate_moves_directly_toward_closest_teammate(self):
         play = object.__new__(Play)
         play.locked_teammate = None

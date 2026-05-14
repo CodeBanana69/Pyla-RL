@@ -1508,6 +1508,30 @@ class Play(Movement):
             self._fog_direction_escape_cached = self.detect_fog_direction_escape(self.current_frame, player_pos)
             self._fog_check_counter = 0
         fog_flee_angle = self._fog_direction_escape_cached or self._fog_threat_cached
+        if follow_teammates and fog_flee_angle is not None:
+            angle = self.find_best_angle(player_pos, fog_flee_angle, walls)
+            vlog(f"showdown: teammate follow paused for smoke escape -> angle={angle:.1f}°")
+            enemy_coords, enemy_distance = None, None
+            jump_pad_flee_angle = fog_flee_angle
+            if (
+                    jump_pads
+                    and self.jump_pad_detection_enabled
+                    and (not self.jump_pad_escape_requires_edge or self.is_player_near_map_edge(player_pos))
+                    and not self.has_close_teammate_for_jump_escape(player_pos, teammate_data)
+            ):
+                jump_pad_flee_angle = self.detect_jump_pad_smoke_escape(self.current_frame, player_pos) or fog_flee_angle
+            if jump_pad_flee_angle is not None:
+                jump_pad_angle = self.find_jump_pad_escape_angle(
+                    player_pos,
+                    jump_pads or [],
+                    walls,
+                    jump_pad_flee_angle,
+                    teammate_data=teammate_data,
+                )
+                if jump_pad_angle is not None:
+                    angle = jump_pad_angle
+                    vlog(f"showdown: teammate smoke escape -> jump pad angle={angle:.1f}°")
+            return angle
 
         # --- No enemy in sight: follow teammate or roam ---
         if not self.is_there_enemy(enemy_data):
@@ -1611,7 +1635,7 @@ class Play(Movement):
                 and fog_flee_angle is None
                 and self.angle_points_into_fog(self.current_frame, player_pos, angle)
         ):
-            fog_flee_angle = self.angle_opposite(angle)
+            fog_flee_angle = self.detect_fog_direction_escape(self.current_frame, player_pos) or self.angle_opposite(angle)
             vlog(f"showdown: follow path points into fog -> fallback escape={fog_flee_angle:.1f}°")
 
         # --- Fog proximity override ---
