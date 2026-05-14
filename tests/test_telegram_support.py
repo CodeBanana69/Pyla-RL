@@ -46,6 +46,16 @@ class TelegramSupportTests(unittest.TestCase):
                 ids = telegram_notifier.notification_chat_ids({"notification_chat_ids": ["123", "456"]})
         self.assertEqual(ids, ["123", "456"])
 
+    def test_chat_ids_from_updates_extracts_unique_message_chats(self):
+        updates = [
+            {"message": {"chat": {"id": 123}}},
+            {"message": {"chat": {"id": "123"}}},
+            {"edited_message": {"chat": {"id": 456}}},
+            {"message": {"text": "/start"}},
+        ]
+
+        self.assertEqual(telegram_notifier.chat_ids_from_updates(updates), ["123", "456"])
+
     def test_missing_config_defaults_are_ready_except_master_enable(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing = Path(tmp) / "missing_telegram_config.toml"

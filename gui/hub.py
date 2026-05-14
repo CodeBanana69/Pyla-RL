@@ -11,7 +11,10 @@ from utils import load_toml_as_dict, save_dict_as_toml, get_discord_link, get_dp
 from packaging import version
 from performance_profile import apply_performance_profile
 from discord_notifier import async_send_test_notification
-from telegram_notifier import async_send_test_notification as async_send_telegram_test_notification
+from telegram_notifier import (
+    async_fetch_recent_chat_ids,
+    async_send_test_notification as async_send_telegram_test_notification,
+)
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -1345,7 +1348,7 @@ class Hub:
             entry.bind("<FocusOut>", on_save)
             entry.bind("<Return>", on_save)
             row_idx += 1
-            return entry
+            return entry, var_str
 
         def create_telegram_toggle(label_text, config_key):
             nonlocal row_idx
@@ -1371,8 +1374,8 @@ class Hub:
             row_idx += 1
 
         create_telegram_toggle("Enable Telegram:", "enabled")
-        create_telegram_entry("Bot Token:", "bot_token", str, width=440, show="*")
-        create_telegram_entry("Notification Chat IDs:", "notification_chat_ids", text_to_chat_ids, width=440)
+        _token_entry, token_var = create_telegram_entry("Bot Token:", "bot_token", str, width=440, show="*")
+        _chat_entry, chat_ids_var = create_telegram_entry("Notification Chat IDs:", "notification_chat_ids", text_to_chat_ids, width=440)
         create_telegram_toggle("Send Match Summary:", "send_match_summary")
         create_telegram_toggle("Include Screenshots:", "include_screenshot")
         create_telegram_toggle("Telegram Remote Control:", "remote_control_enabled")
@@ -1382,8 +1385,64 @@ class Hub:
         status.grid(row=row_idx, column=0, columnspan=2, sticky="n", padx=S(20), pady=(S(6), 0))
         row_idx += 1
 
-        def send_test_telegram():
+        def sync_telegram_entry_vars():
+            self.telegram_config["bot_token"] = token_var.get().strip()
+            self.telegram_config["notification_chat_ids"] = text_to_chat_ids(chat_ids_var.get())
             save_telegram_config()
+
+        def find_telegram_chats():
+            sync_telegram_entry_vars()
+            status.configure(text="Reading recent Telegram chats...", text_color="#AAAAAA")
+
+            def worker():
+                try:
+                    token = self.telegram_config.get("bot_token", "")
+                    chat_ids = asyncio.run(async_fetch_recent_chat_ids(token))
+                    if chat_ids:
+                        merged = text_to_chat_ids(chat_ids_var.get())
+                        for chat_id in chat_ids:
+                            if chat_id not in merged:
+                                merged.append(chat_id)
+                        self.telegram_config["notification_chat_ids"] = merged
+                        save_telegram_config()
+                        message = f"Saved Telegram chat ID(s): {', '.join(chat_ids)}"
+                        color = "#2ECC71"
+
+                        def update_chat_field():
+                            chat_ids_var.set(chat_ids_to_text(merged))
+                            status.configure(text=message, text_color=color)
+
+                        self.app.after(0, update_chat_field)
+                        return
+                    message = "No chats found. Send /start to the bot, then click this again."
+                    color = "#E74C3C"
+                except Exception as exc:
+                    message = f"Could not read Telegram chats: {exc}"
+                    color = "#E74C3C"
+                try:
+                    self.app.after(0, lambda: status.configure(text=message, text_color=color))
+                except Exception:
+                    pass
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        find_chats_btn = ctk.CTkButton(
+            container,
+            text="Find Chats From /start",
+            command=find_telegram_chats,
+            fg_color="#AA2A2A",
+            hover_color="#BB3A3A",
+            font=("Arial", S(16), "bold"),
+            corner_radius=S(6),
+            width=S(240),
+            height=S(40),
+        )
+        find_chats_btn.grid(row=row_idx, column=0, columnspan=2, padx=S(20), pady=S(8))
+        self.attach_tooltip(find_chats_btn, "After you send /start to the bot in Telegram, this saves your chat ID automatically.")
+        row_idx += 1
+
+        def send_test_telegram():
+            sync_telegram_entry_vars()
             status.configure(text="Sending Telegram test...", text_color="#AAAAAA")
 
             def worker():

@@ -104,6 +104,38 @@ def notification_chat_ids(settings: dict[str, Any] | None = None) -> list[str]:
     return ordered
 
 
+def chat_ids_from_updates(updates: list[dict[str, Any]]) -> list[str]:
+    ordered = []
+    seen = set()
+    for update in updates or []:
+        message = update.get("message") or update.get("edited_message") or {}
+        chat = message.get("chat") or {}
+        chat_id = _clean_chat_id(chat.get("id"))
+        if not chat_id or chat_id in seen:
+            continue
+        seen.add(chat_id)
+        ordered.append(chat_id)
+    return ordered
+
+
+async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
+    settings = load_telegram_settings()
+    token = str(token or settings.get("bot_token", "")).strip()
+    if not token:
+        return []
+    url = f"https://api.telegram.org/bot{token}/getUpdates"
+    params = {"timeout": 1, "allowed_updates": '["message"]'}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params, timeout=10) as response:
+            data = await response.json()
+    if not data.get("ok"):
+        raise RuntimeError(str(data))
+    chat_ids = chat_ids_from_updates(list(data.get("result") or []))
+    for chat_id in chat_ids:
+        remember_chat_id(chat_id)
+    return chat_ids
+
+
 def _format_title(event_type: str, details: dict[str, Any]) -> str:
     title = EVENT_TITLES.get(event_type, "PylaAi-XXZ update")
     if event_type == "match":
