@@ -102,20 +102,13 @@ class StageManager:
         except (TypeError, ValueError):
             return True
 
-    def can_current_brawler_have_prestige_reward(self):
+    def can_handle_prestige_reward_screen(self):
         current = self.brawlers_pick_data[0] if getattr(self, "brawlers_pick_data", None) else {}
         if str(current.get("type", "trophies")).strip().lower() != "trophies":
             return False
 
-        target = self._number_or_default(current.get("push_until", 1000), 1000)
-        trophies = self._number_or_default(
-            getattr(self.Trophy_observer, "current_trophies", current.get("trophies", 0)),
-            0,
-        )
-        return (
-                target == 1000
-                and trophies >= 1000
-                and getattr(self, "last_match_crossed_1000", False)
+        return self.had_recent_trophy_change(seconds=45.0) or bool(
+            getattr(self, "last_match_crossed_1000", False)
         )
 
     def had_recent_trophy_change(self, seconds=30.0):
@@ -782,8 +775,8 @@ class StageManager:
         self.window_controller.press_key("Q")
 
     def handle_prestige_reward(self):
-        if not self.can_current_brawler_have_prestige_reward():
-            print("Prestige reward ignored; last match did not increase trophies across the 1000 trophy prestige target.")
+        if not self.can_handle_prestige_reward_screen():
+            print("Prestige reward ignored; no recent recorded trophy result allows this reward screen.")
             return
         screenshot = self.window_controller.screenshot()
         screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)

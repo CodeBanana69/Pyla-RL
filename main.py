@@ -730,7 +730,7 @@ def pyla_main(data):
                 match_result_seen=post_match_context_active,
                 trophy_result_recorded=trophy_result_recorded,
                 recent_trophy_change=recent_trophy_change,
-                prestige_reward_allowed=self.Stage_manager.can_current_brawler_have_prestige_reward(),
+                prestige_reward_allowed=self.Stage_manager.can_handle_prestige_reward_screen(),
                 exact_star_drop_after_match=detected_state in STAR_DROP_STATES,
             )
             if detected_state != "lobby":

@@ -68,7 +68,7 @@ class StateTransitionGuardTests(unittest.TestCase):
             "match",
         )
 
-    def test_prestige_reward_requires_current_brawler_at_1000_trophies(self):
+    def test_prestige_reward_requires_recent_allowed_result_context(self):
         self.assertEqual(
             normalize_detected_state(
                 "prestige_reward",
