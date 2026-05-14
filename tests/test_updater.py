@@ -47,7 +47,7 @@ class UpdaterTest(unittest.TestCase):
                 'max_ips = 24\nplayer_tag = "USER_TAG"\nold_local_key = "keep"\n',
                 encoding="utf-8",
             )
-            (project / "cfg" / "adaptive_state.json").write_text(
+            (project / "cfg" / "custom_state.json").write_text(
                 '{"matches": 12, "old_only": true, "nested": {"user": 1}}',
                 encoding="utf-8",
             )
@@ -60,7 +60,7 @@ class UpdaterTest(unittest.TestCase):
                 'max_ips = 30\nplayer_tag = ""\nnew_key = "added"\n',
                 encoding="utf-8",
             )
-            (source / "cfg" / "adaptive_state.json").write_text(
+            (source / "cfg" / "custom_state.json").write_text(
                 '{"matches": 0, "new_only": true, "nested": {"default": 2}}',
                 encoding="utf-8",
             )
@@ -80,12 +80,12 @@ class UpdaterTest(unittest.TestCase):
             self.assertIn('player_tag = "USER_TAG"', general_config)
             self.assertIn('new_key = "added"', general_config)
             self.assertIn('old_local_key = "keep"', general_config)
-            adaptive_state = (project / "cfg" / "adaptive_state.json").read_text(encoding="utf-8")
-            self.assertIn('"matches": 12', adaptive_state)
-            self.assertIn('"new_only": true', adaptive_state)
-            self.assertIn('"old_only": true', adaptive_state)
-            self.assertIn('"default": 2', adaptive_state)
-            self.assertIn('"user": 1', adaptive_state)
+            custom_state = (project / "cfg" / "custom_state.json").read_text(encoding="utf-8")
+            self.assertIn('"matches": 12', custom_state)
+            self.assertIn('"new_only": true', custom_state)
+            self.assertIn('"old_only": true', custom_state)
+            self.assertIn('"default": 2', custom_state)
+            self.assertIn('"user": 1', custom_state)
             self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "old updater")
             self.assertEqual((project / "downgrader.exe").read_text(encoding="utf-8"), "new downgrader")
             self.assertFalse((project / "adb.exe").exists())

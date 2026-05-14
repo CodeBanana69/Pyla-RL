@@ -99,7 +99,6 @@ class Movement:
             "arc_side": 1,            # +1 = CCW, -1 = CW; flipped each trigger
         }
         self._next_arc_side = 1
-        self.adaptive_safe_range_multiplier = 1.0
         self.strafe_enabled = str(bot_config.get("strafe_while_attacking", "yes")).lower() in ("yes", "true", "1")
         self.strafe_interval = float(bot_config.get("strafe_interval", 1.6))
         self.strafe_blend = float(bot_config.get("strafe_blend", 0.35))
@@ -1874,8 +1873,7 @@ class Play(Movement):
         if self.brawler_ranges is None:
             self.brawler_ranges = self.load_brawler_ranges(self.brawlers_info)
         safe_range, attack_range, super_range = self.brawler_ranges[brawler]
-        multiplier = max(0.75, min(1.35, float(getattr(self, "adaptive_safe_range_multiplier", 1.0))))
-        return int(safe_range * multiplier), attack_range, super_range
+        return safe_range, attack_range, super_range
 
     def _debounce_angle(self, angle: float, threshold_deg: float = 10.0) -> float:
         """Suppress small angle changes and smooth accepted turns.

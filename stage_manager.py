@@ -20,7 +20,6 @@ from state_finder import (
 from trophy_observer import TrophyObserver
 from utils import find_template_center, load_toml_as_dict, async_notify_user, \
     save_brawler_data, extract_text_strings, load_brawl_stars_api_config, fetch_brawl_stars_player, normalize_brawler_name
-from adaptive_brain import AdaptiveBrain
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 
@@ -56,10 +55,6 @@ class StageManager:
         self.post_match_action = str(bot_config.get("post_match_action", "lobby")).strip().lower()
         if self.post_match_action not in ("lobby", "play_again"):
             self.post_match_action = "lobby"
-        adaptive_enabled = str(bot_config.get("adaptive_brain_enabled", "yes")).lower() in ("yes", "true", "1")
-        adaptive_window = int(bot_config.get("adaptive_brain_window", 20))
-        self.adaptive_brain = AdaptiveBrain(enabled=adaptive_enabled, window_size=adaptive_window)
-        print(self.adaptive_brain.summary())
         self.time_since_last_stat_change = time.time()
         # Guards against recording trophies twice when end_game() is re-entered
         # on the same end-of-match screen (e.g. because the dismiss button
@@ -862,7 +857,6 @@ class StageManager:
                 self.last_match_trophy_after = trophies_after
                 self.last_match_trophy_delta = trophies_after - trophies_before
                 self.last_match_crossed_1000 = trophies_before < 1000 <= trophies_after and trophies_after > trophies_before
-                self.adaptive_brain.record_result(found_game_result)
                 self.time_since_last_stat_change = time.time()
                 self.last_recorded_result = found_game_result
                 self.last_recorded_result_time = time.time()

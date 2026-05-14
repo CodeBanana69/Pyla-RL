@@ -157,7 +157,6 @@ def pyla_main(data):
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
             self.Stage_manager = StageManager(data, self.lobby_automator, self.window_controller)
-            self.Stage_manager.adaptive_brain.apply_to_play(self.Play)
             self.states_requiring_data = ["lobby"]
             if data[0]['automatically_pick']:
                 print("Picking brawler automatically")
@@ -803,7 +802,6 @@ def pyla_main(data):
                     self.Play.time_since_last_proceeding = time.time()
                 if previous_state == "match" and state != "match":
                     self.Play.reset_match_control_state()
-                    self.Stage_manager.adaptive_brain.apply_to_play(self.Play)
                 elif previous_state != "match" and state == "match":
                     self.Play.reset_match_control_state()
                     self.match_ready_at = time.time() + self.match_warmup_seconds
@@ -840,7 +838,6 @@ def pyla_main(data):
             self.state = "match"
             self.match_launch_pending = False
             self.Play.reset_match_control_state()
-            self.Stage_manager.adaptive_brain.apply_to_play(self.Play)
             self.match_ready_at = time.time() + self.match_warmup_seconds
             if previous_state in {"lobby", "match_making"}:
                 self.Stage_manager.reset_prestige_reward_gate()
