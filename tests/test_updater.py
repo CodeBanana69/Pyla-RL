@@ -67,6 +67,9 @@ class UpdaterTest(unittest.TestCase):
             (source / "updater.exe").write_text("new updater", encoding="utf-8")
             (source / "downgrader.exe").write_text("new downgrader", encoding="utf-8")
             (source / "adb.exe").write_text("new adb", encoding="utf-8")
+            (source / "cfg" / "telegram_config.local.toml").write_text('bot_token = "BAD"\n', encoding="utf-8")
+            (source / "cfg" / "telegram_chats.toml").write_text('chat_ids = ["BAD"]\n', encoding="utf-8")
+            (source / "cfg" / "brawl_stars_api.local.toml").write_text('api_token = "BAD"\n', encoding="utf-8")
             (source / "main.py").write_text("new", encoding="utf-8")
             (source / "new_file.py").write_text("added", encoding="utf-8")
 
@@ -89,6 +92,9 @@ class UpdaterTest(unittest.TestCase):
             self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "old updater")
             self.assertEqual((project / "downgrader.exe").read_text(encoding="utf-8"), "new downgrader")
             self.assertFalse((project / "adb.exe").exists())
+            self.assertFalse((project / "cfg" / "telegram_config.local.toml").exists())
+            self.assertFalse((project / "cfg" / "telegram_chats.toml").exists())
+            self.assertFalse((project / "cfg" / "brawl_stars_api.local.toml").exists())
             self.assertEqual((project / "main.py").read_text(encoding="utf-8"), "new")
             self.assertEqual((project / "new_file.py").read_text(encoding="utf-8"), "added")
 

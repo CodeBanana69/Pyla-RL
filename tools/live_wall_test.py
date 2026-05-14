@@ -2,7 +2,10 @@ import argparse
 import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
+
+import cv2
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -15,6 +18,18 @@ from window_controller import WindowController
 class MainShim:
     def __init__(self):
         self.state = None
+
+
+def looks_like_disconnect_dialog(frame):
+    h, w = frame.shape[:2]
+    dialog_crop = frame[int(h * 0.32):int(h * 0.62), int(w * 0.24):int(w * 0.76)]
+    if dialog_crop.size == 0:
+        return False
+    dialog_mean = float(dialog_crop.mean())
+    dialog_std = float(dialog_crop.std())
+    dialog_hsv = cv2.cvtColor(dialog_crop, cv2.COLOR_RGB2HSV)
+    dialog_saturation = float(dialog_hsv[:, :, 1].mean())
+    return dialog_mean <= 90 and dialog_std <= 75 and dialog_saturation <= 85
 
 
 def load_brawler():
@@ -49,7 +64,9 @@ def main():
     last_state = None
     wall_counts = []
     raw_wall_counts = []
+    object_counts = Counter()
     last_continue_press = 0.0
+    last_reload_press = 0.0
     continue_interval = 0.35
     completed_rounds = 0
     active_end_state = None
@@ -67,6 +84,14 @@ def main():
             if current_state != last_state:
                 print(f"State: {current_state}")
                 last_state = current_state
+
+            if looks_like_disconnect_dialog(frame) and time.time() - last_reload_press > 4.0:
+                print("Disconnect dialog detected in live wall test; pressing Reload.")
+                controller.keys_up(list("wasd"))
+                controller.click(650, 610, delay=0.08, already_include_ratio=False)
+                last_reload_press = time.time()
+                time.sleep(2.0)
+                continue
 
             if current_state.startswith("end_"):
                 if current_state != active_end_state:
@@ -93,12 +118,19 @@ def main():
             if current_state == "match":
                 raw_tile_data = play.get_tile_data(frame)
                 raw_walls = [box for name, boxes in raw_tile_data.items() if name != "bush" for box in boxes]
-                walls = play.process_tile_data(raw_tile_data)
+                walls, map_objects = play.process_tile_data(raw_tile_data, frame)
                 raw_wall_counts.append(len(raw_walls))
                 wall_counts.append(len(walls))
+                object_counts.update({name: len(boxes) for name, boxes in map_objects.items() if boxes})
 
                 data = play.get_main_data(frame)
                 data["wall"] = walls
+                data["line_of_sight_wall"] = play.map_object_boxes_for_classes(
+                    map_objects,
+                    play.line_of_sight_map_object_classes(),
+                )
+                data["map_objects"] = map_objects
+                data["jump_pad"] = map_objects.get("jump_pad", [])
                 data = play.validate_game_data(data)
                 if data:
                     play.time_since_player_last_found = time.time()
@@ -115,11 +147,20 @@ def main():
                 ips = frames / elapsed if elapsed > 0 else 0
                 raw_avg = sum(raw_wall_counts) / len(raw_wall_counts) if raw_wall_counts else 0
                 merged_avg = sum(wall_counts) / len(wall_counts) if wall_counts else 0
-                print(f"{ips:.2f} IPS | walls raw avg={raw_avg:.1f} merged avg={merged_avg:.1f}")
+                object_samples = max(1, len(wall_counts))
+                objects = ", ".join(
+                    f"{name}={count / object_samples:.1f}"
+                    for name, count in object_counts.most_common(8)
+                ) or "none"
+                print(
+                    f"{ips:.2f} IPS | walls raw avg={raw_avg:.1f} "
+                    f"merged avg={merged_avg:.1f} | objects: {objects}"
+                )
                 frames = 0
                 ips_start = time.time()
                 wall_counts.clear()
                 raw_wall_counts.clear()
+                object_counts.clear()
     finally:
         controller.keys_up(list("wasd"))
         controller.close()

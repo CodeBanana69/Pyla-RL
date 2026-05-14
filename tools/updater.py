@@ -34,6 +34,9 @@ SKIPPED_FILES = {
     "adb.exe",
     "adbwinapi.dll",
     "adbwinusbapi.dll",
+    "brawl_stars_api.local.toml",
+    "telegram_chats.toml",
+    "telegram_config.local.toml",
     "updater.exe",
 }
 

@@ -66,8 +66,10 @@ def load_telegram_settings() -> dict[str, Any]:
     settings.setdefault("enabled", False)
     settings["bot_token"] = str(settings.get("bot_token", "")).strip()
     settings["notification_chat_ids"] = _as_chat_ids(settings.get("notification_chat_ids"))
+    settings["allowed_chat_ids"] = _as_chat_ids(settings.get("allowed_chat_ids"))
     settings.setdefault("send_match_summary", True)
     settings.setdefault("include_screenshot", True)
+    settings.setdefault("allow_multiple_notification_chat_ids", False)
     settings.setdefault("remote_control_enabled", True)
     settings.setdefault("poll_timeout_seconds", 25)
     return settings
@@ -96,12 +98,20 @@ def notification_chat_ids(settings: dict[str, Any] | None = None) -> list[str]:
     settings = settings or load_telegram_settings()
     ordered = []
     seen = set()
-    for chat_id in _as_chat_ids(settings.get("notification_chat_ids")) + load_known_chat_ids():
+    for chat_id in _as_chat_ids(settings.get("notification_chat_ids")):
         if chat_id in seen:
             continue
         seen.add(chat_id)
         ordered.append(chat_id)
     return ordered
+
+
+def allowed_chat_ids(settings: dict[str, Any] | None = None) -> list[str]:
+    settings = settings or load_telegram_settings()
+    explicit = _as_chat_ids(settings.get("allowed_chat_ids"))
+    if explicit:
+        return explicit
+    return _as_chat_ids(settings.get("notification_chat_ids"))
 
 
 def chat_ids_from_updates(updates: list[dict[str, Any]]) -> list[str]:
@@ -130,10 +140,7 @@ async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
             data = await response.json()
     if not data.get("ok"):
         raise RuntimeError(str(data))
-    chat_ids = chat_ids_from_updates(list(data.get("result") or []))
-    for chat_id in chat_ids:
-        remember_chat_id(chat_id)
-    return chat_ids
+    return chat_ids_from_updates(list(data.get("result") or []))
 
 
 def _format_title(event_type: str, details: dict[str, Any]) -> str:
@@ -255,7 +262,13 @@ async def async_notify_user(
         return False
     chat_ids = notification_chat_ids(settings)
     if not chat_ids:
-        print("Telegram skipped: no known chats yet. Send /start or /help to the Telegram bot once.")
+        print("Telegram skipped: no notification_chat_ids configured.")
+        return False
+    if len(chat_ids) > 1 and not _config_bool(settings.get("allow_multiple_notification_chat_ids"), False):
+        print(
+            "Telegram skipped: multiple notification_chat_ids are configured. "
+            "Remove extra chat IDs or enable allow_multiple_notification_chat_ids only if this is intentional."
+        )
         return False
 
     event_type = event_type or "update"

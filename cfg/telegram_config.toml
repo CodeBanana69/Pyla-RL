@@ -7,6 +7,7 @@ bot_token = ""
 
 send_match_summary = true
 include_screenshot = true
+allow_multiple_notification_chat_ids = false
 
 remote_control_enabled = true
 poll_timeout_seconds = 25

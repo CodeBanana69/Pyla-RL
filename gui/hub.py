@@ -93,6 +93,8 @@ class Hub:
         self.bot_config.setdefault("bot_uses_gadgets", "yes")
         self.bot_config.setdefault("minimum_movement_delay", 0.4)
         self.bot_config.setdefault("wall_detection_confidence", 0.9)
+        self.bot_config.setdefault("wall_detection_retry_confidence", 0.20)
+        self.bot_config.setdefault("wall_detection_retry_min_objects", 3)
         self.bot_config.setdefault("entity_detection_confidence", 0.6)
         self.bot_config.setdefault("unstuck_movement_delay", 3.0)
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
@@ -106,6 +108,10 @@ class Hub:
         self.bot_config.setdefault("teammate_follow_force_direct", "yes")
         self.bot_config.setdefault("teammate_marker_follow_enabled", "yes")
         self.bot_config.setdefault("teammate_marker_edge_margin", 0.28)
+        self.bot_config.setdefault("map_object_vision_enabled", "yes")
+        self.bot_config.setdefault("map_object_wall_color_detection", "yes")
+        self.bot_config.setdefault("map_object_water_detection", "no")
+        self.bot_config.setdefault("map_object_min_area", 900)
         self.bot_config.setdefault("jump_pad_detection_enabled", "yes")
         self.bot_config.setdefault("jump_pad_escape_distance", 620)
         self.bot_config.setdefault("jump_pad_escape_min_distance", 55)
@@ -163,6 +169,7 @@ class Hub:
         self.telegram_config.setdefault("notification_chat_ids", [])
         self.telegram_config.setdefault("send_match_summary", True)
         self.telegram_config.setdefault("include_screenshot", True)
+        self.telegram_config.setdefault("allow_multiple_notification_chat_ids", False)
         self.telegram_config.setdefault("remote_control_enabled", True)
         self.telegram_config.setdefault("poll_timeout_seconds", 25)
 
@@ -1484,6 +1491,7 @@ class Hub:
         _chat_entry, chat_ids_var = create_telegram_entry("Notification Chat IDs:", "notification_chat_ids", text_to_chat_ids, width=440)
         create_telegram_toggle("Send Match Summary:", "send_match_summary")
         create_telegram_toggle("Include Screenshots:", "include_screenshot")
+        create_telegram_toggle("Allow Multiple Notification Chats:", "allow_multiple_notification_chat_ids")
         create_telegram_toggle("Telegram Remote Control:", "remote_control_enabled")
         create_telegram_entry("Poll Timeout Seconds:", "poll_timeout_seconds", lambda s: 25 if s == "" else int(s), width=120)
 
@@ -1504,14 +1512,14 @@ class Hub:
                 try:
                     token = self.telegram_config.get("bot_token", "")
                     chat_ids = asyncio.run(async_fetch_recent_chat_ids(token))
-                    if chat_ids:
+                    if len(chat_ids) == 1:
                         merged = text_to_chat_ids(chat_ids_var.get())
-                        for chat_id in chat_ids:
-                            if chat_id not in merged:
-                                merged.append(chat_id)
+                        chat_id = chat_ids[0]
+                        if chat_id not in merged:
+                            merged.append(chat_id)
                         self.telegram_config["notification_chat_ids"] = merged
                         save_telegram_config()
-                        message = f"Saved Telegram chat ID(s): {', '.join(chat_ids)}"
+                        message = f"Saved Telegram chat ID: {chat_id}"
                         color = "#2ECC71"
 
                         def update_chat_field():
@@ -1519,6 +1527,14 @@ class Hub:
                             status.configure(text=message, text_color=color)
 
                         self.app.after(0, update_chat_field)
+                        return
+                    if chat_ids:
+                        message = (
+                            "Found multiple chat IDs. Nothing was auto-saved. "
+                            f"Enter only your own chat ID: {', '.join(chat_ids)}"
+                        )
+                        color = "#ffcc66"
+                        self.app.after(0, lambda: status.configure(text=message, text_color=color))
                         return
                     message = "No chats found. Send /start to the bot, then click this again."
                     color = "#E74C3C"

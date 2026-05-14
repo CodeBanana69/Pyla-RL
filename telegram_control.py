@@ -9,7 +9,13 @@ from typing import Any, Callable
 import aiohttp
 
 from runtime_control import PAUSED, RUNNING, read_state, write_state
-from telegram_notifier import async_send_message, async_send_photo, load_telegram_settings, remember_chat_id
+from telegram_notifier import (
+    allowed_chat_ids,
+    async_send_message,
+    async_send_photo,
+    load_telegram_settings,
+    remember_chat_id,
+)
 from utils import _config_bool
 
 
@@ -113,9 +119,24 @@ class TelegramControlServer:
 
         command = text.split()[0].split("@", 1)[0].lower()
         remember_chat_id(chat_id)
-
+        chat_id_text = str(chat_id).strip()
+        allowed = allowed_chat_ids(self.settings_loader())
         if command in {"/help", "/start"}:
-            await async_send_message(chat_id, self._help_text(), token=token)
+            await async_send_message(chat_id, self._help_text(chat_id_text), token=token)
+            return
+        if allowed and chat_id_text not in allowed:
+            await async_send_message(
+                chat_id,
+                "This chat is not allowed for this PylaAi-XXZ instance. Add this chat ID in the Telegram tab first.",
+                token=token,
+            )
+            return
+        if not allowed:
+            await async_send_message(
+                chat_id,
+                "Remote control is not enabled for any chat yet. Add this chat ID in the Telegram tab first.",
+                token=token,
+            )
             return
 
         if command in {"/pause", "/stop"}:
@@ -138,17 +159,21 @@ class TelegramControlServer:
 
         await async_send_message(chat_id, "Unknown command. Send /help.", token=token)
 
-    def _help_text(self) -> str:
+    def _help_text(self, chat_id: str | None = None) -> str:
         lines = [
             "<b>PylaAi-XXZ Telegram commands</b>",
+        ]
+        if chat_id:
+            lines.append(f"<b>This chat ID:</b> {chat_id}")
+        lines.extend([
             "/status - bot status",
             "/pause - pause movement",
             "/resume - resume movement",
             "/screenshot - send current emulator screenshot",
             "/restart_game - restart Brawl Stars and scrcpy",
-        ]
+        ])
         lines.append("")
-        lines.append("This chat is now remembered for Telegram notifications.")
+        lines.append("This chat can be used only after its chat ID is saved in the Telegram tab.")
         return "\n".join(lines)
 
     def _status_text(self) -> str:

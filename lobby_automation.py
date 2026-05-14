@@ -10,6 +10,7 @@ from utils import (
     extract_text_strings,
     count_hsv_pixels,
     load_toml_as_dict,
+    load_brawlers_info,
     find_template_center,
     resolve_brawler_name_alias,
 )
@@ -21,6 +22,7 @@ class LobbyAutomation:
     def __init__(self, window_controller):
         self.coords_cfg = load_toml_as_dict("./cfg/lobby_config.toml")
         self.window_controller = window_controller
+        self.known_brawler_names = self._load_known_brawler_names()
 
     def _read_state(self):
         try:
@@ -63,25 +65,35 @@ class LobbyAutomation:
         state = self._read_state()
         if state == "brawler_selection":
             return True
+        if state == "shop" and self.is_probably_brawler_selection_screen():
+            return True
 
         if state == "lobby" and self.click_visible_brawler_menu_button():
             time.sleep(0.8)
             state = self._read_state()
             if state == "brawler_selection":
                 return True
+            if state == "shop" and self.is_probably_brawler_selection_screen():
+                return True
 
         for attempt in range(attempts):
             if state == "shop":
+                if self.is_probably_brawler_selection_screen():
+                    return True
                 print("Brawler menu click opened a lobby panel; backing out and retrying Brawlers.")
                 self.press_back()
                 time.sleep(0.8)
                 state = self._read_state()
                 if state == "brawler_selection":
                     return True
+                if state == "shop" and self.is_probably_brawler_selection_screen():
+                    return True
                 if state == "lobby" and self.click_visible_brawler_menu_button():
                     time.sleep(0.8)
                     state = self._read_state()
                     if state == "brawler_selection":
+                        return True
+                    if state == "shop" and self.is_probably_brawler_selection_screen():
                         return True
 
             x, y = brawler_button_points[min(attempt, len(brawler_button_points) - 1)]
@@ -91,6 +103,8 @@ class LobbyAutomation:
             state = self._read_state()
             if state == "brawler_selection":
                 return True
+            if state == "shop" and self.is_probably_brawler_selection_screen():
+                return True
             if state == "shop":
                 continue
             if state is None:
@@ -99,6 +113,55 @@ class LobbyAutomation:
                 return True
 
         return False
+
+    @staticmethod
+    def _load_known_brawler_names():
+        try:
+            return {
+                LobbyAutomation.normalize_ocr_name(name)
+                for name in load_brawlers_info().keys()
+                if name
+            }
+        except Exception:
+            return set()
+
+    def is_probably_brawler_selection_screen(self, screenshot=None):
+        try:
+            if screenshot is None:
+                screenshot = self.window_controller.screenshot()
+            if screenshot is None:
+                return False
+            results = extract_text_and_positions(screenshot)
+        except Exception:
+            return False
+
+        known_names = getattr(self, "known_brawler_names", None)
+        if known_names is None:
+            known_names = self._load_known_brawler_names()
+            self.known_brawler_names = known_names
+
+        normalized_texts = {
+            self.resolve_ocr_typos(self.normalize_ocr_name(text))
+            for text in results.keys()
+        }
+        known_hits = len(normalized_texts & known_names)
+        selection_words = {
+            "brawlers",
+            "brawler",
+            "sortby",
+            "leasttrophies",
+            "mosttrophies",
+            "trophies",
+            "locked",
+            "upgrade",
+        }
+        selection_word_hits = len(normalized_texts & selection_words)
+
+        # Brawl Pass/shop panels can also be classified as "shop", but the
+        # brawler selector exposes a grid/list of real brawler names. Trust OCR
+        # only when it sees enough of that grid, so a single offer name does not
+        # bypass the retry/back-out recovery.
+        return known_hits >= 2 or (known_hits >= 1 and selection_word_hits >= 1)
 
     def click_visible_brawler_menu_button(self):
         try:

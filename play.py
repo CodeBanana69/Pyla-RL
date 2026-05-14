@@ -75,6 +75,11 @@ class Movement:
         self.wall_box_merge_iou = float(bot_config.get("wall_box_merge_iou", 0.25))
         self.wall_box_merge_center_distance = float(bot_config.get("wall_box_merge_center_distance", 35))
         self.wall_history_min_hits = int(bot_config.get("wall_history_min_hits", 1))
+        self.map_object_vision_enabled = str(bot_config.get("map_object_vision_enabled", "yes")).lower() in ("yes", "true", "1")
+        self.map_object_wall_color_detection = str(bot_config.get("map_object_wall_color_detection", "yes")).lower() in ("yes", "true", "1")
+        self.map_object_water_detection = str(bot_config.get("map_object_water_detection", "no")).lower() in ("yes", "true", "1")
+        self.map_object_min_area = float(bot_config.get("map_object_min_area", 900))
+        self.last_map_object_data = {}
         self.jump_pad_detection_enabled = str(bot_config.get("jump_pad_detection_enabled", "yes")).lower() in ("yes", "true", "1")
         self.jump_pad_escape_distance = float(bot_config.get("jump_pad_escape_distance", 620))
         self.jump_pad_escape_min_distance = float(bot_config.get("jump_pad_escape_min_distance", 55))
@@ -512,6 +517,10 @@ class Play(Movement):
         self.hypercharge_pixels_minimum = bot_config["hypercharge_pixels_minimum"]
         self.super_pixels_minimum = bot_config["super_pixels_minimum"]
         self.wall_detection_confidence = bot_config["wall_detection_confidence"]
+        self.wall_detection_retry_confidence = float(
+            bot_config.get("wall_detection_retry_confidence", max(0.2, self.wall_detection_confidence - 0.55))
+        )
+        self.wall_detection_retry_min_objects = int(bot_config.get("wall_detection_retry_min_objects", 3))
         self.entity_detection_confidence = bot_config["entity_detection_confidence"]
         self.entity_detection_retry_confidence = float(
             bot_config.get("entity_detection_retry_confidence", max(0.35, self.entity_detection_confidence - 0.20))
@@ -1708,7 +1717,8 @@ class Play(Movement):
     def is_enemy_hittable(self, player_pos, enemy_pos, walls, skill_type):
         if self.can_attack_through_walls(self.current_brawler, skill_type, self.brawlers_info):
             return True
-        if self.walls_block_line_of_sight(player_pos, enemy_pos, walls):
+        line_of_sight_walls = getattr(self, "current_line_of_sight_walls", None) or walls
+        if self.walls_block_line_of_sight(player_pos, enemy_pos, line_of_sight_walls):
             return False
         return True
 
@@ -1876,8 +1886,14 @@ class Play(Movement):
         if 'wall' not in data.keys() or not data['wall']:
             data['wall'] = []
 
+        if 'line_of_sight_wall' not in data.keys() or not data['line_of_sight_wall']:
+            data['line_of_sight_wall'] = data['wall']
+
         if 'jump_pad' not in data.keys() or not data['jump_pad']:
             data['jump_pad'] = []
+
+        if 'map_objects' not in data.keys() or not data['map_objects']:
+            data['map_objects'] = {}
 
         return False if incomplete else data
 
@@ -2171,6 +2187,24 @@ class Play(Movement):
 
     def get_tile_data(self, frame):
         tile_data = self.Detect_tile_detector.detect_objects(frame, conf_tresh=self.wall_detection_confidence)
+        primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
+        if (
+                primary_count < self.wall_detection_retry_min_objects
+                and self.wall_detection_retry_confidence < self.wall_detection_confidence
+        ):
+            retry_data = self.Detect_tile_detector.detect_objects(
+                frame,
+                conf_tresh=self.wall_detection_retry_confidence,
+            )
+            retry_count = sum(len(boxes or []) for boxes in (retry_data or {}).values())
+            if retry_count > primary_count:
+                if visual_debug:
+                    counts = {key: len(value) for key, value in retry_data.items()}
+                    print(
+                        "[DBG] sparse map objects recovered with lower wall threshold "
+                        f"{self.wall_detection_retry_confidence:.2f}: {counts}"
+                    )
+                tile_data = retry_data
         return tile_data
 
     @staticmethod
@@ -2233,10 +2267,11 @@ class Play(Movement):
 
         return [cluster["box"] for cluster in clusters if cluster["hits"] >= min_hits]
 
-    def process_tile_data(self, tile_data):
+    def process_tile_data(self, tile_data, frame=None):
+        map_objects = self.build_map_object_vision(tile_data, frame)
         walls = []
-        for class_name, boxes in tile_data.items():
-            if class_name != 'bush':
+        for class_name, boxes in map_objects.items():
+            if class_name in self.blocking_map_object_classes():
                 walls.extend(boxes)
         walls = self.merge_wall_boxes(walls)
 
@@ -2247,7 +2282,247 @@ class Play(Movement):
         # Combine walls from history
         combined_walls = self.combine_walls_from_history()
 
-        return combined_walls
+        return combined_walls, map_objects
+
+    @staticmethod
+    def blocking_map_object_classes():
+        return {
+            "wall",
+            "crate",
+            "barrel",
+            "fence",
+            "indestructible",
+            "themed",
+            "bouncer",
+            "gravity_push",
+            "gravity_pull",
+            "damageable",
+            "invisible_indestructible",
+        }
+
+    @staticmethod
+    def line_of_sight_map_object_classes():
+        return {
+            "wall",
+            "crate",
+            "barrel",
+            "fence",
+            "indestructible",
+            "themed",
+            "bouncer",
+            "gravity_push",
+            "gravity_pull",
+            "damageable",
+            "invisible_indestructible",
+        }
+
+    @staticmethod
+    def nonblocking_map_object_classes():
+        return {"bush", "close_bush", "jump_pad", "fog"}
+
+    def map_object_boxes_for_classes(self, map_objects, class_names):
+        boxes = []
+        allowed = set(class_names)
+        for class_name, class_boxes in (map_objects or {}).items():
+            if class_name in allowed:
+                boxes.extend(class_boxes or [])
+        return self.merge_wall_boxes(boxes)
+
+    def build_map_object_vision(self, tile_data, frame=None):
+        objects = {}
+        for class_name, boxes in (tile_data or {}).items():
+            normalized_name = self.normalize_map_object_class(class_name)
+            normalized_boxes = [
+                self.normalize_box(box)
+                for box in boxes or []
+            ]
+            if normalized_boxes:
+                objects.setdefault(normalized_name, []).extend(normalized_boxes)
+
+        if self.map_object_vision_enabled and self.map_object_water_detection:
+            water_boxes = self.detect_water_tiles(frame)
+            if water_boxes:
+                objects.setdefault("water", []).extend(water_boxes)
+
+        wall_count = len(objects.get("wall") or [])
+        if (
+                self.map_object_vision_enabled
+                and self.map_object_wall_color_detection
+                and wall_count < self.wall_detection_retry_min_objects
+        ):
+            color_wall_boxes = self.detect_wall_tiles_by_color(frame)
+            if color_wall_boxes:
+                objects.setdefault("wall", []).extend(color_wall_boxes)
+
+        return {
+            key: self.merge_wall_boxes(value)
+            for key, value in objects.items()
+            if value
+        }
+
+    @staticmethod
+    def normalize_map_object_class(class_name):
+        name = str(class_name or "").strip().lower().replace(" ", "_").replace("-", "_")
+        aliases = {
+            "closebush": "close_bush",
+            "forest": "bush",
+            "respawningforest": "bush",
+            "water_tile": "water",
+            "invisiblewater": "invisible_water",
+            "wall1": "wall",
+            "wall2": "wall",
+            "wallywall": "wall",
+            "wallyfillerwall": "wall",
+            "indestructiblefence": "fence",
+            "ropefence": "fence",
+            "damageable1": "damageable",
+            "damageable2": "damageable",
+            "damageable3": "damageable",
+            "damageable4": "damageable",
+            "gravitypush": "gravity_push",
+            "gravitypull": "gravity_pull",
+        }
+        return aliases.get(name, name)
+
+    def detect_water_tiles(self, frame):
+        if frame is None:
+            return []
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        # Kept conservative: many Showdown bushes are teal/cyan and otherwise
+        # look like water in HSV, so only deep blue water should pass.
+        water = cv2.inRange(
+            hsv,
+            np.array((98, 45, 80), dtype=np.uint8),
+            np.array((116, 210, 255), dtype=np.uint8),
+        )
+        water = cv2.morphologyEx(
+            water,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+        )
+        water = cv2.morphologyEx(
+            water,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (13, 13)),
+        )
+        contours, _ = cv2.findContours(water, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = frame.shape[:2]
+        scale = max(0.4, min(1.2, w / brawl_stars_width))
+        min_area = max(float(self.map_object_min_area), 700 * scale * scale)
+        max_area = max(min_area + 1, 70000 * scale * scale)
+        boxes = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area or area > max_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            if bw < 24 * scale or bh < 24 * scale:
+                continue
+            if y > h * 0.84 or x < w * 0.04 or x > w * 0.96:
+                continue
+            roi = hsv[y:y + bh, x:x + bw]
+            if roi.size == 0:
+                continue
+            sat_mean = float(roi[:, :, 1].mean())
+            val_mean = float(roi[:, :, 2].mean())
+            if sat_mean < 80 or val_mean < 85:
+                continue
+            boxes.append([x, y, x + bw, y + bh])
+
+        return self.merge_wall_boxes(boxes)
+
+    def detect_wall_tiles_by_color(self, frame):
+        if frame is None:
+            return []
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        wall_mask = cv2.inRange(
+            hsv,
+            np.array((110, 35, 90), dtype=np.uint8),
+            np.array((135, 165, 215), dtype=np.uint8),
+        )
+        wall_mask = cv2.morphologyEx(
+            wall_mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+        )
+        wall_mask = cv2.morphologyEx(
+            wall_mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
+        )
+        contours, _ = cv2.findContours(wall_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = frame.shape[:2]
+        scale = max(0.4, min(1.2, w / brawl_stars_width))
+        min_area = max(260, int(480 * scale * scale))
+        tile = max(24, int(self.TILE_SIZE * scale * 0.85))
+        boxes = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            if bw < 16 * scale or bh < 16 * scale:
+                continue
+            if y < h * 0.08 or y > h * 0.86 or x < w * 0.02 or x > w * 0.98:
+                continue
+            if bw > w * 0.38 or bh > h * 0.36:
+                continue
+
+            roi_mask = wall_mask[y:y + bh, x:x + bw]
+            roi_hsv = hsv[y:y + bh, x:x + bw]
+            if roi_mask.size == 0:
+                continue
+            # Teal bushes are high saturation; stone walls sit lower.
+            masked = roi_hsv[roi_mask > 0]
+            if masked.size == 0 or float(masked[:, 1].mean()) > 150:
+                continue
+            masked_rgb = frame[y:y + bh, x:x + bw][roi_mask > 0]
+            if masked_rgb.size == 0:
+                continue
+            r_mean = float(masked_rgb[:, 0].mean())
+            g_mean = float(masked_rgb[:, 1].mean())
+            b_mean = float(masked_rgb[:, 2].mean())
+            if b_mean < g_mean + 12 or b_mean < r_mean + 10:
+                continue
+
+            step = max(14, int(tile * 0.52))
+            min_cell = max(12, int(tile * 0.42))
+            for cy in range(y, y + bh, step):
+                for cx in range(x, x + bw, step):
+                    x2 = min(cx + tile, x + bw)
+                    y2 = min(cy + tile, y + bh)
+                    if x2 - cx < min_cell or y2 - cy < min_cell:
+                        continue
+                    cell = wall_mask[cy:y2, cx:x2]
+                    if cell.size == 0:
+                        continue
+                    density = cv2.countNonZero(cell) / float(cell.size)
+                    if density < 0.42:
+                        continue
+
+                    ys, xs = np.nonzero(cell)
+                    if xs.size == 0:
+                        continue
+                    cell_rgb = frame[cy:y2, cx:x2][cell > 0]
+                    if cell_rgb.size == 0:
+                        continue
+                    r_cell = float(cell_rgb[:, 0].mean())
+                    g_cell = float(cell_rgb[:, 1].mean())
+                    b_cell = float(cell_rgb[:, 2].mean())
+                    if b_cell < g_cell + 12 or b_cell < r_cell + 10:
+                        continue
+                    bx1 = cx + int(xs.min())
+                    by1 = cy + int(ys.min())
+                    bx2 = cx + int(xs.max()) + 1
+                    by2 = cy + int(ys.max()) + 1
+                    if bx2 - bx1 >= min_cell and by2 - by1 >= min_cell:
+                        boxes.append([bx1, by1, bx2, by2])
+
+        return self.merge_wall_boxes(boxes)
 
     @staticmethod
     def box_center(box):
@@ -2482,17 +2757,32 @@ class Play(Movement):
 
             tile_data = self.get_tile_data(frame)
 
-            walls = self.process_tile_data(tile_data)
+            walls, map_objects = self.process_tile_data(tile_data, frame)
+            line_of_sight_walls = self.map_object_boxes_for_classes(
+                map_objects,
+                self.line_of_sight_map_object_classes(),
+            )
             jump_pads = self.detect_jump_pads(frame)
+            if jump_pads:
+                map_objects.setdefault("jump_pad", []).extend(jump_pads)
+                map_objects["jump_pad"] = self.merge_wall_boxes(map_objects["jump_pad"])
 
             self.time_since_walls_checked = current_time
             self.last_walls_data = walls
             self.last_jump_pad_data = jump_pads
+            self.last_map_object_data = map_objects
             data['wall'] = walls
+            data['line_of_sight_wall'] = line_of_sight_walls
             data['jump_pad'] = jump_pads
+            data['map_objects'] = map_objects
         elif self.keep_walls_in_memory:
             data['wall'] = self.last_walls_data
+            data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
+                self.last_map_object_data,
+                self.line_of_sight_map_object_classes(),
+            )
             data['jump_pad'] = self.last_jump_pad_data
+            data['map_objects'] = self.last_map_object_data
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)
@@ -2535,6 +2825,7 @@ class Play(Movement):
 
         self.current_frame = frame
         self.last_playstyle_teammate_data = data.get("teammate")
+        self.current_line_of_sight_walls = data.get("line_of_sight_wall") or data.get("wall") or []
         movement = self.loop(brawler, data, current_time)
 
         if visual_debug:
@@ -2558,6 +2849,14 @@ class Play(Movement):
                     list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
                     for item in value
                 ]
+            elif isinstance(value, dict):
+                copied[key] = {
+                    sub_key: [
+                        list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
+                        for item in (sub_value or [])
+                    ]
+                    for sub_key, sub_value in value.items()
+                }
             else:
                 copied[key] = value
         return copied
@@ -2671,6 +2970,24 @@ class Play(Movement):
             "enemy":    (255, 0, 0),    # red
             "wall":     (128, 128, 128),  # gray
         }
+        object_colors = {
+            "wall": (180, 180, 180),
+            "water": (0, 190, 255),
+            "bush": (0, 180, 60),
+            "close_bush": (80, 255, 100),
+            "jump_pad": (255, 220, 0),
+            "crate": (210, 130, 30),
+            "barrel": (210, 110, 50),
+            "fence": (210, 210, 210),
+            "indestructible": (120, 120, 255),
+            "themed": (255, 120, 180),
+            "bouncer": (255, 180, 0),
+            "damageable": (255, 80, 80),
+            "gravity_push": (120, 255, 255),
+            "gravity_pull": (170, 120, 255),
+            "invisible_water": (80, 160, 255),
+            "invisible_indestructible": (160, 160, 220),
+        }
         boxes_drawn = 0
         for key, color in colors.items():
             boxes = data.get(key)
@@ -2684,6 +3001,49 @@ class Play(Movement):
                 if key != "wall":
                     cv2.putText(img, key, sp((x1, max(y1 - 6, 0))),
                                 cv2.FONT_HERSHEY_SIMPLEX, max(0.35, 0.5 * scale), color, 1)
+                boxes_drawn += 1
+
+        map_objects = data.get("map_objects") or {}
+        object_counts = {
+            key: len(boxes)
+            for key, boxes in map_objects.items()
+            if boxes
+        }
+        if object_counts:
+            summary = " ".join(
+                f"{key}:{count}"
+                for key, count in sorted(object_counts.items())
+                if key != "wall"
+            )
+            wall_count = object_counts.get("wall")
+            if wall_count is not None:
+                summary = f"wall:{wall_count} {summary}".strip()
+            if summary:
+                cv2.putText(
+                    img,
+                    summary[:120],
+                    (s(8), s(18)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.32, 0.45 * scale),
+                    (255, 255, 255),
+                    1,
+                )
+
+        for key, boxes in map_objects.items():
+            if not boxes or key == "wall":
+                continue
+            color = object_colors.get(key, (255, 255, 255))
+            label_drawn = False
+            for box in boxes:
+                if boxes_drawn >= self.visual_debug_max_boxes:
+                    break
+                x1, y1, x2, y2 = map(int, box)
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(1)))
+                if not label_drawn and key not in {"bush", "close_bush"}:
+                    label = key[:14]
+                    cv2.putText(img, label, sp((x1, min(max(y1 + 12, 0), frame.shape[0] - 1))),
+                                cv2.FONT_HERSHEY_SIMPLEX, max(0.3, 0.42 * scale), color, 1)
+                    label_drawn = True
                 boxes_drawn += 1
 
         # Draw attack/super ranges around the player based on brawlers_info.json.
