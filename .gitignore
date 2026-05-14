@@ -10,6 +10,7 @@ cfg/match_history.toml
 test.py
 /debug_frames
 /datasets
+/extracted_map_data
 /runs
 logs/
 venv/
