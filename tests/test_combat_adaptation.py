@@ -1,4 +1,5 @@
 import math
+import time
 import unittest
 
 import cv2
@@ -275,7 +276,7 @@ class CombatAdaptationTests(unittest.TestCase):
 
         self.assertEqual(movement, 0.0)
 
-    def test_showdown_follow_teammate_force_direct_ignores_blocked_unknown_path(self):
+    def test_showdown_follow_teammate_force_direct_respects_blocked_path(self):
         play = object.__new__(Play)
         play.locked_teammate = None
         play.locked_teammate_distance = float("inf")
@@ -289,7 +290,8 @@ class CombatAdaptationTests(unittest.TestCase):
         play.get_enemy_pos = lambda entity: entity
         play.get_distance = Play.get_distance
         play.angle_from_direction = Play.angle_from_direction
-        play.is_path_blocked_angle = lambda *_args, **_kwargs: True
+        blocked = {45.0}
+        play.is_path_blocked_angle = lambda _player, angle, _walls: round(angle, 1) in blocked
 
         movement = play.showdown_follow_teammate(
             [90, 90, 110, 110],
@@ -297,7 +299,43 @@ class CombatAdaptationTests(unittest.TestCase):
             [],
         )
 
-        self.assertEqual(round(movement, 1), 45.0)
+        self.assertNotEqual(round(movement, 1), 45.0)
+
+    def test_showdown_follow_teammate_delays_marker_after_recent_visible_mate(self):
+        play = object.__new__(Play)
+        play.locked_teammate = None
+        play.locked_teammate_distance = float("inf")
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+        play.teammate_marker_fallback_delay = 1.25
+        play.last_teammate_seen_time = time.time()
+        play.get_player_pos = lambda _player: (100, 100)
+        play.find_closest_teammate = lambda *_args, **_kwargs: (None, float("inf"))
+        play.teammate_marker_follow_angle = lambda _player: 0.0
+        play.showdown_roam = lambda *_args, **_kwargs: 180.0
+
+        movement = play.showdown_follow_teammate([90, 90, 110, 110], [], [])
+
+        self.assertEqual(movement, 180.0)
+
+    def test_showdown_follow_teammate_uses_marker_after_delay(self):
+        play = object.__new__(Play)
+        play.locked_teammate = None
+        play.locked_teammate_distance = float("inf")
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+        play.teammate_marker_fallback_delay = 1.25
+        play.last_teammate_seen_time = time.time() - 2.0
+        play.get_player_pos = lambda _player: (100, 100)
+        play.find_closest_teammate = lambda *_args, **_kwargs: (None, float("inf"))
+        play.teammate_marker_follow_angle = lambda _player: 0.0
+        play.showdown_roam = lambda *_args, **_kwargs: 180.0
+
+        movement = play.showdown_follow_teammate([90, 90, 110, 110], [], [])
+
+        self.assertEqual(movement, 0.0)
 
     def test_showdown_follow_teammate_keeps_locked_mate_over_new_closer_mate(self):
         play = object.__new__(Play)

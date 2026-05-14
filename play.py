@@ -495,9 +495,11 @@ class Play(Movement):
         self.teammate_follow_step_distance = float(bot_config.get("teammate_follow_step_distance", 8))
         self.teammate_combat_regroup_distance = float(bot_config.get("teammate_combat_regroup_distance", 650))
         self.teammate_combat_bias = float(bot_config.get("teammate_combat_bias", 0.75))
-        self.teammate_follow_force_direct = str(bot_config.get("teammate_follow_force_direct", "yes")).lower() in ("yes", "true", "1")
+        self.teammate_follow_force_direct = str(bot_config.get("teammate_follow_force_direct", "no")).lower() in ("yes", "true", "1")
         self.teammate_marker_follow_enabled = str(bot_config.get("teammate_marker_follow_enabled", "yes")).lower() in ("yes", "true", "1")
         self.teammate_marker_edge_margin = float(bot_config.get("teammate_marker_edge_margin", 0.28))
+        self.teammate_marker_fallback_delay = float(bot_config.get("teammate_marker_fallback_delay", 1.25))
+        self.last_teammate_seen_time = 0.0
         self.wall_history = []
         self.wall_history_length = int(bot_config.get("wall_history_length", 3))
         self.scene_data = []
@@ -872,6 +874,13 @@ class Play(Movement):
             cx, cy = x + bw * 0.5, y + bh * 0.5
             near_edge = cx <= edge_x or cx >= w - edge_x or cy <= edge_y or cy >= h - edge_y
             if not near_edge:
+                continue
+            if cx >= w * 0.70 and cy >= h * 0.55:
+                continue
+            if cx <= w * 0.24 and cy >= h * 0.62:
+                continue
+            aspect = bw / max(1, bh)
+            if aspect < 0.55 or aspect > 1.80:
                 continue
 
             pad = int(max(bw, bh) * 0.45)
@@ -1413,13 +1422,22 @@ class Play(Movement):
         """
         player_pos = self.get_player_pos(player_data)
         closest_teammate, closest_distance = self.choose_locked_teammate(player_pos, teammate_data, walls)
+        if teammate_data:
+            self.last_teammate_seen_time = time.time()
 
         if closest_teammate is None:
             self.locked_teammate = None
             self.locked_teammate_distance = float('inf')
-            marker_angle = self.teammate_marker_follow_angle(player_pos)
-            if marker_angle is not None:
-                return marker_angle
+            last_seen = float(getattr(self, "last_teammate_seen_time", 0.0) or 0.0)
+            marker_delay = float(getattr(self, "teammate_marker_fallback_delay", 1.25))
+            no_recent_teammate = (
+                    last_seen <= 0
+                    or time.time() - last_seen >= marker_delay
+            )
+            if no_recent_teammate:
+                marker_angle = self.teammate_marker_follow_angle(player_pos)
+                if marker_angle is not None:
+                    return marker_angle
             vlog("follow teammate: no teammate detected -> roam")
             return self.showdown_roam(player_data, walls)
 
@@ -1427,7 +1445,11 @@ class Play(Movement):
         direction_y = closest_teammate[1] - player_pos[1]
         direct_angle = self.angle_from_direction(direction_x, direction_y)
 
-        if self.teammate_follow_force_direct and closest_distance > self.teammate_follow_step_distance:
+        if (
+                self.teammate_follow_force_direct
+                and closest_distance > self.teammate_follow_step_distance
+                and not self.is_path_blocked_angle(player_pos, direct_angle, walls)
+        ):
             vlog(f"follow teammate: force direct -> angle={direct_angle:.1f}° (dist={int(closest_distance)}px)")
             return direct_angle
 
