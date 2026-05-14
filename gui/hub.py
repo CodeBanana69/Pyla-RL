@@ -1159,6 +1159,79 @@ class Hub:
 
         row_idx = 0
 
+        title = ctk.CTkLabel(
+            container,
+            text="Discord Notifications",
+            font=("Arial", S(24), "bold"),
+            text_color="#FFFFFF",
+        )
+        title.grid(row=row_idx, column=0, columnspan=2, sticky="w", padx=S(20), pady=(S(14), S(4)))
+        row_idx += 1
+
+        tutorial_text = (
+            "Fast setup for notifications:\n"
+            "1. Open your Discord server settings.\n"
+            "2. Go to Apps or Integrations, then Webhooks.\n"
+            "3. Create a new webhook, copy its Webhook URL, and paste it below.\n"
+            "4. Use Send Discord Test to confirm messages arrive.\n\n"
+            "Optional remote-control bot:\n"
+            "1. Open the Discord Developer Portal and create a New Application.\n"
+            "2. Open Bot, create or reset the token, then paste it into Bot Token.\n"
+            "3. In OAuth2 URL Generator, invite it with the bot and applications.commands scopes.\n"
+            "4. Enable Developer Mode in Discord, then copy your User ID, Channel ID, and Server ID.\n"
+            "5. Restart PylaAi-XXZ after changing the bot token or remote-control settings.\n\n"
+            "Features: match summaries, optional screenshots, stuck pings, target-reached pings, timed/match-count pings, "
+            "and slash commands /start, /stop, and /status when Discord Remote Control is enabled."
+        )
+        tutorial = ctk.CTkLabel(
+            container,
+            text=tutorial_text,
+            justify="left",
+            anchor="w",
+            font=("Arial", S(15)),
+            text_color="#CCCCCC",
+        )
+        tutorial.grid(row=row_idx, column=0, columnspan=2, sticky="we", padx=S(20), pady=(0, S(8)))
+        row_idx += 1
+
+        button_row = ctk.CTkFrame(container, fg_color="transparent")
+        button_row.grid(row=row_idx, column=0, columnspan=2, sticky="w", padx=S(20), pady=(0, S(12)))
+
+        def open_discord_developer_portal():
+            webbrowser.open("https://discord.com/developers/applications")
+
+        def open_discord_webhook_help():
+            webbrowser.open("https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks")
+
+        webhook_help_btn = ctk.CTkButton(
+            button_row,
+            text="Webhook Guide",
+            command=open_discord_webhook_help,
+            fg_color="#AA2A2A",
+            hover_color="#BB3A3A",
+            font=("Arial", S(15), "bold"),
+            corner_radius=S(6),
+            width=S(150),
+            height=S(36),
+        )
+        webhook_help_btn.pack(side="left", padx=(0, S(10)))
+        self.attach_tooltip(webhook_help_btn, "Opens Discord's official webhook guide.")
+
+        developer_portal_btn = ctk.CTkButton(
+            button_row,
+            text="Developer Portal",
+            command=open_discord_developer_portal,
+            fg_color="#AA2A2A",
+            hover_color="#BB3A3A",
+            font=("Arial", S(15), "bold"),
+            corner_radius=S(6),
+            width=S(170),
+            height=S(36),
+        )
+        developer_portal_btn.pack(side="left")
+        self.attach_tooltip(developer_portal_btn, "Opens the Discord Developer Portal for creating the optional remote-control bot.")
+        row_idx += 1
+
         def create_webhook_entry(label_text, config_key, convert_func=str, width=360, show=None):
             nonlocal row_idx
             lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
