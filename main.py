@@ -222,8 +222,15 @@ def pyla_main(data):
             self.last_visual_sample = None
             self.global_freeze_health_interval = float(time_thresholds.get("global_freeze_health_interval", 60.0))
             self.global_freeze_diff_threshold = float(time_thresholds.get("global_freeze_diff_threshold", 0.20))
+            self.global_freeze_emulator_restart_after = int(
+                time_thresholds.get("global_freeze_emulator_restart_after", 2)
+            )
+            self.stale_feed_emulator_restart_after = int(
+                time_thresholds.get("stale_feed_emulator_restart_after", 3)
+            )
             self.last_global_freeze_check = 0.0
             self.last_global_freeze_sample = None
+            self.global_freeze_recovery_attempts = 0
             self.starr_nova_info_check_interval = float(
                 time_thresholds.get("starr_nova_info_check_interval", 60.0)
             )
@@ -363,6 +370,8 @@ def pyla_main(data):
             self.last_visual_sample = None
             self.last_visual_freeze_check = 0.0
             self.last_visual_change_time = time.time()
+            self.last_global_freeze_sample = None
+            self.global_freeze_recovery_attempts = 0
 
         def reset_low_ips_watchdog(self, recovered=True):
             self.low_ips_since = None
@@ -612,15 +621,28 @@ def pyla_main(data):
             diff = float(cv2.absdiff(sample, self.last_global_freeze_sample).mean())
             self.last_global_freeze_sample = sample
             if diff >= self.global_freeze_diff_threshold:
+                self.global_freeze_recovery_attempts = 0
                 return False
 
+            self.global_freeze_recovery_attempts += 1
             print(
                 "Screen health check found no visible change for "
                 f"{self.global_freeze_health_interval:.0f}s (diff {diff:.3f}); "
-                "restarting Brawl Stars and scrcpy."
+                f"recovery attempt {self.global_freeze_recovery_attempts}."
             )
             self.window_controller.keys_up(list("wasd"))
-            self.restart_brawl_stars()
+            if self.global_freeze_recovery_attempts >= self.global_freeze_emulator_restart_after:
+                print("Screen is still frozen after app recovery; restarting emulator profile.")
+                if self.window_controller.restart_emulator_profile():
+                    self.reset_visual_freeze_watchdog()
+                    self.reset_low_ips_watchdog(recovered=False)
+                    self.last_processed_frame_id = -1
+                else:
+                    print("Emulator restart was not available yet; restarting Brawl Stars and scrcpy instead.")
+                    self.restart_brawl_stars()
+            else:
+                print("Restarting Brawl Stars and scrcpy first.")
+                self.restart_brawl_stars()
             return True
 
         def handle_starr_nova_info_screen(self, frame):
@@ -926,10 +948,20 @@ def pyla_main(data):
             self.last_stale_feed_recovery = now
             self.stale_feed_recovery_attempts += 1
 
-            if self.stale_feed_recovery_attempts >= 2 or stale_age > 30:
+            if self.stale_feed_recovery_attempts >= self.stale_feed_emulator_restart_after or stale_age > 60:
+                print("Scrcpy feed is still frozen after recovery attempts; restarting emulator profile.")
+                if self.window_controller.restart_emulator_profile():
+                    self.stale_feed_recovery_attempts = 0
+                    self.reset_visual_freeze_watchdog()
+                    self.reset_low_ips_watchdog(recovered=False)
+                    self.last_processed_frame_id = -1
+                else:
+                    print("Emulator restart was not available yet; restarting Brawl Stars and scrcpy.")
+                    self.restart_brawl_stars()
+            elif self.stale_feed_recovery_attempts >= 2 or stale_age > 30:
                 print("Scrcpy feed is still frozen; restarting Brawl Stars and scrcpy.")
                 if self.restart_brawl_stars():
-                    self.stale_feed_recovery_attempts = 0
+                    self.stale_feed_recovery_attempts = max(1, self.stale_feed_recovery_attempts - 1)
             else:
                 print(f"Scrcpy frame is {age_text}; restarting scrcpy feed.")
                 if not self.window_controller.restart_scrcpy_client():
