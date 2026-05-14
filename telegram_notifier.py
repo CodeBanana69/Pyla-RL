@@ -8,7 +8,7 @@ import aiohttp
 import numpy as np
 from PIL import Image
 
-from utils import _config_bool, load_toml_as_dict, save_dict_as_toml
+from utils import _config_bool, load_toml_as_dict, resolve_project_path, save_dict_as_toml
 
 
 TELEGRAM_CONFIG_PATH = "cfg/telegram_config.toml"
@@ -59,9 +59,9 @@ def _as_chat_ids(value: Any) -> list[str]:
 
 def load_telegram_settings() -> dict[str, Any]:
     settings = {}
-    if Path(TELEGRAM_CONFIG_PATH).exists():
+    if Path(resolve_project_path(TELEGRAM_CONFIG_PATH)).exists():
         settings.update(load_toml_as_dict(TELEGRAM_CONFIG_PATH))
-    if Path(LOCAL_TELEGRAM_CONFIG_PATH).exists():
+    if Path(resolve_project_path(LOCAL_TELEGRAM_CONFIG_PATH)).exists():
         settings.update(load_toml_as_dict(LOCAL_TELEGRAM_CONFIG_PATH))
     settings.setdefault("enabled", False)
     settings["bot_token"] = str(settings.get("bot_token", "")).strip()
@@ -74,7 +74,7 @@ def load_telegram_settings() -> dict[str, Any]:
 
 
 def load_known_chat_ids() -> list[str]:
-    if not Path(TELEGRAM_CHATS_PATH).exists():
+    if not Path(resolve_project_path(TELEGRAM_CHATS_PATH)).exists():
         return []
     chats = load_toml_as_dict(TELEGRAM_CHATS_PATH)
     return _as_chat_ids(chats.get("chat_ids"))

@@ -7,10 +7,11 @@ import pyautogui
 from pathlib import Path
 from PIL import Image
 import tkinter as tk
-from utils import load_toml_as_dict, save_dict_as_toml, get_discord_link, get_dpi_scale
+from utils import load_toml_as_dict, save_dict_as_toml, get_discord_link, get_dpi_scale, resolve_project_path
 from packaging import version
 from performance_profile import apply_performance_profile
 from discord_notifier import async_send_test_notification
+from telegram_notifier import async_send_test_notification as async_send_telegram_test_notification
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -49,6 +50,8 @@ class Hub:
         self.general_config_path = "cfg/general_config.toml"
         self.webhook_config_path = "cfg/discord_config.toml"
         legacy_webhook_config_path = "cfg/webhook_config.toml"
+        self.telegram_base_config_path = "cfg/telegram_config.toml"
+        self.telegram_config_path = "cfg/telegram_config.local.toml"
 
         self.bot_config = load_toml_as_dict(self.bot_config_path)
         self.time_tresholds = load_toml_as_dict(self.time_tresholds_path)
@@ -59,6 +62,9 @@ class Hub:
             save_dict_as_toml(self.webhook_config, self.webhook_config_path)
         else:
             self.webhook_config = load_toml_as_dict(self.webhook_config_path)
+        self.telegram_config = dict(load_toml_as_dict(self.telegram_base_config_path))
+        if Path(resolve_project_path(self.telegram_config_path)).exists():
+            self.telegram_config.update(load_toml_as_dict(self.telegram_config_path))
 
         # -----------------------------------------------------------------------------------------
         # Defaults
@@ -134,6 +140,14 @@ class Hub:
         self.webhook_config.setdefault("discord_control_channel_id", "")
         self.webhook_config.setdefault("discord_control_guild_id", "")
 
+        self.telegram_config.setdefault("enabled", False)
+        self.telegram_config.setdefault("bot_token", "")
+        self.telegram_config.setdefault("notification_chat_ids", [])
+        self.telegram_config.setdefault("send_match_summary", True)
+        self.telegram_config.setdefault("include_screenshot", True)
+        self.telegram_config.setdefault("remote_control_enabled", True)
+        self.telegram_config.setdefault("poll_timeout_seconds", 25)
+
         # -----------------------------------------------------------------------------------------
         # Appearance
         # -----------------------------------------------------------------------------------------
@@ -188,6 +202,7 @@ class Hub:
         self.tab_overview = self.tabview.add("Overview")
         self.tab_additional = self.tabview.add("Additional Settings")
         self.tab_webhook = self.tabview.add("Discord")
+        self.tab_telegram = self.tabview.add("Telegram")
         self.tab_timers = self.tabview.add("Timers")
         self.tab_history = self.tabview.add("Match History")
 
@@ -195,6 +210,7 @@ class Hub:
         self._init_overview_tab()
         self._init_additional_tab()
         self._init_webhook_tab()
+        self._init_telegram_tab()
         self._init_timers_tab()
         self._init_history_tab()
 
@@ -1234,6 +1250,189 @@ class Hub:
         test_btn.grid(row=row_idx, column=0, columnspan=2, padx=S(20), pady=S(12))
         self.attach_tooltip(test_btn, "Sends a Discord test message using the current Discord settings.")
         row_idx += 1
+
+        container.grid_columnconfigure(0, weight=1)
+        container.grid_columnconfigure(1, weight=1)
+
+        self._add_version_label(frame)
+
+    def _init_telegram_tab(self):
+        frame = self.tab_telegram
+        container = ctk.CTkScrollableFrame(frame, width=S(900), height=S(620), fg_color="transparent")
+        container.pack(expand=True, fill="both")
+
+        row_idx = 0
+
+        def save_telegram_config():
+            save_dict_as_toml(self.telegram_config, self.telegram_config_path)
+
+        title = ctk.CTkLabel(
+            container,
+            text="Telegram Bot",
+            font=("Arial", S(24), "bold"),
+            text_color="#FFFFFF",
+        )
+        title.grid(row=row_idx, column=0, columnspan=2, sticky="w", padx=S(20), pady=(S(14), S(4)))
+        row_idx += 1
+
+        tutorial_text = (
+            "Setup:\n"
+            "1. Open Telegram and message @BotFather.\n"
+            "2. Send /newbot, choose a name and username.\n"
+            "3. Copy the token from BotFather into Bot Token.\n"
+            "4. Enable Telegram, then send /start or /help to your new bot once.\n"
+            "5. Optional: paste chat IDs manually, separated by commas."
+        )
+        tutorial = ctk.CTkLabel(
+            container,
+            text=tutorial_text,
+            justify="left",
+            anchor="w",
+            font=("Arial", S(15)),
+            text_color="#CCCCCC",
+        )
+        tutorial.grid(row=row_idx, column=0, columnspan=2, sticky="we", padx=S(20), pady=(0, S(8)))
+        row_idx += 1
+
+        def open_botfather():
+            webbrowser.open("https://t.me/BotFather")
+
+        botfather_btn = ctk.CTkButton(
+            container,
+            text="Open @BotFather",
+            command=open_botfather,
+            fg_color="#AA2A2A",
+            hover_color="#BB3A3A",
+            font=("Arial", S(15), "bold"),
+            corner_radius=S(6),
+            width=S(180),
+            height=S(36),
+        )
+        botfather_btn.grid(row=row_idx, column=0, columnspan=2, sticky="w", padx=S(20), pady=(0, S(12)))
+        self.attach_tooltip(botfather_btn, "Opens Telegram's official bot creator.")
+        row_idx += 1
+
+        def chat_ids_to_text(value):
+            if isinstance(value, (list, tuple, set)):
+                return ", ".join(str(item) for item in value if str(item).strip())
+            return str(value or "")
+
+        def text_to_chat_ids(value):
+            return [part.strip() for part in str(value or "").replace(";", ",").split(",") if part.strip()]
+
+        def create_telegram_entry(label_text, config_key, convert_func=str, width=360, show=None):
+            nonlocal row_idx
+            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+            current_value = self.telegram_config.get(config_key, "")
+            if config_key == "notification_chat_ids":
+                current_value = chat_ids_to_text(current_value)
+            var_str = tk.StringVar(value=str(current_value))
+
+            def on_save(*_):
+                val_str = var_str.get().strip()
+                try:
+                    self.telegram_config[config_key] = convert_func(val_str)
+                    save_telegram_config()
+                except ValueError:
+                    stored = self.telegram_config.get(config_key, "")
+                    if config_key == "notification_chat_ids":
+                        stored = chat_ids_to_text(stored)
+                    var_str.set(str(stored))
+
+            entry = ctk.CTkEntry(container, textvariable=var_str, width=S(width), font=("Arial", S(16)), show=show)
+            entry.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+            entry.bind("<FocusOut>", on_save)
+            entry.bind("<Return>", on_save)
+            row_idx += 1
+            return entry
+
+        def create_telegram_toggle(label_text, config_key):
+            nonlocal row_idx
+            lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
+            lbl.grid(row=row_idx, column=0, sticky="e", padx=S(20), pady=S(10))
+            var_bool = tk.BooleanVar(value=bool(self.telegram_config.get(config_key, False)))
+
+            def on_toggle():
+                self.telegram_config[config_key] = bool(var_bool.get())
+                save_telegram_config()
+
+            checkbox = ctk.CTkCheckBox(
+                container,
+                text="",
+                variable=var_bool,
+                command=on_toggle,
+                fg_color="#AA2A2A",
+                hover_color="#BB3A3A",
+                width=S(30),
+                height=S(30),
+            )
+            checkbox.grid(row=row_idx, column=1, sticky="w", padx=S(20), pady=S(10))
+            row_idx += 1
+
+        create_telegram_toggle("Enable Telegram:", "enabled")
+        create_telegram_entry("Bot Token:", "bot_token", str, width=440, show="*")
+        create_telegram_entry("Notification Chat IDs:", "notification_chat_ids", text_to_chat_ids, width=440)
+        create_telegram_toggle("Send Match Summary:", "send_match_summary")
+        create_telegram_toggle("Include Screenshots:", "include_screenshot")
+        create_telegram_toggle("Telegram Remote Control:", "remote_control_enabled")
+        create_telegram_entry("Poll Timeout Seconds:", "poll_timeout_seconds", lambda s: 25 if s == "" else int(s), width=120)
+
+        status = ctk.CTkLabel(container, text="", font=("Arial", S(14)), text_color="#AAAAAA")
+        status.grid(row=row_idx, column=0, columnspan=2, sticky="n", padx=S(20), pady=(S(6), 0))
+        row_idx += 1
+
+        def send_test_telegram():
+            save_telegram_config()
+            status.configure(text="Sending Telegram test...", text_color="#AAAAAA")
+
+            def worker():
+                try:
+                    ok = asyncio.run(async_send_telegram_test_notification())
+                    message = (
+                        "Telegram test sent."
+                        if ok
+                        else "Telegram test failed. Send /start to the bot once and check the token."
+                    )
+                    color = "#2ECC71" if ok else "#E74C3C"
+                except Exception as exc:
+                    message = f"Telegram test failed: {exc}"
+                    color = "#E74C3C"
+                try:
+                    self.app.after(0, lambda: status.configure(text=message, text_color=color))
+                except Exception:
+                    pass
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        test_btn = ctk.CTkButton(
+            container,
+            text="Send Telegram Test",
+            command=send_test_telegram,
+            fg_color="#AA2A2A",
+            hover_color="#BB3A3A",
+            font=("Arial", S(16), "bold"),
+            corner_radius=S(6),
+            width=S(220),
+            height=S(40),
+        )
+        test_btn.grid(row=row_idx, column=0, columnspan=2, padx=S(20), pady=S(12))
+        self.attach_tooltip(test_btn, "Sends a Telegram test message using the current Telegram settings.")
+        row_idx += 1
+
+        help_text = (
+            "Remote commands after setup: /help, /status, /pause, /resume, /screenshot, /restart_game.\n"
+            "Secrets are saved to cfg/telegram_config.local.toml, which is ignored by Git."
+        )
+        help_label = ctk.CTkLabel(
+            container,
+            text=help_text,
+            justify="left",
+            anchor="w",
+            font=("Arial", S(14)),
+            text_color="#AAAAAA",
+        )
+        help_label.grid(row=row_idx, column=0, columnspan=2, sticky="we", padx=S(20), pady=(S(4), S(12)))
 
         container.grid_columnconfigure(0, weight=1)
         container.grid_columnconfigure(1, weight=1)
