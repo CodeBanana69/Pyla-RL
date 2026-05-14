@@ -217,6 +217,28 @@ class BrawlerApiAutofillTest(unittest.TestCase):
                 os.remove(path)
 
     @patch("utils.refresh_brawl_stars_api_token_if_enabled")
+    def test_default_api_config_merges_local_override(self, mock_refresh):
+        mock_refresh.side_effect = lambda config, file_path: config
+        local_path = utils.LOCAL_BRAWL_STARS_API_CONFIG_PATH
+        try:
+            Path(local_path).write_text(
+                'player_tag = "#LOCAL"\n'
+                'developer_email = "local@example.com"\n'
+                'developer_password = "secret"\n',
+                encoding="utf-8",
+            )
+
+            config = utils.load_brawl_stars_api_config()
+
+            self.assertEqual(config["player_tag"], "#LOCAL")
+            self.assertEqual(config["developer_email"], "local@example.com")
+            self.assertEqual(config["developer_password"], "secret")
+        finally:
+            utils.clear_toml_cache(local_path)
+            if os.path.exists(local_path):
+                os.remove(local_path)
+
+    @patch("utils.refresh_brawl_stars_api_token_if_enabled")
     def test_fallback_parser_accepts_unquoted_credentials_after_toml_error(self, mock_refresh):
         mock_refresh.side_effect = lambda config, file_path: config
         path = "cfg/test_brawl_stars_api_unquoted.toml"
