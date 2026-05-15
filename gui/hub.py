@@ -1808,16 +1808,26 @@ class Hub:
     # ---------------------------------------------------------------------------------------------
     def _init_timers_tab(self):
         frame = self.tab_timers
-        container = ctk.CTkFrame(frame, fg_color="transparent")
-        container.pack(expand=True, fill="both")
+        container = ctk.CTkScrollableFrame(frame, width=S(900), height=S(620), fg_color="transparent")
+        container.pack(expand=True, fill="both", padx=S(10), pady=S(10))
 
         container.grid_rowconfigure(0, minsize=S(70))  # extra top space for tooltips
 
         row_idx = 1
 
-        def create_timer_setting(param_name, label_text, tooltip_text=None, disabled=False):
+        def create_timer_setting(
+                param_name,
+                label_text,
+                tooltip_text=None,
+                disabled=False,
+                min_value=0.1,
+                max_value=10,
+                steps=99,
+                integer=False,
+        ):
             nonlocal row_idx
 
+            self.time_tresholds.setdefault(param_name, 1 if integer else min_value)
             lbl = ctk.CTkLabel(container, text=label_text, font=("Arial", S(18)))
             lbl.grid(row=row_idx, column=0, padx=S(20), pady=S(10), sticky="e")
 
@@ -1830,9 +1840,9 @@ class Hub:
             # The slider
             sld = ctk.CTkSlider(
                 slider_entry_frame,
-                from_=0.1,
-                to=10,
-                number_of_steps=99,
+                from_=min_value,
+                to=max_value,
+                number_of_steps=steps,
                 width=S(200),
                 command=lambda v: on_slider_change(v, val_var, param_name),
                 state=("disabled" if disabled else "normal")
@@ -1857,16 +1867,13 @@ class Hub:
                     val_var.set(str(self.time_tresholds[param_name]))
                     return
                 try:
-                    val = float(new_val_str)
+                    val = int(float(new_val_str)) if integer else float(new_val_str)
+                    val = max(min_value, min(max_value, val))
                     self.time_tresholds[param_name] = val
                     save_dict_as_toml(self.time_tresholds, self.time_tresholds_path)
                     # Update slider visually
-                    if val < 0.1:
-                        sld.set(0.1)
-                    elif val > 10:
-                        sld.set(10)
-                    else:
-                        sld.set(val)
+                    sld.set(val)
+                    val_var.set(str(val) if integer else f"{val:.2f}")
                 except ValueError:
                     val_var.set(str(self.time_tresholds[param_name]))
 
@@ -1876,22 +1883,22 @@ class Hub:
             def on_slider_change(value, v_var, p_name):
                 if disabled:
                     return
-                v = float(value)
+                v = int(round(float(value))) if integer else float(value)
                 # update entry text
-                v_var.set(f"{v:.2f}")
+                v_var.set(str(v) if integer else f"{v:.2f}")
                 self.time_tresholds[p_name] = v
                 save_dict_as_toml(self.time_tresholds, self.time_tresholds_path)
 
             # Initialize slider
             try:
-                init_val = float(self.time_tresholds[param_name])
-                if init_val < 0.1:
-                    init_val = 0.1
-                elif init_val > 10:
-                    init_val = 10
+                init_val = int(float(self.time_tresholds[param_name])) if integer else float(self.time_tresholds[param_name])
+                if init_val < min_value:
+                    init_val = min_value
+                elif init_val > max_value:
+                    init_val = max_value
                 sld.set(init_val)
             except:
-                sld.set(1.0)
+                sld.set(1 if integer else min_value)
 
             # NOTE: We removed "self.attach_tooltip(lbl, tooltip_text)" so the label has no tooltip.
             if tooltip_text and not disabled:
@@ -1924,6 +1931,42 @@ class Hub:
             param_name="no_detection_proceed",
             label_text="No detections proceed Delay:",
             tooltip_text="How often (in seconds) does the bot press Q to proceed when it doesn't find the player but doesn't know in what state it is."
+        )
+        create_timer_setting(
+            param_name="low_ips_recovery_seconds",
+            label_text="Low IPS Recovery Seconds:",
+            tooltip_text="How long IPS must stay low before the bot performs a recovery attempt.",
+            min_value=5,
+            max_value=90,
+            steps=85,
+            integer=True,
+        )
+        create_timer_setting(
+            param_name="low_ips_recovery_cooldown",
+            label_text="Low IPS Cooldown:",
+            tooltip_text="Minimum seconds between low-IPS recovery actions.",
+            min_value=5,
+            max_value=90,
+            steps=85,
+            integer=True,
+        )
+        create_timer_setting(
+            param_name="low_ips_app_restart_after",
+            label_text="Low IPS App Restart Attempt:",
+            tooltip_text="Restart Brawl Stars and scrcpy after this many low-IPS recovery attempts. Use 1 for fastest recovery.",
+            min_value=1,
+            max_value=6,
+            steps=5,
+            integer=True,
+        )
+        create_timer_setting(
+            param_name="low_ips_emulator_restart_after",
+            label_text="Low IPS Emulator Restart Attempt:",
+            tooltip_text="Restart the whole emulator profile after this many failed low-IPS recoveries.",
+            min_value=1,
+            max_value=10,
+            steps=9,
+            integer=True,
         )
 
         container.grid_columnconfigure(0, weight=1)

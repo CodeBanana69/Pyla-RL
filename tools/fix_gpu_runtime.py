@@ -41,6 +41,27 @@ def install_variant(variant):
     run([sys.executable, "-m", "pip", "install", "--upgrade", package])
 
 
+def prepare_cuda_dll_paths():
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from cuda_runtime_paths import add_cuda_dll_directories, has_cuda_dependency_dlls
+
+    added_paths = add_cuda_dll_directories(verbose=True)
+    ok, missing = has_cuda_dependency_dlls()
+    if not ok:
+        print()
+        print(
+            "WARNING: CUDA provider files are installed, but these CUDA DLLs were not found: "
+            + ", ".join(missing)
+        )
+        print("Run this command again with Python 3.11 64-bit so PyTorch CUDA wheels install correctly:")
+        print("py -3.11-64 tools\\fix_gpu_runtime.py cuda")
+    elif added_paths:
+        print("CUDA dependency DLLs found.")
+    return ok
+
+
 def update_config(variant):
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
@@ -72,6 +93,9 @@ def main():
         update_config(args.variant)
     except Exception as exc:
         print(f"WARNING: Could not update cfg/general_config.toml automatically: {exc}")
+
+    if args.variant == "cuda":
+        prepare_cuda_dll_paths()
 
     import onnxruntime as ort
 

@@ -27,5 +27,5 @@ low_ips_match_grace_seconds = 12
 low_ips_feed_restart_seconds = 18
 low_ips_recovery_seconds = 45
 low_ips_recovery_cooldown = 35
-low_ips_app_restart_after = 3
+low_ips_app_restart_after = 1
 low_ips_emulator_restart_after = 6

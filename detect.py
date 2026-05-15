@@ -4,6 +4,9 @@ import warnings
 
 import cv2
 import numpy as np
+from cuda_runtime_paths import add_cuda_dll_directories
+
+add_cuda_dll_directories()
 import onnxruntime as ort
 
 from utils import load_toml_as_dict
