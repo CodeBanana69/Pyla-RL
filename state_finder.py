@@ -310,51 +310,6 @@ def mask_ratio(crop, lower, upper):
     return cv2.countNonZero(mask) / max(1, crop.shape[0] * crop.shape[1])
 
 
-def get_team_invite_reject_button_center(image, image_is_rgb=False):
-    if image is None or image.size == 0:
-        return None
-    image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if image_is_rgb else image
-    crop = crop_scaled_region(image_bgr, [560, 590, 780, 170])
-    if crop.size == 0:
-        return None
-
-    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-    red_low = cv2.inRange(
-        hsv,
-        np.array((0, 100, 100), dtype=np.uint8),
-        np.array((12, 255, 255), dtype=np.uint8),
-    )
-    red_high = cv2.inRange(
-        hsv,
-        np.array((170, 100, 100), dtype=np.uint8),
-        np.array((179, 255, 255), dtype=np.uint8),
-    )
-    red_mask = cv2.bitwise_or(red_low, red_high)
-    red_mask = cv2.morphologyEx(red_mask, cv2.MORPH_CLOSE, np.ones((7, 7), dtype=np.uint8))
-    contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-
-    min_area = max(900, crop.shape[0] * crop.shape[1] * 0.08)
-    candidates = []
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        bx, by, bw, bh = cv2.boundingRect(contour)
-        if area < min_area or bw < crop.shape[1] * 0.20 or bh < crop.shape[0] * 0.35:
-            continue
-        candidates.append((area, bx, by, bw, bh))
-    if not candidates:
-        return None
-
-    _, bx, by, bw, bh = max(candidates, key=lambda item: item[0])
-    current_height, current_width = image_bgr.shape[:2]
-    width_ratio = current_width / orig_screen_width
-    height_ratio = current_height / orig_screen_height
-    x = int(560 * width_ratio) + bx + bw // 2
-    y = int(590 * height_ratio) + by + bh // 2
-    return x, y
-
-
 def get_starr_nova_got_it_button_center(image):
     current_height, current_width = image.shape[:2]
     width_ratio = current_width / orig_screen_width

@@ -12,7 +12,6 @@ from state_finder import (
     find_game_result,
     is_in_prestige_reward,
     get_prestige_next_button_center,
-    get_team_invite_reject_button_center,
     get_star_drop_type,
     get_skin_reward_equip_button_center,
     get_skin_reward_continue_button_center,
@@ -941,12 +940,6 @@ class StageManager:
 
     def close_pop_up(self):
         screenshot = self.window_controller.screenshot()
-        team_invite_reject = get_team_invite_reject_button_center(screenshot, image_is_rgb=True)
-        if team_invite_reject is not None:
-            self.window_controller.keys_up(list("wasd"))
-            self.window_controller.click(*team_invite_reject)
-            self.tap_with_adb_fallback(*team_invite_reject, screenshot_shape=screenshot.shape)
-            return
         if self.close_popup_icon is None:
             self.close_popup_icon = load_image("images/states/close_popup.png", self.window_controller.scale_factor)
         popup_location = find_template_center(screenshot, self.close_popup_icon)

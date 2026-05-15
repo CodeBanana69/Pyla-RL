@@ -8,7 +8,6 @@ import numpy as np
 from stage_manager import StageManager
 from state_finder import (
     get_prestige_next_button_center,
-    get_team_invite_reject_button_center,
     is_in_prestige_reward,
 )
 
@@ -55,24 +54,6 @@ class DummyWindowController:
 
 
 class PrestigeRewardTests(unittest.TestCase):
-    @staticmethod
-    def draw_team_invite_screen(image):
-        blue = cv2.cvtColor(
-            np.full((1, 1, 3), (105, 220, 230), dtype=np.uint8),
-            cv2.COLOR_HSV2BGR,
-        )[0, 0]
-        red = cv2.cvtColor(
-            np.full((1, 1, 3), (2, 220, 230), dtype=np.uint8),
-            cv2.COLOR_HSV2BGR,
-        )[0, 0]
-        green = cv2.cvtColor(
-            np.full((1, 1, 3), (60, 220, 230), dtype=np.uint8),
-            cv2.COLOR_HSV2BGR,
-        )[0, 0]
-        image[220:860, 550:1370] = blue
-        image[620:730, 615:950] = red
-        image[620:730, 970:1305] = green
-
     @staticmethod
     def draw_prestige_screen(image, button_box=(1240, 930, 340, 100)):
         green = cv2.cvtColor(
@@ -299,30 +280,6 @@ class PrestigeRewardTests(unittest.TestCase):
         manager.last_recorded_result_time = time.time() - 31
         manager.time_since_last_stat_change = time.time() - 31
         self.assertFalse(manager.had_recent_trophy_change(seconds=30.0))
-
-    def test_team_invite_reject_releases_movement_and_uses_adb_fallback(self):
-        manager = object.__new__(StageManager)
-        manager.window_controller = DummyWindowController()
-        manager.last_team_invite_reject_time = 0.0
-        screenshot_bgr = np.zeros((1080, 1920, 3), dtype=np.uint8)
-        self.draw_team_invite_screen(screenshot_bgr)
-        screenshot_rgb = cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2RGB)
-        manager.window_controller.screenshot = lambda: screenshot_rgb
-        center = get_team_invite_reject_button_center(screenshot_rgb, image_is_rgb=True)
-        adb_taps = []
-
-        def adb_fallback(x, y, screenshot_shape=None):
-            adb_taps.append((x, y, screenshot_shape))
-            return True
-
-        manager.tap_with_adb_fallback = adb_fallback
-
-        manager.close_pop_up()
-
-        self.assertIn(list("wasd"), manager.window_controller.keys_released)
-        self.assertIn(center, manager.window_controller.clicks)
-        self.assertEqual(adb_taps, [(center[0], center[1], screenshot_rgb.shape)])
-
 
 if __name__ == "__main__":
     unittest.main()

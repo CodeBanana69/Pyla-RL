@@ -57,6 +57,30 @@ class PushAll1kSelectionTest(unittest.TestCase):
         self.assertTrue(reordered[1]["automatically_pick"])
         self.assertTrue(reordered[2]["automatically_pick"])
 
+    def test_push_all_priority_order_moves_selected_brawlers_first(self):
+        obj = object.__new__(SelectBrawler)
+        obj.push_all_priority_order = ["spike", "max"]
+        data = [
+            {"brawler": "shelly", "automatically_pick": False, "selection_method": "lowest_trophies"},
+            {"brawler": "max", "automatically_pick": True, "selection_method": "lowest_trophies"},
+            {"brawler": "spike", "automatically_pick": True, "selection_method": "lowest_trophies"},
+        ]
+
+        ordered = SelectBrawler.apply_push_all_priority_order(obj, data)
+
+        self.assertEqual([row["brawler"] for row in ordered], ["spike", "max", "shelly"])
+        self.assertTrue(all(row["automatically_pick"] for row in ordered))
+        self.assertEqual(ordered[0]["selection_method"], "named_brawler")
+        self.assertEqual(ordered[1]["selection_method"], "named_brawler")
+        self.assertEqual(ordered[2]["selection_method"], "lowest_trophies")
+
+    def test_empty_push_all_priority_order_keeps_normal_data(self):
+        obj = object.__new__(SelectBrawler)
+        obj.push_all_priority_order = []
+        data = [{"brawler": "shelly", "automatically_pick": False}]
+
+        self.assertIs(SelectBrawler.apply_push_all_priority_order(obj, data), data)
+
     def test_push_all_target_filters_and_sets_target_amount(self):
         obj = object.__new__(SelectBrawler)
         obj.brawlers = ["shelly", "colt", "meg"]

@@ -25,6 +25,7 @@ from utils import (
 from tkinter import filedialog
 
 from gui.main import install_tk_background_error_filter
+from gui.theme import THEME
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -52,15 +53,15 @@ class SelectBrawler:
         self.app.geometry(f"{str(int(860 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")
         self.data_setter = data_setter
         self.colors = {
-            'gray': "#7d7777",
-            'red': "#cd5c5c",
-            'darker_white': '#c4c4c4',
-            'dark gray': '#1c1c1c',
-            'cherry red': '#960a00',
-            'ui box gray': '#242424',
-            'chess white': '#f0d9b5',
-            'chess brown': '#b58863',
-            'indian red': "#cd5c5c"
+            'gray': THEME["border"],
+            'red': THEME["accent_hover"],
+            'darker_white': THEME["muted"],
+            'dark gray': THEME["bg"],
+            'cherry red': THEME["accent"],
+            'ui box gray': THEME["surface"],
+            'chess white': THEME["text"],
+            'chess brown': THEME["surface_3"],
+            'indian red': THEME["accent_hover"]
         }
 
         self.app.configure(fg_color=self.colors['ui box gray'])
@@ -68,7 +69,11 @@ class SelectBrawler:
 
 
         self.images = []
+        self.image_by_brawler = {}
         self.visible_image_labels = []
+        self.push_all_priority_order = []
+        self._push_order_drag_brawler = None
+        self._push_order_queue_frames = []
         self.brawlers_data = []
         self.farm_type = ""
         self.api_trophies_by_brawler = None
@@ -93,6 +98,7 @@ class SelectBrawler:
 
             img_tk = CTkImage(img, size=(square_size, square_size))
             self.images.append((brawler, img_tk))  # Store tuple of brawler name and image
+            self.image_by_brawler[brawler] = img_tk
 
         # Entry widget for filtering
         self.filter_var = tk.StringVar()
@@ -130,13 +136,23 @@ class SelectBrawler:
         ctk.CTkButton(self.app, text="Start", command=self.start_bot, fg_color=self.colors['ui box gray'],
                       text_color="white",
                       font=("Comic sans MS", int(25 * scale_factor)), border_color=self.colors['cherry red'],
-                      border_width=int(2 * scale_factor)).place(x=int(390 * scale_factor), y=int((window_height-60* scale_factor) ))
+                      border_width=int(2 * scale_factor), width=int(140 * scale_factor)).place(
+            x=int(360 * scale_factor),
+            y=int((window_height - 60 * scale_factor))
+        )
 
         ctk.CTkButton(self.app, text="Push All", command=self.open_push_all_target_window, fg_color=self.colors['ui box gray'],
                       text_color="white",
                       font=("Comic sans MS", int(25 * scale_factor)), border_color=self.colors['cherry red'],
-                      border_width=int(2 * scale_factor)).place(x=int(10 * scale_factor),
+                      border_width=int(2 * scale_factor), width=int(140 * scale_factor)).place(x=int(72 * scale_factor),
                                                                 y=int((window_height-60* scale_factor) ))
+        ctk.CTkButton(self.app, text="Push Order", command=self.open_push_order_window, fg_color=self.colors['ui box gray'],
+                      text_color="white",
+                      font=("Comic sans MS", int(20 * scale_factor)), border_color=self.colors['cherry red'],
+                      border_width=int(2 * scale_factor), width=int(150 * scale_factor)).place(
+            x=int(638 * scale_factor),
+            y=int((window_height - 57 * scale_factor))
+        )
 
         self.app.mainloop()
 
@@ -271,6 +287,301 @@ class SelectBrawler:
 
     def get_push_all_1k_data(self):
         return self.get_push_all_data(1000)
+
+    def apply_push_all_priority_order(self, data):
+        priority_order = [
+            brawler
+            for brawler in self.push_all_priority_order
+            if any(row.get("brawler") == brawler for row in data)
+        ]
+        if not priority_order:
+            return data
+
+        priority_index = {brawler: index for index, brawler in enumerate(priority_order)}
+        priority_rows = []
+        remaining_rows = []
+        for row in data:
+            if row.get("brawler") in priority_index:
+                priority_rows.append(dict(row))
+            else:
+                remaining_rows.append(dict(row))
+
+        priority_rows.sort(key=lambda row: priority_index[row.get("brawler")])
+        ordered = priority_rows + remaining_rows
+        for index, row in enumerate(ordered):
+            row["automatically_pick"] = True if priority_rows else index != 0
+            if row.get("brawler") in priority_index:
+                row["selection_method"] = "named_brawler"
+        print("Push All priority order:", [row.get("brawler") for row in ordered[:len(priority_rows)]])
+        return ordered
+
+    def add_push_order_brawler(self, brawler):
+        if brawler not in self.brawlers or brawler in self.push_all_priority_order:
+            return
+        self.push_all_priority_order.append(brawler)
+
+    def remove_push_order_brawler(self, brawler):
+        self.push_all_priority_order = [
+            queued for queued in self.push_all_priority_order
+            if queued != brawler
+        ]
+
+    def move_push_order_brawler(self, brawler, target_index):
+        if brawler not in self.push_all_priority_order:
+            return False
+        self.push_all_priority_order.remove(brawler)
+        target_index = max(0, min(int(target_index), len(self.push_all_priority_order)))
+        self.push_all_priority_order.insert(target_index, brawler)
+        return True
+
+    def push_order_drop_index(self, pointer_x):
+        if not self._push_order_queue_frames:
+            return 0
+        for index, frame in enumerate(self._push_order_queue_frames):
+            try:
+                midpoint = frame.winfo_rootx() + frame.winfo_width() / 2
+            except Exception:
+                continue
+            if pointer_x < midpoint:
+                return index
+        return len(self._push_order_queue_frames)
+
+    def open_push_order_window(self):
+        top = ctk.CTkToplevel(self.app)
+        top.configure(fg_color=self.colors['ui box gray'])
+        top.title("Push Order")
+        top.attributes("-topmost", True)
+        win_w = int(860 * scale_factor)
+        win_h = int(560 * scale_factor)
+        top.geometry(f"{win_w}x{win_h}+{str(int(820 * scale_factor))}+{str(int(180 * scale_factor))}")
+
+        header_frame = ctk.CTkFrame(top, fg_color=self.colors['ui box gray'])
+        header_frame.pack(fill="x", padx=int(18 * scale_factor), pady=(int(14 * scale_factor), int(4 * scale_factor)))
+
+        ctk.CTkLabel(
+            header_frame,
+            text="Push Order",
+            font=("Comic sans MS", int(24 * scale_factor), "bold"),
+            text_color=self.colors['red'],
+            anchor="w",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            header_frame,
+            text="Drag brawlers into the priority line. Empty line = normal Push All.",
+            font=("Comic sans MS", int(14 * scale_factor)),
+            text_color=self.colors['chess white'],
+            anchor="w",
+        ).pack(anchor="w", pady=(int(2 * scale_factor), 0))
+
+        ctk.CTkLabel(
+            top,
+            text="Priority line",
+            font=("Comic sans MS", int(15 * scale_factor), "bold"),
+            text_color=self.colors['chess white'],
+        ).pack(anchor="w", padx=int(22 * scale_factor), pady=(int(8 * scale_factor), 0))
+
+        queue_frame = ctk.CTkScrollableFrame(
+            top,
+            fg_color=self.colors['dark gray'],
+            border_color=self.colors['cherry red'],
+            border_width=int(1 * scale_factor),
+            width=int(810 * scale_factor),
+            height=int(92 * scale_factor),
+            orientation="horizontal",
+        )
+        queue_frame.pack(padx=int(18 * scale_factor), pady=(int(4 * scale_factor), int(8 * scale_factor)), fill="x")
+
+        action_frame = ctk.CTkFrame(top, fg_color=self.colors['ui box gray'])
+        action_frame.pack(fill="x", padx=int(18 * scale_factor), pady=(0, int(8 * scale_factor)))
+
+        ctk.CTkLabel(
+            top,
+            text="Brawlers",
+            font=("Comic sans MS", int(15 * scale_factor), "bold"),
+            text_color=self.colors['chess white'],
+        ).pack(anchor="w", padx=int(22 * scale_factor), pady=(int(2 * scale_factor), 0))
+
+        grid_frame = ctk.CTkScrollableFrame(
+            top,
+            fg_color=self.colors['dark gray'],
+            border_color=self.colors['gray'],
+            border_width=int(1 * scale_factor),
+            width=int(810 * scale_factor),
+            height=int(305 * scale_factor),
+        )
+        grid_frame.pack(padx=int(18 * scale_factor), pady=(int(4 * scale_factor), int(12 * scale_factor)), fill="both", expand=True)
+
+        grid_cards = {}
+        selected_count_label = ctk.CTkLabel(
+            action_frame,
+            text="0 selected",
+            font=("Comic sans MS", int(13 * scale_factor), "bold"),
+            text_color=self.colors['chess white'],
+        )
+        selected_count_label.pack(side="left", padx=(int(8 * scale_factor), int(14 * scale_factor)))
+
+        def refresh_grid_state():
+            queued_brawlers = set(self.push_all_priority_order)
+            selected_count_label.configure(text=f"{len(queued_brawlers)} selected")
+            for brawler, widgets in grid_cards.items():
+                queued = brawler in queued_brawlers
+                widgets["frame"].configure(
+                    border_color=self.colors['cherry red'] if queued else self.colors['gray'],
+                    border_width=int(2 * scale_factor) if queued else int(1 * scale_factor),
+                )
+                widgets["name"].configure(text=f"{brawler}{' *' if queued else ''}")
+
+        def refresh_order_view():
+            render_queue()
+            refresh_grid_state()
+
+        def render_queue():
+            self._push_order_queue_frames = []
+            for widget in queue_frame.winfo_children():
+                widget.destroy()
+            if not self.push_all_priority_order:
+                ctk.CTkLabel(
+                    queue_frame,
+                    text="Drop brawlers here. Leave empty for normal Push All.",
+                    font=("Comic sans MS", int(15 * scale_factor)),
+                    text_color=self.colors['gray'],
+                ).grid(row=0, column=0, padx=int(14 * scale_factor), pady=int(24 * scale_factor), sticky="w")
+                return
+
+            for index, brawler in enumerate(self.push_all_priority_order):
+                frame = ctk.CTkFrame(
+                    queue_frame,
+                    fg_color=self.colors['ui box gray'],
+                    border_color=self.colors['cherry red'],
+                    border_width=int(2 * scale_factor),
+                    width=int(124 * scale_factor),
+                    height=int(72 * scale_factor),
+                )
+                frame.grid(row=0, column=index, padx=int(6 * scale_factor), pady=int(7 * scale_factor))
+                frame.grid_propagate(False)
+                self._push_order_queue_frames.append(frame)
+
+                img_tk = self.image_by_brawler.get(brawler)
+                if img_tk is not None:
+                    icon = ctk.CTkLabel(frame, image=img_tk, text="", width=int(44 * scale_factor), height=int(44 * scale_factor))
+                    icon.place(x=int(4 * scale_factor), y=int(13 * scale_factor))
+                    icon._pyla_image_ref = img_tk
+                    drag_widgets = [frame, icon]
+                else:
+                    drag_widgets = [frame]
+
+                label = ctk.CTkLabel(
+                    frame,
+                    text=f"{index + 1}. {brawler}",
+                    font=("Comic sans MS", int(11 * scale_factor)),
+                    text_color="white",
+                    width=int(60 * scale_factor),
+                    anchor="w",
+                )
+                label.place(x=int(52 * scale_factor), y=int(18 * scale_factor))
+                remove_btn = ctk.CTkButton(
+                    frame,
+                    text="X",
+                    command=lambda b=brawler: (self.remove_push_order_brawler(b), refresh_order_view()),
+                    fg_color=self.colors['cherry red'],
+                    hover_color=self.colors['red'],
+                    text_color="white",
+                    font=("Arial", int(10 * scale_factor), "bold"),
+                    width=int(20 * scale_factor),
+                    height=int(20 * scale_factor),
+                )
+                remove_btn.place(x=int(92 * scale_factor), y=int(4 * scale_factor))
+
+                for widget in drag_widgets + [label]:
+                    widget.bind("<ButtonPress-1>", lambda event, b=brawler: self._start_push_order_drag(b))
+                    widget.bind("<ButtonRelease-1>", lambda event: self._finish_push_order_drag(event, refresh_order_view))
+
+        def render_grid():
+            grid_cards.clear()
+            for widget in grid_frame.winfo_children():
+                widget.destroy()
+            for index, (brawler, img_tk) in enumerate(self.images):
+                frame = ctk.CTkFrame(
+                    grid_frame,
+                    fg_color=self.colors['ui box gray'],
+                    border_color=self.colors['gray'],
+                    border_width=int(1 * scale_factor),
+                    width=int(86 * scale_factor),
+                    height=int(102 * scale_factor),
+                )
+                frame.grid(row=index // 8, column=index % 8, padx=int(7 * scale_factor), pady=int(7 * scale_factor))
+                frame.grid_propagate(False)
+                label = ctk.CTkLabel(frame, image=img_tk, text="")
+                label._pyla_image_ref = img_tk
+                label.pack(pady=(int(5 * scale_factor), 0))
+                name = ctk.CTkLabel(
+                    frame,
+                    text=brawler,
+                    font=("Comic sans MS", int(10 * scale_factor)),
+                    text_color="white",
+                    width=int(78 * scale_factor),
+                )
+                name.pack(pady=(0, int(4 * scale_factor)))
+                grid_cards[brawler] = {"frame": frame, "name": name}
+                for widget in (frame, label, name):
+                    widget.bind("<ButtonPress-1>", lambda event, b=brawler: self._start_push_order_drag(b))
+                    widget.bind("<ButtonRelease-1>", lambda event, b=brawler: self._finish_push_order_add(event, b, queue_frame, refresh_order_view))
+                    widget.bind("<Double-Button-1>", lambda event, b=brawler: (self.add_push_order_brawler(b), refresh_order_view()))
+            refresh_grid_state()
+
+        ctk.CTkButton(
+            action_frame,
+            text="Clear Order",
+            command=lambda: (self.push_all_priority_order.clear(), refresh_order_view()),
+            fg_color=self.colors['ui box gray'],
+            hover_color=self.colors['cherry red'],
+            text_color="white",
+            border_color=self.colors['cherry red'],
+            border_width=int(2 * scale_factor),
+            width=int(120 * scale_factor),
+        ).pack(side="left", padx=int(6 * scale_factor))
+        ctk.CTkButton(
+            action_frame,
+            text="Done",
+            command=top.destroy,
+            fg_color=self.colors['cherry red'],
+            hover_color=self.colors['red'],
+            text_color="white",
+            width=int(110 * scale_factor),
+        ).pack(side="right", padx=int(6 * scale_factor))
+
+        render_queue()
+        render_grid()
+
+    def _start_push_order_drag(self, brawler):
+        self._push_order_drag_brawler = brawler
+
+    def _finish_push_order_add(self, event, brawler, queue_frame, refresh_order_view):
+        self._push_order_drag_brawler = None
+        try:
+            x = event.widget.winfo_pointerx()
+            y = event.widget.winfo_pointery()
+            inside_queue = (
+                queue_frame.winfo_rootx() <= x <= queue_frame.winfo_rootx() + queue_frame.winfo_width()
+                and queue_frame.winfo_rooty() <= y <= queue_frame.winfo_rooty() + queue_frame.winfo_height()
+            )
+        except Exception:
+            inside_queue = False
+        if inside_queue:
+            self.add_push_order_brawler(brawler)
+            refresh_order_view()
+
+    def _finish_push_order_drag(self, event, refresh_order_view):
+        brawler = self._push_order_drag_brawler
+        self._push_order_drag_brawler = None
+        if not brawler:
+            return
+        try:
+            pointer_x = event.widget.winfo_pointerx()
+        except Exception:
+            return
+        if self.move_push_order_brawler(brawler, self.push_order_drop_index(pointer_x)):
+            refresh_order_view()
 
     @staticmethod
     def _match_brawler_from_ocr_texts(texts, known_brawlers):
@@ -523,9 +834,11 @@ class SelectBrawler:
                 print(f"Push All: no brawlers below {target_trophies} trophies were found.")
                 self.app.deiconify()
                 return
-            selected_serial, selected_brawler = self.quick_select_least_trophies_brawler()
-            if selected_brawler:
-                data = self._move_brawler_to_front(data, selected_brawler)
+            data = self.apply_push_all_priority_order(data)
+            if not self.push_all_priority_order:
+                selected_serial, selected_brawler = self.quick_select_least_trophies_brawler()
+                if selected_brawler:
+                    data = self._move_brawler_to_front(data, selected_brawler)
             print(f"Push All {target_trophies} first brawler:", data[0])
             self.brawlers_data = data
             self.start_bot()

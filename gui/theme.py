@@ -1,0 +1,18 @@
+THEME = {
+    "bg": "#0f172a",
+    "surface": "#162033",
+    "surface_2": "#1f2a3d",
+    "surface_3": "#273449",
+    "border": "#3b4a62",
+    "accent": "#2f8cff",
+    "accent_hover": "#54a3ff",
+    "accent_dark": "#1d5fbf",
+    "danger": "#ef4444",
+    "danger_hover": "#f87171",
+    "success": "#22c55e",
+    "warning": "#f59e0b",
+    "text": "#f8fafc",
+    "muted": "#94a3b8",
+    "muted_2": "#64748b",
+    "link": "#38bdf8",
+}

@@ -198,7 +198,7 @@ class LobbyStateFallbackTests(unittest.TestCase):
         self.assertFalse(is_lobby_hud_visible(image))
         self.assertEqual(get_in_game_state(image), "match")
 
-    def test_team_invite_popup_is_ignored_by_state_detection(self):
+    def test_red_green_overlay_is_ignored_by_state_detection(self):
         image = np.zeros((1080, 1920, 3), dtype=np.uint8)
         blue_bgr = cv2.cvtColor(
             np.full((1, 1, 3), (105, 220, 230), dtype=np.uint8),
