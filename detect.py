@@ -63,7 +63,10 @@ def _build_providers(preferred_device):
             cuda_provider = (
                 "CUDAExecutionProvider",
                 {
-                    "cudnn_conv_algo_search": "DEFAULT",
+                    "cudnn_conv_algo_search": "EXHAUSTIVE",
+                    "cudnn_conv_use_max_workspace": "1",
+                    "do_copy_in_default_stream": "1",
+                    "use_tf32": "1",
                 },
             )
             providers.append(cuda_provider)

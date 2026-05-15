@@ -24,6 +24,18 @@ class ProviderSelectionTests(unittest.TestCase):
         providers = _build_providers("cuda")
         self.assertEqual(providers[0][0], "CUDAExecutionProvider")
 
+    @patch("detect.ort.get_available_providers", return_value=[
+        "CUDAExecutionProvider",
+        "DmlExecutionProvider",
+        "CPUExecutionProvider",
+    ])
+    def test_cuda_provider_uses_fast_cudnn_options(self, *_):
+        providers = _build_providers("cuda")
+        options = providers[0][1]
+        self.assertEqual(options["cudnn_conv_algo_search"], "EXHAUSTIVE")
+        self.assertEqual(options["cudnn_conv_use_max_workspace"], "1")
+        self.assertEqual(options["use_tf32"], "1")
+
     @patch("easyocr.Reader")
     def test_easyocr_is_forced_to_cpu(self, mock_reader):
         DefaultEasyOCR()
