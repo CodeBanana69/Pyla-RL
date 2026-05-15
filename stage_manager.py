@@ -290,6 +290,9 @@ class StageManager:
         try:
             loop.run_until_complete(async_notify_user(event_type, screenshot, details=details or {}))
         finally:
+            loop.run_until_complete(asyncio.sleep(0.25))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            asyncio.set_event_loop(None)
             loop.close()
 
     def current_target_details(self, extra=None):

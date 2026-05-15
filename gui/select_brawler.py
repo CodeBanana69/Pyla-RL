@@ -44,8 +44,8 @@ class SelectBrawler:
         square_size = int(75 * scale_factor)
         amount_of_rows = ceil(len(brawlers)/10) + 1
         necessary_height = (int(145 * scale_factor) + amount_of_rows*square_size + (amount_of_rows-1)*int(3 * scale_factor))
-        window_height = min(necessary_height, int(820 * scale_factor))
-        image_frame_height = max(int(240 * scale_factor), window_height - int(190 * scale_factor))
+        window_height = min(necessary_height + int(95 * scale_factor), int(900 * scale_factor))
+        image_frame_height = max(int(240 * scale_factor), window_height - int(285 * scale_factor))
         self.app.title(f"PylaAi-XXZ v{pyla_version}")
         self.brawlers = brawlers
 
@@ -68,7 +68,10 @@ class SelectBrawler:
 
 
         self.images = []
+        self.image_by_brawler = {}
         self.visible_image_labels = []
+        self.queue_item_frames = []
+        self._drag_queue_brawler = None
         self.brawlers_data = []
         self.farm_type = ""
         self.api_trophies_by_brawler = None
@@ -93,6 +96,7 @@ class SelectBrawler:
 
             img_tk = CTkImage(img, size=(square_size, square_size))
             self.images.append((brawler, img_tk))  # Store tuple of brawler name and image
+            self.image_by_brawler[brawler] = img_tk
 
         # Entry widget for filtering
         self.filter_var = tk.StringVar()
@@ -117,6 +121,22 @@ class SelectBrawler:
         self.filter_entry.place(x=search_x, y=int(scale_factor * 52))
         self.filter_var.trace_add("write", lambda *args: self.queue_image_filter_update())
 
+        ctk.CTkLabel(
+            self.app,
+            text="Queue: drag brawlers to set play order",
+            font=("Comic sans MS", int(16 * scale_factor)),
+            text_color=self.colors['chess white'],
+        ).place(x=int(10 * scale_factor), y=int(92 * scale_factor))
+
+        self.queue_frame = ctk.CTkScrollableFrame(
+            self.app,
+            fg_color=self.colors['dark gray'],
+            width=int(835 * scale_factor),
+            height=int(74 * scale_factor),
+            orientation="horizontal",
+        )
+        self.queue_frame.place(x=int(10 * scale_factor), y=int(118 * scale_factor))
+
         # Frame to hold the images
         self.image_frame = ctk.CTkScrollableFrame(
             self.app,
@@ -124,8 +144,9 @@ class SelectBrawler:
             width=int(845 * scale_factor),
             height=image_frame_height,
         )
-        self.image_frame.place(x=0, y=int(100 * scale_factor))
+        self.image_frame.place(x=0, y=int(200 * scale_factor))
 
+        self.update_queue_strip()
         self.update_images("")
         ctk.CTkButton(self.app, text="Start", command=self.start_bot, fg_color=self.colors['ui box gray'],
                       text_color="white",
@@ -227,6 +248,8 @@ class SelectBrawler:
                             if not (bd["push_until"] <= bd[bd["type"]])
                         ]
                         self.brawlers_data = brawlers_data
+                        self.normalize_queue_order_flags()
+                        self.update_queue_strip()
                         print("Brawler data loaded successfully :", brawlers_data)
                     except Exception as e:
                         print("Invalid data format. Expected a list of brawler data.", e)
@@ -314,6 +337,141 @@ class SelectBrawler:
         for index, row in enumerate(reordered):
             row["automatically_pick"] = index != 0
         return reordered
+
+    def normalize_queue_order_flags(self):
+        for index, item in enumerate(self.brawlers_data):
+            item["automatically_pick"] = index != 0
+        return self.brawlers_data
+
+    def get_queue_drop_index(self, pointer_x):
+        frames = [frame for frame, _ in self.queue_item_frames]
+        if not frames:
+            return 0
+        for index, frame in enumerate(frames):
+            try:
+                midpoint = frame.winfo_rootx() + frame.winfo_width() / 2
+            except Exception:
+                continue
+            if pointer_x < midpoint:
+                return index
+        return len(frames)
+
+    def move_queue_item(self, brawler, target_index):
+        current_index = None
+        for index, item in enumerate(self.brawlers_data):
+            if item.get("brawler") == brawler:
+                current_index = index
+                break
+        if current_index is None:
+            return False
+
+        item = self.brawlers_data.pop(current_index)
+        target_index = max(0, min(int(target_index), len(self.brawlers_data)))
+        self.brawlers_data.insert(target_index, item)
+        self.normalize_queue_order_flags()
+        self.update_queue_strip()
+        print("Queue reordered:", [row.get("brawler") for row in self.brawlers_data])
+        return True
+
+    def remove_queue_item(self, brawler):
+        before = len(self.brawlers_data)
+        self.brawlers_data = [item for item in self.brawlers_data if item.get("brawler") != brawler]
+        if len(self.brawlers_data) == before:
+            return
+        self.normalize_queue_order_flags()
+        self.update_queue_strip()
+        print("Queue updated:", [row.get("brawler") for row in self.brawlers_data])
+
+    def update_queue_strip(self):
+        if not hasattr(self, "queue_frame"):
+            return
+        self.queue_item_frames = []
+        for widget in self.queue_frame.winfo_children():
+            widget.destroy()
+
+        if not self.brawlers_data:
+            ctk.CTkLabel(
+                self.queue_frame,
+                text="No brawlers queued yet. Click a brawler image to add it.",
+                font=("Comic sans MS", int(14 * scale_factor)),
+                text_color=self.colors['gray'],
+            ).grid(row=0, column=0, padx=int(12 * scale_factor), pady=int(20 * scale_factor), sticky="w")
+            return
+
+        tile_w = int(150 * scale_factor)
+        tile_h = int(58 * scale_factor)
+        icon_size = int(42 * scale_factor)
+        for index, item in enumerate(self.brawlers_data):
+            brawler = item.get("brawler", "")
+            frame = ctk.CTkFrame(
+                self.queue_frame,
+                fg_color=self.colors['ui box gray'],
+                border_color=self.colors['cherry red'] if index == 0 else self.colors['gray'],
+                border_width=int(2 * scale_factor),
+                width=tile_w,
+                height=tile_h,
+            )
+            frame.grid(row=0, column=index, padx=int(5 * scale_factor), pady=int(6 * scale_factor))
+            frame.grid_propagate(False)
+            self.queue_item_frames.append((frame, brawler))
+
+            drag_widgets = [frame]
+            img_tk = self.image_by_brawler.get(brawler)
+            if img_tk is not None:
+                icon = ctk.CTkLabel(frame, image=img_tk, text="", width=icon_size, height=icon_size)
+                icon.place(x=int(5 * scale_factor), y=int(8 * scale_factor))
+                icon._pyla_image_ref = img_tk
+                drag_widgets.append(icon)
+
+            name = ctk.CTkLabel(
+                frame,
+                text=f"{index + 1}. {brawler}",
+                font=("Comic sans MS", int(12 * scale_factor)),
+                text_color="white",
+                width=int(82 * scale_factor),
+                anchor="w",
+            )
+            name.place(x=int(52 * scale_factor), y=int(7 * scale_factor))
+            target_label = "T" if item.get("type") == "trophies" else "W"
+            target = ctk.CTkLabel(
+                frame,
+                text=f"{target_label}: {item.get('push_until', 0)}",
+                font=("Comic sans MS", int(11 * scale_factor)),
+                text_color=self.colors['darker_white'],
+                width=int(82 * scale_factor),
+                anchor="w",
+            )
+            target.place(x=int(52 * scale_factor), y=int(30 * scale_factor))
+            delete = ctk.CTkButton(
+                frame,
+                text="X",
+                command=lambda b=brawler: self.remove_queue_item(b),
+                fg_color=self.colors['cherry red'],
+                hover_color=self.colors['red'],
+                text_color="white",
+                font=("Arial", int(10 * scale_factor), "bold"),
+                width=int(20 * scale_factor),
+                height=int(20 * scale_factor),
+            )
+            delete.place(x=int(126 * scale_factor), y=int(4 * scale_factor))
+
+            for widget in drag_widgets + [name, target]:
+                widget.bind("<ButtonPress-1>", lambda event, b=brawler: self.start_queue_drag(b))
+                widget.bind("<ButtonRelease-1>", self.finish_queue_drag)
+
+    def start_queue_drag(self, brawler):
+        self._drag_queue_brawler = brawler
+
+    def finish_queue_drag(self, event):
+        brawler = self._drag_queue_brawler
+        self._drag_queue_brawler = None
+        if not brawler:
+            return
+        try:
+            pointer_x = event.widget.winfo_pointerx()
+        except Exception:
+            return
+        self.move_queue_item(brawler, self.get_queue_drop_index(pointer_x))
 
     def detect_first_sorted_brawler(self, device):
         last_texts = []
@@ -528,6 +686,8 @@ class SelectBrawler:
                 data = self._move_brawler_to_front(data, selected_brawler)
             print(f"Push All {target_trophies} first brawler:", data[0])
             self.brawlers_data = data
+            self.normalize_queue_order_flags()
+            self.update_queue_strip()
             self.start_bot()
         except Exception as e:
             print(f"Push All failed: {e}")
@@ -699,6 +859,8 @@ class SelectBrawler:
 
             self.brawlers_data = [item for item in self.brawlers_data if item["brawler"] != data["brawler"]]
             self.brawlers_data.append(data)
+            self.normalize_queue_order_flags()
+            self.update_queue_strip()
 
             print("Selected Brawler Data :", self.brawlers_data)
             top.destroy()

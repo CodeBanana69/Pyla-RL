@@ -61,11 +61,12 @@ def main():
         print("WARNING: Python is not 64-bit. Re-run setup.exe to install Python 3.11 64-bit.")
     if detector.device == "CPUExecutionProvider":
         print("WARNING: ONNX is running on CPU.")
-        print("- Fast Windows fix for NVIDIA/AMD/Intel: python tools/fix_gpu_runtime.py directml")
-        print("- Then set cfg/general_config.toml cpu_or_gpu = \"directml\" and restart the bot.")
-        print("- CUDA users can try: python tools/fix_gpu_runtime.py cuda")
+        print("- NVIDIA 40-series fix: py -3.11-64 tools\\fix_gpu_runtime.py cuda")
+        print("- AMD/Intel fallback: py -3.11-64 tools\\fix_gpu_runtime.py directml")
     if detector.device == "DmlExecutionProvider" and ips < 10:
-        print("WARNING: DirectML is active but slow. On dual-GPU laptops, try directml_device_id = \"1\" and restart the bot.")
+        print("WARNING: DirectML is active but slow.")
+        print("- NVIDIA users should try: py -3.11-64 tools\\fix_gpu_runtime.py cuda")
+        print("- Dual-GPU laptops can also try directml_device_id = \"1\" and restart the bot.")
 
     print("\nFrame-source check")
     print("Start your emulator, open Brawl Stars, and keep it visible. Measuring scrcpy frames for 10 seconds...")

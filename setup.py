@@ -92,27 +92,26 @@ def setup_pyla():
     onnx_installed = False
 
     # --- THE CHOICE BRANCHES ---
+
+    def nvidia_cuda_torch_command():
+        if ver >= 10.0: # 50-Series Blackwell
+            return ["--pre", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/nightly/cu128"], "CUDA 12.8 (Blackwell)"
+        if ver >= 8.9: # 40-Series Ada
+            return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"], "CUDA 12.4 (Ada)"
+        return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu121"], "CUDA 12.1 (Standard)"
     
     # NVIDIA BRANCH (Series 10-50)
     if target == "nvidia":
         print(f"\n NVIDIA: {name} detected.")
         if os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes"):
-            print("\nAuto setup: installing DirectML GPU acceleration for NVIDIA Windows systems.")
-            install_onnxruntime_variant("onnxruntime-directml")
+            print("\nAuto setup: installing CUDA GPU acceleration for NVIDIA Windows systems.")
+            torch_cmd, status_accel = nvidia_cuda_torch_command()
+            force_install(torch_cmd)
+            install_onnxruntime_variant("onnxruntime-gpu")
             onnx_installed = True
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
+            status_pytorch = "CUDA Edition"
         elif ask_user("Install NVIDIA CUDA acceleration? (takes more storage but gives you more ips, about 2GB)"):
-            if ver >= 10.0: # 50-Series Blackwell
-                torch_cmd = ["--pre", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/nightly/cu128"]
-                status_accel = "CUDA 12.8 (Blackwell)"
-            elif ver >= 8.9: # 40-Series Ada
-                torch_cmd = ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"]
-                status_accel = "CUDA 12.4 (Ada)"
-            else: # 10/20/30-Series
-                torch_cmd = ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu121"]
-                status_accel = "CUDA 12.1 (Standard)"
-            
+            torch_cmd, status_accel = nvidia_cuda_torch_command()
             force_install(torch_cmd)
             install_onnxruntime_variant("onnxruntime-gpu")
             onnx_installed = True

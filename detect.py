@@ -35,6 +35,7 @@ def get_optimal_threads(max_limit=4):
 
 
 _provider_message_printed = False
+_provider_fallback_warning_printed = False
 
 
 def _directml_provider():
@@ -55,7 +56,7 @@ def _build_providers(preferred_device):
     providers = []
 
     if preferred_device in ("gpu", "auto", "cuda"):
-        if "CUDAExecutionProvider" in available_providers:
+        if "CUDAExecutionProvider" in available_providers and not providers:
             cuda_provider = (
                 "CUDAExecutionProvider",
                 {
@@ -84,6 +85,11 @@ def _build_providers(preferred_device):
                 f"Using CPU inference. Available ONNX providers: {', '.join(ort.get_available_providers())}. "
                 f"Python={platform.python_version()} {platform.architecture()[0]}."
             )
+            if preferred_device in ("auto", "gpu", "directml", "dml", "cuda"):
+                print(
+                    "WARNING: GPU inference was requested but no usable GPU ONNX provider is installed. "
+                    "NVIDIA users run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
+                )
         else:
             print(
                 f"Using {selected} for ONNX inference with CPU fallback. "
@@ -208,6 +214,7 @@ class Detect:
         self._last_resized_h = 0
 
     def load_model(self):
+        global _provider_fallback_warning_printed
         so = ort.SessionOptions()
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         so.add_session_config_entry("session.intra_op.allow_spinning", "0")
@@ -222,7 +229,18 @@ class Detect:
             so.intra_op_num_threads = 1
             so.inter_op_num_threads = 1
         model = ort.InferenceSession(self.model_path, sess_options=so, providers=providers)
-        return model, model.get_providers()[0]
+        actual_provider = model.get_providers()[0]
+        if (
+                actual_provider == "CPUExecutionProvider"
+                and first_provider != "CPUExecutionProvider"
+                and not _provider_fallback_warning_printed
+        ):
+            print(
+                f"WARNING: ONNX requested {first_provider}, but the session fell back to CPU. "
+                "NVIDIA users run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
+            )
+            _provider_fallback_warning_printed = True
+        return model, actual_provider
 
     def preprocess_image(self, img):
         h, w = img.shape[:2]

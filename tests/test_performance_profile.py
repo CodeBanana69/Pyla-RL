@@ -27,6 +27,7 @@ class PerformanceProfileTest(unittest.TestCase):
             self.assertEqual(general["scrcpy_max_fps"], 60)
             self.assertEqual(general["scrcpy_max_width"], 960)
             self.assertEqual(general["scrcpy_bitrate"], 3000000)
+            self.assertEqual(general["cpu_or_gpu"], "auto")
             self.assertEqual(general["onnx_cpu_threads"], 4)
             self.assertEqual(bot["entity_detection_confidence"], 0.55)
             self.assertEqual(bot["entity_detection_retry_confidence"], 0.35)

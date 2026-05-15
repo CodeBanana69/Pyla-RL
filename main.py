@@ -357,6 +357,9 @@ def pyla_main(data):
                         },
                     ))
                 finally:
+                    loop.run_until_complete(asyncio.sleep(0.25))
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                    asyncio.set_event_loop(None)
                     loop.close()
                 print("Bot got stuck. User notified. Shutting down.")
                 self.window_controller.keys_up(list("wasd"))

@@ -57,6 +57,35 @@ class PushAll1kSelectionTest(unittest.TestCase):
         self.assertTrue(reordered[1]["automatically_pick"])
         self.assertTrue(reordered[2]["automatically_pick"])
 
+    def test_manual_queue_reorder_updates_auto_pick_order(self):
+        obj = object.__new__(SelectBrawler)
+        obj.brawlers_data = [
+            {"brawler": "spike", "automatically_pick": False},
+            {"brawler": "max", "automatically_pick": True},
+            {"brawler": "gus", "automatically_pick": True},
+        ]
+        obj.update_queue_strip = lambda: None
+
+        self.assertTrue(obj.move_queue_item("gus", 0))
+
+        self.assertEqual([row["brawler"] for row in obj.brawlers_data], ["gus", "spike", "max"])
+        self.assertFalse(obj.brawlers_data[0]["automatically_pick"])
+        self.assertTrue(obj.brawlers_data[1]["automatically_pick"])
+        self.assertTrue(obj.brawlers_data[2]["automatically_pick"])
+
+    def test_manual_queue_remove_updates_auto_pick_order(self):
+        obj = object.__new__(SelectBrawler)
+        obj.brawlers_data = [
+            {"brawler": "spike", "automatically_pick": False},
+            {"brawler": "max", "automatically_pick": True},
+        ]
+        obj.update_queue_strip = lambda: None
+
+        obj.remove_queue_item("spike")
+
+        self.assertEqual([row["brawler"] for row in obj.brawlers_data], ["max"])
+        self.assertFalse(obj.brawlers_data[0]["automatically_pick"])
+
     def test_push_all_target_filters_and_sets_target_amount(self):
         obj = object.__new__(SelectBrawler)
         obj.brawlers = ["shelly", "colt", "meg"]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import asyncio
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,7 @@ from utils import _config_bool, load_toml_as_dict, resolve_project_path, save_di
 TELEGRAM_CONFIG_PATH = "cfg/telegram_config.toml"
 LOCAL_TELEGRAM_CONFIG_PATH = "cfg/telegram_config.local.toml"
 TELEGRAM_CHATS_PATH = "cfg/telegram_chats.toml"
+_WINDOWS_AIOHTTP_CLEANUP_DELAY = 0.25
 
 
 EVENT_TITLES = {
@@ -128,6 +131,14 @@ def chat_ids_from_updates(updates: list[dict[str, Any]]) -> list[str]:
     return ordered
 
 
+async def drain_aiohttp_transports() -> None:
+    # On Windows, aiohttp SSL/pipe transports can finish cleanup just after the
+    # coroutine returns. If the caller closes a short-lived event loop
+    # immediately, Python's ProactorEventLoop prints "Event loop is closed".
+    if sys.platform.startswith("win"):
+        await asyncio.sleep(_WINDOWS_AIOHTTP_CLEANUP_DELAY)
+
+
 async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
     settings = load_telegram_settings()
     token = str(token or settings.get("bot_token", "")).strip()
@@ -135,9 +146,12 @@ async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
         return []
     url = f"https://api.telegram.org/bot{token}/getUpdates"
     params = {"timeout": 1, "allowed_updates": '["message"]'}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params, timeout=10) as response:
-            data = await response.json()
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=10) as response:
+                data = await response.json()
+    finally:
+        await drain_aiohttp_transports()
     if not data.get("ok"):
         raise RuntimeError(str(data))
     return chat_ids_from_updates(list(data.get("result") or []))
@@ -218,10 +232,13 @@ async def async_send_message(chat_id: int | str, text: str, token: str | None = 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=15) as response:
-                return response.status == 200
+                sent = response.status == 200
     except Exception as exc:
         print(f"Telegram message failed: {exc}")
         return False
+    finally:
+        await drain_aiohttp_transports()
+    return sent
 
 
 async def async_send_photo(chat_id: int | str, screenshot: Any, caption: str = "", token: str | None = None) -> bool:
@@ -242,10 +259,13 @@ async def async_send_photo(chat_id: int | str, screenshot: Any, caption: str = "
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=data, timeout=30) as response:
-                return response.status == 200
+                sent = response.status == 200
     except Exception as exc:
         print(f"Telegram photo failed: {exc}")
         return False
+    finally:
+        await drain_aiohttp_transports()
+    return sent
 
 
 async def async_notify_user(

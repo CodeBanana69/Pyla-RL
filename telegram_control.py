@@ -13,6 +13,7 @@ from telegram_notifier import (
     allowed_chat_ids,
     async_send_message,
     async_send_photo,
+    drain_aiohttp_transports,
     load_telegram_settings,
     remember_chat_id,
 )
@@ -102,9 +103,12 @@ class TelegramControlServer:
             "offset": self._offset,
             "allowed_updates": '["message"]',
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=timeout_seconds + 10) as response:
-                data = await response.json()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=timeout_seconds + 10) as response:
+                    data = await response.json()
+        finally:
+            await drain_aiohttp_transports()
         if not data.get("ok"):
             raise RuntimeError(str(data))
         return list(data.get("result") or [])
