@@ -231,7 +231,7 @@ def pyla_main(data):
             self.last_global_freeze_sample = None
             self.global_freeze_recovery_attempts = 0
             self.host_freeze_enabled = str(
-                time_thresholds.get("host_emulator_freeze_enabled", "yes")
+                time_thresholds.get("host_emulator_freeze_enabled", "no")
             ).strip().lower() in ("1", "true", "yes", "on")
             self.host_freeze_health_interval = float(
                 time_thresholds.get("host_emulator_freeze_health_interval", 60.0)
@@ -685,17 +685,9 @@ def pyla_main(data):
             print(
                 "PC emulator-window screenshot did not visibly change for "
                 f"{self.host_freeze_health_interval:.0f}s (diff {diff:.3f}); "
-                "restarting the full emulator profile."
+                "skipping emulator restart because this check can false-trigger on static screens."
             )
-            self.window_controller.keys_up(list("wasd"))
-            if self.window_controller.restart_emulator_profile():
-                self.reset_visual_freeze_watchdog()
-                self.reset_low_ips_watchdog(recovered=False)
-                self.last_processed_frame_id = -1
-            else:
-                print("Full emulator restart was not available; restarting Brawl Stars and scrcpy instead.")
-                self.restart_brawl_stars()
-            return True
+            return False
 
         def handle_starr_nova_info_screen(self, frame):
             now = time.time()

@@ -13,7 +13,24 @@ class ProviderSelectionTests(unittest.TestCase):
         "DmlExecutionProvider",
         "CPUExecutionProvider",
     ])
-    def test_auto_prefers_cuda_before_directml_when_available(self, *_):
+    def test_auto_prefers_directml_before_cuda_when_available(self, *_):
+        providers = _build_providers("auto")
+        self.assertEqual(providers[0], "DmlExecutionProvider")
+
+    @patch("detect.ort.get_available_providers", return_value=[
+        "CUDAExecutionProvider",
+        "DmlExecutionProvider",
+        "CPUExecutionProvider",
+    ])
+    def test_gpu_prefers_directml_before_cuda_when_available(self, *_):
+        providers = _build_providers("gpu")
+        self.assertEqual(providers[0], "DmlExecutionProvider")
+
+    @patch("detect.ort.get_available_providers", return_value=[
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider",
+    ])
+    def test_auto_uses_cuda_when_directml_is_not_installed(self, *_):
         providers = _build_providers("auto")
         self.assertEqual(providers[0][0], "CUDAExecutionProvider")
 

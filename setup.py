@@ -104,23 +104,22 @@ def setup_pyla():
     if target == "nvidia":
         print(f"\n NVIDIA: {name} detected.")
         if os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes"):
-            print("\nAuto setup: installing CUDA GPU acceleration for NVIDIA Windows systems.")
-            torch_cmd, status_accel = nvidia_cuda_torch_command()
-            force_install(torch_cmd)
-            install_onnxruntime_variant("onnxruntime-gpu")
-            onnx_installed = True
-            status_pytorch = "CUDA Edition"
-        elif ask_user("Install NVIDIA CUDA acceleration? (takes more storage but gives you more ips, about 2GB)"):
-            torch_cmd, status_accel = nvidia_cuda_torch_command()
-            force_install(torch_cmd)
-            install_onnxruntime_variant("onnxruntime-gpu")
-            onnx_installed = True
-            status_pytorch = "CUDA Edition"
-        elif ask_user("Install DirectML GPU acceleration instead? (smaller, works on most Windows GPUs)"):
+            print("\nAuto setup: installing DirectML GPU acceleration for stable Windows NVIDIA systems.")
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
             status_pytorch = "DirectML Edition"
             status_accel = "DirectML"
+        elif ask_user("Install DirectML GPU acceleration? (recommended; stable on most Windows NVIDIA systems)"):
+            install_onnxruntime_variant("onnxruntime-directml")
+            onnx_installed = True
+            status_pytorch = "DirectML Edition"
+            status_accel = "DirectML"
+        elif ask_user("Install NVIDIA CUDA acceleration? (advanced; only if CUDA/cuDNN is installed correctly)"):
+            torch_cmd, status_accel = nvidia_cuda_torch_command()
+            force_install(torch_cmd)
+            install_onnxruntime_variant("onnxruntime-gpu")
+            onnx_installed = True
+            status_pytorch = "CUDA Edition"
 
     # INTEL BRANCH (OpenVINO)
     elif target == "intel":
