@@ -35,9 +35,14 @@ SKIPPED_FILES = {
     "adbwinapi.dll",
     "adbwinusbapi.dll",
     "brawl_stars_api.local.toml",
+    "downgrader.exe",
     "telegram_chats.toml",
     "telegram_config.local.toml",
     "updater.exe",
+}
+
+OBSOLETE_FILES = {
+    "downgrader.exe",
 }
 
 
@@ -424,6 +429,18 @@ def copy_update_files(source_root: Path, project_dir: Path) -> None:
             print(f"Skipped locked file: {relative_path}")
 
 
+def remove_obsolete_files(project_dir: Path) -> None:
+    for relative in OBSOLETE_FILES:
+        target = project_dir / relative
+        if not target.exists() or not target.is_file():
+            continue
+        try:
+            target.unlink()
+            print(f"Removed obsolete file: {relative}")
+        except PermissionError:
+            print(f"Could not remove locked obsolete file: {relative}")
+
+
 def install_from_zip(project_dir: Path, url: str, label: str, marker_sha: str | None = None, selected_ref: str | None = None) -> None:
     temp_dir = Path(tempfile.mkdtemp(prefix="pyla_update_"))
     backup_dir = temp_dir / "preserved_user_files"
@@ -440,6 +457,7 @@ def install_from_zip(project_dir: Path, url: str, label: str, marker_sha: str | 
         source_root = find_project_root(extract_dir)
         print(f"Installing update from: {source_root}")
         copy_update_files(source_root, project_dir)
+        remove_obsolete_files(project_dir)
         restore_preserved_files(project_dir, backup_dir)
         write_local_update_info(project_dir, marker_sha, selected_ref=selected_ref)
     except Exception:

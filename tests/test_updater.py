@@ -12,6 +12,7 @@ from tools.updater import (
     newest_ref,
     previous_ref,
     read_local_update_sha,
+    remove_obsolete_files,
     restore_preserved_files,
     selected_ref_from_choice,
     write_local_update_info,
@@ -31,7 +32,7 @@ class UpdaterTest(unittest.TestCase):
         self.assertEqual(url, "https://github.com/xxz-888/PylaAi-XXZ/archive/abc123.zip")
         self.assertEqual(label, "GitHub ref abc123")
 
-    def test_downgrader_previous_ref_chooses_commit_before_latest(self):
+    def test_previous_ref_chooses_commit_before_latest(self):
         commits = [{"sha": "latest"}, {"sha": "previous"}, {"sha": "older"}]
 
         self.assertEqual(previous_ref(commits), "previous")
@@ -63,6 +64,7 @@ class UpdaterTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (project / "updater.exe").write_text("old updater", encoding="utf-8")
+            (project / "downgrader.exe").write_text("old downgrader", encoding="utf-8")
             (project / "main.py").write_text("old", encoding="utf-8")
 
             (source / "cfg").mkdir(parents=True)
@@ -86,6 +88,7 @@ class UpdaterTest(unittest.TestCase):
 
             backup_preserved_files(project, backup)
             copy_update_files(source, project)
+            remove_obsolete_files(project)
             restore_preserved_files(project, backup)
 
             self.assertEqual((project / "cfg" / "brawl_stars_api.toml").read_text(encoding="utf-8"), 'api_token = "USER"\n')
@@ -101,7 +104,7 @@ class UpdaterTest(unittest.TestCase):
             self.assertIn('"default": 2', custom_state)
             self.assertIn('"user": 1', custom_state)
             self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "old updater")
-            self.assertEqual((project / "downgrader.exe").read_text(encoding="utf-8"), "new downgrader")
+            self.assertFalse((project / "downgrader.exe").exists())
             self.assertFalse((project / "adb.exe").exists())
             self.assertFalse((project / "cfg" / "telegram_config.local.toml").exists())
             self.assertFalse((project / "cfg" / "telegram_chats.toml").exists())
