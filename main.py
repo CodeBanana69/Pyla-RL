@@ -230,6 +230,17 @@ def pyla_main(data):
             self.last_global_freeze_check = 0.0
             self.last_global_freeze_sample = None
             self.global_freeze_recovery_attempts = 0
+            self.host_freeze_enabled = str(
+                time_thresholds.get("host_emulator_freeze_enabled", "yes")
+            ).strip().lower() in ("1", "true", "yes", "on")
+            self.host_freeze_health_interval = float(
+                time_thresholds.get("host_emulator_freeze_health_interval", 60.0)
+            )
+            self.host_freeze_diff_threshold = float(
+                time_thresholds.get("host_emulator_freeze_diff_threshold", 0.15)
+            )
+            self.last_host_freeze_check = 0.0
+            self.last_host_freeze_sample = None
             self.starr_nova_info_check_interval = float(
                 time_thresholds.get("starr_nova_info_check_interval", 60.0)
             )
@@ -374,6 +385,7 @@ def pyla_main(data):
             self.last_visual_change_time = time.time()
             self.last_global_freeze_sample = None
             self.global_freeze_recovery_attempts = 0
+            self.last_host_freeze_sample = None
 
         def reset_low_ips_watchdog(self, recovered=True):
             self.low_ips_since = None
@@ -644,6 +656,44 @@ def pyla_main(data):
                     self.restart_brawl_stars()
             else:
                 print("Restarting Brawl Stars and scrcpy first.")
+                self.restart_brawl_stars()
+            return True
+
+        def handle_host_emulator_freeze(self):
+            if not self.host_freeze_enabled:
+                return False
+            now = time.time()
+            if now - self.last_host_freeze_check < self.host_freeze_health_interval:
+                return False
+            self.last_host_freeze_check = now
+
+            frame = self.window_controller.host_emulator_screenshot()
+            if frame is None or frame.size == 0:
+                return False
+
+            sample = cv2.resize(frame, (96, 54), interpolation=cv2.INTER_AREA)
+            sample = cv2.cvtColor(sample, cv2.COLOR_RGB2GRAY)
+            if self.last_host_freeze_sample is None:
+                self.last_host_freeze_sample = sample
+                return False
+
+            diff = float(cv2.absdiff(sample, self.last_host_freeze_sample).mean())
+            self.last_host_freeze_sample = sample
+            if diff >= self.host_freeze_diff_threshold:
+                return False
+
+            print(
+                "PC emulator-window screenshot did not visibly change for "
+                f"{self.host_freeze_health_interval:.0f}s (diff {diff:.3f}); "
+                "restarting the full emulator profile."
+            )
+            self.window_controller.keys_up(list("wasd"))
+            if self.window_controller.restart_emulator_profile():
+                self.reset_visual_freeze_watchdog()
+                self.reset_low_ips_watchdog(recovered=False)
+                self.last_processed_frame_id = -1
+            else:
+                print("Full emulator restart was not available; restarting Brawl Stars and scrcpy instead.")
                 self.restart_brawl_stars()
             return True
 
@@ -1052,6 +1102,9 @@ def pyla_main(data):
                     continue
 
                 self.stale_feed_recovery_attempts = 0
+
+                if self.handle_host_emulator_freeze():
+                    continue
 
                 if self.handle_global_screen_freeze(frame):
                     continue

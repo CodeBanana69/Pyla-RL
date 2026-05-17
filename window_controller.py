@@ -1,4 +1,6 @@
 import atexit
+import ctypes
+import ctypes.wintypes
 import glob
 import json
 import math
@@ -9,6 +11,7 @@ import socket
 import threading
 import time
 import cv2
+import numpy as np
 from typing import List, Optional, Tuple
 
 import scrcpy
@@ -143,6 +146,25 @@ def _find_existing_path(paths):
             if os.path.exists(match):
                 return match
     return None
+
+
+def _window_title_matches_emulator(title, selected_emulator):
+    title = str(title or "").lower()
+    selected_emulator = str(selected_emulator or "").lower()
+    if not title:
+        return False
+    if "brawl stars" in title:
+        return True
+    if "ldplayer" in selected_emulator:
+        return "ldplayer" in title or "dnplayer" in title
+    if "mumu" in selected_emulator:
+        return "mumu" in title or "android device" in title
+    return any(token in title for token in ("ldplayer", "dnplayer", "mumu", "android device", "brawl stars"))
+
+
+def _valid_window_rect(rect):
+    left, top, right, bottom = rect
+    return right - left >= 320 and bottom - top >= 240
 
 
 def _adb_executable():
@@ -1120,6 +1142,61 @@ class WindowController:
 
     def foreground_package(self, timeout=4):
         return _get_foreground_package(self.connected_serial, timeout=timeout)
+
+    def host_emulator_screenshot(self):
+        if os.name != "nt":
+            return None
+        try:
+            from PIL import ImageGrab
+        except Exception:
+            return None
+
+        rects = []
+        user32 = ctypes.windll.user32
+
+        def enum_handler(hwnd, _):
+            try:
+                if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length <= 0:
+                    return True
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buffer, length + 1)
+                title = buffer.value
+                if not _window_title_matches_emulator(title, getattr(self, "selected_emulator", "")):
+                    return True
+                rect = ctypes.wintypes.RECT()
+                if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    return True
+                box = (rect.left, rect.top, rect.right, rect.bottom)
+                if _valid_window_rect(box):
+                    rects.append((box, title))
+            except Exception:
+                pass
+            return True
+
+        try:
+            enum_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)(enum_handler)
+            user32.EnumWindows(enum_proc, 0)
+        except Exception:
+            return None
+
+        if not rects:
+            return None
+
+        rect, _title = max(
+            rects,
+            key=lambda item: (item[0][2] - item[0][0]) * (item[0][3] - item[0][1]),
+        )
+        try:
+            image = ImageGrab.grab(bbox=rect)
+            frame = np.array(image)
+            if frame.ndim == 3 and frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+            return frame
+        except Exception:
+            return None
 
     def screenshot(self):
         if not self.ensure_emulator_online():

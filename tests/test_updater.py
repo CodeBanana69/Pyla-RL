@@ -9,11 +9,13 @@ from tools.updater import (
     latest_download_url,
     MAIN_BRANCH_ZIP,
     merge_toml_text,
+    newest_ref,
+    previous_ref,
     read_local_update_sha,
     restore_preserved_files,
+    selected_ref_from_choice,
     write_local_update_info,
 )
-from tools.downgrader import previous_ref
 
 
 class UpdaterTest(unittest.TestCase):
@@ -33,6 +35,15 @@ class UpdaterTest(unittest.TestCase):
         commits = [{"sha": "latest"}, {"sha": "previous"}, {"sha": "older"}]
 
         self.assertEqual(previous_ref(commits), "previous")
+
+    def test_version_picker_uses_one_for_newest_and_zero_for_previous(self):
+        commits = [{"sha": "latest"}, {"sha": "previous"}, {"sha": "older"}]
+
+        self.assertEqual(newest_ref(commits), "latest")
+        self.assertEqual(selected_ref_from_choice("1", commits), "latest")
+        self.assertEqual(selected_ref_from_choice("0", commits), "previous")
+        self.assertEqual(selected_ref_from_choice("2", commits), "older")
+        self.assertEqual(selected_ref_from_choice("abc123", commits), "abc123")
 
     def test_copy_update_preserves_user_api_config_and_skips_updater_exe(self):
         with tempfile.TemporaryDirectory() as tmp:

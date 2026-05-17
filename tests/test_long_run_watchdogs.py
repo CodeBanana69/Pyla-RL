@@ -5,6 +5,8 @@ from window_controller import (
     WindowController,
     _foreground_package_from_text,
     _package_task_display_from_text,
+    _valid_window_rect,
+    _window_title_matches_emulator,
 )
 
 
@@ -23,6 +25,16 @@ class LongRunWatchdogTests(unittest.TestCase):
             "topResumedActivity=ActivityRecord{456 u0 com.supercell.brawlstars/com.supercell.titan.GameApp}"
         )
         self.assertEqual(_foreground_package_from_text(text), "com.supercell.brawlstars")
+
+    def test_host_window_title_matching_supports_ldplayer_and_mumu(self):
+        self.assertTrue(_window_title_matches_emulator("LDPlayer - Brawl Stars", "LDPlayer"))
+        self.assertTrue(_window_title_matches_emulator("Android Device", "MuMu"))
+        self.assertTrue(_window_title_matches_emulator("Brawl Stars", "MuMu"))
+        self.assertFalse(_window_title_matches_emulator("Command Prompt", "MuMu"))
+
+    def test_host_window_rect_rejects_tiny_windows(self):
+        self.assertTrue(_valid_window_rect((10, 10, 810, 610)))
+        self.assertFalse(_valid_window_rect((10, 10, 80, 60)))
 
     def test_package_display_parser_finds_hidden_mumu_display(self):
         text = (

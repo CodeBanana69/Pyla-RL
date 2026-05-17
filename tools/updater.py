@@ -138,6 +138,71 @@ def recent_commits(limit=10) -> list[dict]:
     return data
 
 
+def previous_ref(commits: list[dict]) -> str:
+    if len(commits) >= 2:
+        return str(commits[1].get("sha", "")).strip()
+    if commits:
+        return str(commits[0].get("sha", "")).strip()
+    return ""
+
+
+def newest_ref(commits: list[dict]) -> str:
+    if commits:
+        return str(commits[0].get("sha", "")).strip()
+    return ""
+
+
+def print_recent_versions(limit=12) -> list[dict]:
+    print("Recent versions from main:")
+    commits = recent_commits(limit)
+    for index, commit in enumerate(commits):
+        sha = str(commit.get("sha", "")).strip()
+        details = commit.get("commit") or {}
+        message = str(details.get("message") or "").splitlines()[0]
+        date = ((details.get("committer") or {}).get("date") or "")[:10]
+        number = "1" if index == 0 else "0" if index == 1 else str(index)
+        label = "newest" if index == 0 else "previous" if index == 1 else "older"
+        print(f"  {number:>2}. {sha[:8]}  {date}  {label:<8}  {message}")
+    return commits
+
+
+def selected_ref_from_choice(choice: str, commits: list[dict]) -> str:
+    choice = str(choice or "").strip()
+    if not choice:
+        return newest_ref(commits)
+    lowered = choice.lower()
+    if lowered in ("latest", "newest"):
+        return newest_ref(commits)
+    if lowered in ("--previous", "previous", "prev", "rollback"):
+        return previous_ref(commits)
+    if choice == "1":
+        return newest_ref(commits)
+    if choice == "0":
+        return previous_ref(commits)
+    if choice.isdigit():
+        index = int(choice)
+        if 2 <= index < len(commits):
+            return str(commits[index].get("sha", "")).strip()
+    return choice
+
+
+def selected_ref_from_args_or_prompt(commits: list[dict]) -> str:
+    plain_args = [
+        arg for arg in sys.argv[1:]
+        if not arg.startswith("--")
+    ]
+    if plain_args:
+        return selected_ref_from_choice(plain_args[0], commits)
+
+    print("")
+    print("Type 1 for newest, 0 for previous/rollback, or paste a commit/tag/branch.")
+    print("Press Enter for newest. Type cancel to quit.")
+    choice = input("Version to install: ").strip()
+    if choice.lower() in ("cancel", "quit", "exit"):
+        return ""
+    return selected_ref_from_choice(choice, commits)
+
+
 def read_local_update_sha(project_dir: Path) -> str | None:
     info_path = project_dir / UPDATE_INFO_PATH
     if not info_path.exists():
@@ -400,7 +465,8 @@ def option_value(name: str) -> str | None:
 def main() -> int:
     if "--help" in sys.argv or "-h" in sys.argv:
         print("PylaAi-XXZ updater")
-        print("Downloads the latest GitHub update and keeps your cfg settings.")
+        print("Downloads a GitHub update and keeps your cfg settings.")
+        print("Run updater.exe, then choose 1 for newest or 0 for previous.")
         print("Use --ref <commit/tag/branch> to install or downgrade to a specific version.")
         print("Use --list-versions to show recent main commits you can pass to --ref.")
         print("Use --force to reinstall even when this folder is already current.")
@@ -449,6 +515,18 @@ def main() -> int:
         print(exc)
         wait_for_enter()
         return 1
+
+    if selected_ref is None:
+        try:
+            commits = print_recent_versions()
+            selected_ref = selected_ref_from_args_or_prompt(commits)
+        except Exception as exc:
+            print(f"Could not load recent versions: {exc}")
+            selected_ref = None
+        if selected_ref == "":
+            print("Cancelled.")
+            wait_for_enter()
+            return 0
 
     latest_sha = resolve_ref_sha(selected_ref) if selected_ref else latest_main_sha()
     local_sha = read_local_update_sha(project_dir)

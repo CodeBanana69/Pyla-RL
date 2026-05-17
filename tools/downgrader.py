@@ -5,8 +5,12 @@ try:
         app_dir,
         download_url_for_ref,
         install_from_zip,
+        newest_ref,
+        previous_ref,
+        print_recent_versions,
         recent_commits,
         resolve_ref_sha,
+        selected_ref_from_choice,
         wait_for_enter,
     )
 except ModuleNotFoundError:
@@ -14,69 +18,50 @@ except ModuleNotFoundError:
         app_dir,
         download_url_for_ref,
         install_from_zip,
+        newest_ref,
+        previous_ref,
+        print_recent_versions,
         recent_commits,
         resolve_ref_sha,
+        selected_ref_from_choice,
         wait_for_enter,
     )
-
-
-def print_recent_versions(limit=12):
-    print("Recent versions from main:")
-    commits = recent_commits(limit)
-    for index, commit in enumerate(commits, 1):
-        sha = str(commit.get("sha", "")).strip()
-        details = commit.get("commit") or {}
-        message = str(details.get("message") or "").splitlines()[0]
-        date = ((details.get("committer") or {}).get("date") or "")[:10]
-        print(f"  {index:>2}. {sha[:8]}  {date}  {message}")
-    return commits
-
-
-def previous_ref(commits):
-    if len(commits) >= 2:
-        return str(commits[1].get("sha", "")).strip()
-    if commits:
-        return str(commits[0].get("sha", "")).strip()
-    return ""
 
 
 def selected_ref_from_args_or_prompt(commits):
     if len(sys.argv) > 1:
         arg = sys.argv[1].strip()
-        if arg in ("--previous", "previous", "prev"):
-            return previous_ref(commits)
-        return arg
+        return selected_ref_from_choice(arg, commits)
 
     print("")
-    fallback_ref = previous_ref(commits)
-    if fallback_ref:
-        print(f"Press Enter to install the previous version: {fallback_ref[:8]}")
-    print("Or type a number from the list, or paste a commit/tag/branch.")
+    latest_ref = newest_ref(commits)
+    previous = previous_ref(commits)
+    if latest_ref:
+        print(f"Type 1 to install the newest version: {latest_ref[:8]}")
+    if previous:
+        print(f"Type 0 to install the previous version: {previous[:8]}")
+    print("Or paste a commit/tag/branch.")
     print("Type cancel to quit.")
     choice = input("Version to install: ").strip()
     if not choice:
-        return fallback_ref
+        return previous
     if choice.lower() in ("cancel", "quit", "exit"):
         return ""
-    if choice.isdigit():
-        index = int(choice)
-        if 1 <= index <= len(commits):
-            return str(commits[index - 1].get("sha", "")).strip()
-    return choice
+    return selected_ref_from_choice(choice, commits)
 
 
 def main() -> int:
     if "--help" in sys.argv or "-h" in sys.argv:
-        print("PylaAi-XXZ downgrader")
-        print("Run downgrader.exe and press Enter to install the version before the latest commit.")
-        print("You can also choose a recent version by number.")
-        print("Fast rollback: downgrader.exe --previous")
-        print("Advanced: downgrader.exe <commit/tag/branch>")
+        print("PylaAi-XXZ version picker")
+        print("Choose 1 for newest or 0 for previous/rollback.")
+        print("Fast newest: updater.exe 1")
+        print("Fast rollback: updater.exe 0")
+        print("Advanced: updater.exe <commit/tag/branch>")
         return 0
 
     project_dir = app_dir()
     print("=" * 50)
-    print("PylaAi-XXZ Downgrader")
+    print("PylaAi-XXZ Version Picker")
     print("=" * 50)
     print(f"Project folder: {project_dir}")
 
