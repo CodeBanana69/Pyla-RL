@@ -7,7 +7,7 @@ timeout_seconds = 15
 # Auto-refresh mode for changing public IPs.
 # When enabled, PylaAi-XXZ logs in to the official developer portal, gets your current public IP,
 # deletes previous PylaAi-XXZ-created keys, creates a fresh key for that IP, and saves api_token.
-auto_refresh_token = true
+auto_refresh_token = false
 developer_email = ""
 developer_password = ""
 public_ip_service = "https://api.ipify.org"

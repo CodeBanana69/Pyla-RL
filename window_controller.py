@@ -681,6 +681,8 @@ class WindowController:
             atexit.register(self.close)
             print("Scrcpy client started successfully.")
 
+        except ConnectionError:
+            raise
         except Exception as e:
             raise ConnectionError(f"Failed to initialize Scrcpy: {e}")
 
@@ -796,9 +798,45 @@ class WindowController:
             else:
                 subprocess.Popen(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
+        except OSError as e:
+            if getattr(e, "winerror", None) == 740 and isinstance(command, list):
+                return self._run_emulator_command_elevated(command, action)
+            print(f"Could not run emulator {action} command: {e}")
+            return False
         except Exception as e:
             print(f"Could not run emulator {action} command: {e}")
             return False
+
+    def _run_emulator_command_elevated(self, command, action):
+        if os.name != "nt" or not isinstance(command, list) or not command:
+            return False
+
+        executable = command[0]
+        args = subprocess.list2cmdline(command[1:])
+        print(
+            f"{self.selected_emulator} launcher requires administrator permission. "
+            "Opening a Windows UAC prompt now."
+        )
+        try:
+            result = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                executable,
+                args,
+                None,
+                1,
+            )
+        except Exception as e:
+            print(f"Could not open elevated emulator {action} command: {e}")
+            return False
+
+        if result <= 32:
+            print(
+                f"Windows did not allow the elevated {self.selected_emulator} launch "
+                f"(ShellExecute error {result}). Start the emulator manually or run Pyla as administrator."
+            )
+            return False
+        return True
 
     def launch_saved_emulator_profile(self, wait_for_device=False, action="launch"):
         if not self.run_emulator_command(action, wait=wait_for_device):

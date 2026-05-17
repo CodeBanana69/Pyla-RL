@@ -39,6 +39,7 @@ def get_optimal_threads(max_limit=4):
 
 _provider_message_printed = False
 _provider_fallback_warning_printed = False
+_runtime_provider_fallback_warning_printed = False
 
 
 def _directml_provider():
@@ -108,6 +109,16 @@ def _build_providers(preferred_device):
 
 def _provider_name(provider):
     return provider[0] if isinstance(provider, tuple) else provider
+
+
+def _fallback_providers_after_runtime_failure(failed_provider):
+    failed_provider = _provider_name(failed_provider)
+    available_providers = set(ort.get_available_providers())
+    providers = []
+    if failed_provider != "DmlExecutionProvider" and "DmlExecutionProvider" in available_providers:
+        providers.append(_directml_provider())
+    providers.append("CPUExecutionProvider")
+    return providers
 
 
 def _configure_session_options_for_provider(session_options, provider_name):
@@ -221,10 +232,14 @@ class Detect:
 
     def load_model(self):
         global _provider_fallback_warning_printed
+        providers = _build_providers(self.preferred_device)
+        return self._load_model_with_providers(providers)
+
+    def _load_model_with_providers(self, providers):
+        global _provider_fallback_warning_printed
         so = ort.SessionOptions()
         so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         so.add_session_config_entry("session.intra_op.allow_spinning", "0")
-        providers = _build_providers(self.preferred_device)
         first_provider = _provider_name(providers[0])
         _configure_session_options_for_provider(so, first_provider)
         optimal_threads_amount = get_optimal_threads()
@@ -247,6 +262,30 @@ class Detect:
             )
             _provider_fallback_warning_printed = True
         return model, actual_provider
+
+    def _fallback_after_runtime_failure(self, error):
+        global _runtime_provider_fallback_warning_printed
+        if self.device == "CPUExecutionProvider":
+            return False
+
+        providers = _fallback_providers_after_runtime_failure(self.device)
+        fallback_provider = _provider_name(providers[0])
+        if not _runtime_provider_fallback_warning_printed:
+            print(
+                f"WARNING: ONNX provider {self.device} failed during inference; "
+                f"switching to {fallback_provider}. Error: {error}"
+            )
+            if self.device == "CUDAExecutionProvider":
+                print(
+                    "CUDA/cuDNN runtime failed. NVIDIA users can repair it with: "
+                    "py -3.11-64 tools\\fix_gpu_runtime.py cuda"
+                )
+            _runtime_provider_fallback_warning_printed = True
+
+        self.model, self.device = self._load_model_with_providers(providers)
+        self.input_name = self.model.get_inputs()[0].name
+        self.output_names = [output.name for output in self.model.get_outputs()]
+        return True
 
     def preprocess_image(self, img):
         h, w = img.shape[:2]
@@ -290,7 +329,12 @@ class Detect:
     def detect_objects(self, img, conf_tresh=0.6):
         orig_h, orig_w = img.shape[:2]
         preprocessed_img, resized_w, resized_h = self.preprocess_image(img)
-        outputs = self.model.run(self.output_names, {self.input_name: preprocessed_img})
+        try:
+            outputs = self.model.run(self.output_names, {self.input_name: preprocessed_img})
+        except Exception as e:
+            if not self._fallback_after_runtime_failure(e):
+                raise
+            outputs = self.model.run(self.output_names, {self.input_name: preprocessed_img})
         detections = self.postprocess(outputs, (orig_h, orig_w), (resized_w, resized_h), conf_tresh)
 
         results = {}

@@ -68,7 +68,7 @@ class TrophyObserver:
         self._trophy_log_path = os.path.join(TROPHY_LOG_DIR, TROPHY_LOG_FILE)
 
     def win_streak_gain(self):
-        return min(self.win_streak - 1, 10) if self.current_trophies < 2000 else 0
+        return max(0, min(self.win_streak - 1, 10)) if self.current_trophies < 2000 else 0
 
     def apply_trophy_floor(self, old_trophies):
         """Once a brawler has reached 1000 trophies, they can't drop below it."""
@@ -202,18 +202,17 @@ class TrophyObserver:
 
         if game_result in self._showdown_place_index:
             # Showdown trio: place-based trophy delta.
-            # Win streak rules (Brawl Stars showdown):
+            # Win streak rules for local trophy estimates:
             #   1st, 2nd → streak grows, streak bonus applied
-            #   3rd     → streak unchanged, no streak bonus
-            #   4th     → streak reset, no streak bonus
+            #   3rd/4th reset streak, no streak bonus
             place_index = self._showdown_place_index[game_result]
             delta = self.calc_showdown_delta(place_index)
 
             # Update streak first so win_streak_gain() reflects this match.
-            # 1st/2nd grow it, 4th resets, 3rd leaves it unchanged.
+            # 1st/2nd grow it; every other showdown placement resets it.
             if game_result in ("1st", "2nd"):
                 self.win_streak += 1
-            elif game_result == "4th":
+            else:
                 self.win_streak = 0
 
             streak_bonus = self.win_streak_gain() if game_result in ("1st", "2nd") else 0
