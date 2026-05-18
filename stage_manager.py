@@ -471,7 +471,7 @@ class StageManager:
             self.push_all_needs_selection = bool(refreshed_rows)
 
         if refreshed_rows:
-            refreshed_rows[0]["automatically_pick"] = False
+            refreshed_rows[0]["automatically_pick"] = bool(self.push_all_needs_selection)
             refreshed_rows[0]["selection_method"] = "lowest_trophies"
             for row in refreshed_rows[1:]:
                 if row.get("automatically_pick") is not True:

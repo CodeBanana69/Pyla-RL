@@ -81,6 +81,16 @@ showdown_place_templates = {
 
 
 SHOWDOWN_PLACE_THRESHOLD = 0.95
+SHOWDOWN_PLACE_THRESHOLDS = {
+    # The first-place banner has more moving characters behind it and the
+    # current template is a wider text crop, so it scores lower than the
+    # compact rank-number templates while still being far above in-match noise.
+    "1st": 0.84,
+}
+
+
+def showdown_place_threshold(place):
+    return SHOWDOWN_PLACE_THRESHOLDS.get(place, SHOWDOWN_PLACE_THRESHOLD)
 
 
 def refresh_runtime_config():
@@ -104,7 +114,7 @@ def find_game_result(screenshot):
                     screenshot,
                     end_results_path + template_file,
                     crop_region,
-                    threshold=SHOWDOWN_PLACE_THRESHOLD,
+                    threshold=showdown_place_threshold(place),
                 ):
                     return place
         return False

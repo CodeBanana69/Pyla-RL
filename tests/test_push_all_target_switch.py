@@ -205,6 +205,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 manager.start_game()
 
                 self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
+                self.assertTrue(manager.brawlers_pick_data[0]["automatically_pick"])
                 self.assertEqual(manager.Trophy_observer.current_trophies, 25)
                 self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
                 mock_fetch_player.reset_mock()

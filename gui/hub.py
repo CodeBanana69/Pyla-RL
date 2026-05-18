@@ -90,7 +90,11 @@ class Hub:
         # -----------------------------------------------------------------------------------------
         # Bot config defaults
         self.bot_config.setdefault("gamemode_type", 3)
-        self.bot_config.setdefault("gamemode", "brawlball")
+        self.bot_config.setdefault("gamemode", "showdown")
+        if self.bot_config.get("gamemode") in ("brawlball", "brawlball_5v5"):
+            self.bot_config["gamemode_type"] = 3
+            self.bot_config["gamemode"] = "showdown"
+            save_dict_as_toml(self.bot_config, self.bot_config_path)
         self.bot_config.setdefault("bot_uses_gadgets", "yes")
         self.bot_config.setdefault("minimum_movement_delay", 0.4)
         self.bot_config.setdefault("wall_detection_confidence", 0.9)
@@ -480,10 +484,6 @@ class Hub:
             )
             return btn
 
-        # For type=3 (vertical)
-        self.rb_brawlball_3 = create_gamemode_button(
-            self.gm3_frame, "brawlball", "Brawlball", orientation=3
-        )
         self.rb_showdown_3 = create_gamemode_button(
             self.gm3_frame, "showdown", "Showdown Trio", orientation=3
         )
@@ -491,20 +491,14 @@ class Hub:
             self.gm3_frame, "other", "Other", orientation=3
         )
 
-        self.rb_brawlball_3.grid(row=0, column=0, padx=S(10), pady=S(5))
-        self.rb_showdown_3.grid(row=0, column=1, padx=S(10), pady=S(5))
-        self.rb_other_3.grid(row=0, column=2, padx=S(10), pady=S(5))
+        self.rb_showdown_3.grid(row=0, column=0, padx=S(10), pady=S(5))
+        self.rb_other_3.grid(row=0, column=1, padx=S(10), pady=S(5))
 
         # For type=5 (horizontal)
         self.rb_basketbrawl_5 = create_gamemode_button(
             self.gm5_frame, "basketbrawl", "Basket Brawl", orientation=5
         )
-        self.rb_bb5v5_5 = create_gamemode_button(
-            self.gm5_frame, "brawlball_5v5", "Brawlball 5v5", orientation=5
-        )
-
         self.rb_basketbrawl_5.grid(row=0, column=0, padx=S(10), pady=S(5))
-        self.rb_bb5v5_5.grid(row=0, column=1, padx=S(10), pady=S(5))
 
         def refresh_gm_buttons():
             """Refresh button colors to highlight the currently selected gamemode."""
@@ -517,13 +511,11 @@ class Hub:
                     btn.configure(fg_color=THEME["surface_2"], hover_color=THEME["accent_hover"])
 
             # For vertical set
-            set_button_color(self.rb_brawlball_3, "brawlball")
             set_button_color(self.rb_showdown_3, "showdown")
             set_button_color(self.rb_other_3, "other")
 
             # For horizontal set
             set_button_color(self.rb_basketbrawl_5, "basketbrawl")
-            set_button_color(self.rb_bb5v5_5, "brawlball_5v5")
 
         def refresh_orientation_buttons():
             """Refresh the orientation buttons' color based on self.gamemode_type_var."""
