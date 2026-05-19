@@ -20,3 +20,5 @@ discord_control_guild_id = ""
 # - discord_control_channel_id: right-click the command channel, Copy Channel ID.
 # - discord_control_guild_id: right-click the server icon, Copy Server ID.
 # Invite the bot with OAuth2 scopes: bot and applications.commands.
+# Remote commands: /start, /stop, /status, /screenshot, /restart_game, /restart_scrcpy,
+# /restart_emulator, /back, /press.

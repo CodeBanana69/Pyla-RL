@@ -1222,7 +1222,8 @@ class Hub:
             "4. Enable Developer Mode in Discord, then copy your User ID, Channel ID, and Server ID.\n"
             "5. Restart PylaAi-XXZ after changing the bot token or remote-control settings.\n\n"
             "Features: match summaries, optional screenshots, stuck pings, target-reached pings, timed/match-count pings, "
-            "and slash commands /start, /stop, and /status when Discord Remote Control is enabled."
+            "and slash commands /start, /stop, /status, /screenshot, /restart_game, /restart_scrcpy, "
+            "/restart_emulator, /back, and /press when Discord Remote Control is enabled."
         )
         tutorial = ctk.CTkLabel(
             container,

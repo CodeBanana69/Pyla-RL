@@ -422,7 +422,14 @@ def is_starr_nova_hub_screen(image):
     background_blue = mask_ratio(comic_background, (95, 70, 70), (125, 255, 255))
 
     top_event_anchor = timer_black > 0.20 and timer_magenta > 0.012 and timer_cyan > 0.010
-    skin_anchor = card_cyan > 0.012 and card_pink > 0.006
+    # The Starr Nova hub can be on Event Hub, Transforms, or Skins. The old
+    # check required the Skins-tab card colors, which missed the Transforms tab
+    # and left the bot stuck in a generic shop state.
+    content_anchor = (
+            (card_cyan > 0.012 and card_pink > 0.006)
+            or card_pink > 0.018
+            or background_gray > 0.42
+    )
     bottom_anchor = bottom_gray > 0.22 and (bottom_yellow > 0.008 or bottom_magenta > 0.012)
     comic_anchor = background_gray > 0.34 and background_blue < 0.18
     return (
@@ -430,7 +437,7 @@ def is_starr_nova_hub_screen(image):
             and logo_cyan > 0.003
             and top_event_anchor
             and comic_anchor
-            and skin_anchor
+            and content_anchor
             and bottom_anchor
     )
 

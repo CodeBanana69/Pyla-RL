@@ -297,7 +297,16 @@ def pyla_main(data):
             self.disconnect_ocr_interval = 6.0
             self.control_window = RuntimeControlWindow()
             self.control_window.start()
-            self.discord_control = DiscordControlServer(self.control_window.state_path)
+            self.discord_control = DiscordControlServer(
+                self.control_window.state_path,
+                screenshot_provider=self.window_controller.screenshot,
+                restart_game_callback=self.restart_brawl_stars,
+                restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
+                restart_emulator_callback=self.window_controller.restart_emulator_profile,
+                press_key_callback=self.discord_press_key,
+                back_callback=self.window_controller.android_back,
+                status_provider=self.telegram_status,
+            )
             self.discord_control.start()
             self.telegram_control = TelegramControlServer(
                 self.control_window.state_path,
@@ -325,6 +334,11 @@ def pyla_main(data):
                 "brawler": current.get("brawler", ""),
                 "target": current.get("push_until", ""),
             }
+
+        def discord_press_key(self, key):
+            normalized = str(key or "").strip().upper()
+            self.window_controller.press_key(normalized)
+            return True
 
         @staticmethod
         def load_models():

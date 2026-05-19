@@ -252,6 +252,20 @@ class LobbyStateFallbackTests(unittest.TestCase):
         self.assertTrue(45 <= center[0] <= 85)
         self.assertTrue(40 <= center[1] <= 75)
 
+    def test_starr_nova_hub_screen_detects_transforms_tab(self):
+        image = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        self.draw_starr_nova_hub_screen(image)
+        pink_bgr = cv2.cvtColor(
+            np.full((1, 1, 3), (150, 210, 230), dtype=np.uint8),
+            cv2.COLOR_HSV2BGR,
+        )[0, 0]
+        gray_bgr = (214, 214, 214)
+        image[92:250, 330:850] = gray_bgr
+        image[112:225, 360:820] = pink_bgr
+        image[125:175, 555:760] = pink_bgr
+
+        self.assertTrue(is_starr_nova_hub_screen(image))
+
     def test_starr_nova_hub_screen_rejects_plain_back_button(self):
         image = np.zeros((1080, 1920, 3), dtype=np.uint8)
         image[0:115, 0:150] = (48, 56, 74)
