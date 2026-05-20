@@ -204,7 +204,7 @@ class TrophyObserver:
             # Showdown trio: place-based trophy delta.
             # Win streak rules for local trophy estimates:
             #   1st, 2nd → streak grows, streak bonus applied
-            #   3rd/4th reset streak, no streak bonus
+            #   3rd keeps streak as tie, 4th resets it; neither gets streak bonus
             place_index = self._showdown_place_index[game_result]
             delta = self.calc_showdown_delta(place_index)
 
@@ -212,7 +212,7 @@ class TrophyObserver:
             # 1st/2nd grow it; every other showdown placement resets it.
             if game_result in ("1st", "2nd"):
                 self.win_streak += 1
-            else:
+            elif game_result == "4th":
                 self.win_streak = 0
 
             streak_bonus = self.win_streak_gain() if game_result in ("1st", "2nd") else 0

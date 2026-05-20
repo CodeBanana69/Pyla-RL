@@ -65,6 +65,7 @@ class StageManager:
         self.last_match_trophy_after = None
         self.last_match_trophy_delta = 0
         self.last_match_crossed_1000 = False
+        self.last_player_total_trophies = None
         self.stop_after_post_match_rewards = False
         self.completion_notification_sent = False
         time_thresholds = load_toml_as_dict("./cfg/time_tresholds.toml")
@@ -313,9 +314,36 @@ class StageManager:
             "win_streak": self.Trophy_observer.win_streak,
             "brawlers_left": len(self.brawlers_pick_data),
         }
+        total_trophies = self.player_total_trophies()
+        if total_trophies is not None:
+            details["total_trophies"] = total_trophies
+        trophy_delta = getattr(self, "last_match_trophy_delta", 0) or 0
+        if trophy_delta:
+            details["trophy_delta"] = trophy_delta
         if extra:
             details.update(extra)
         return details
+
+    def player_total_trophies(self):
+        config = dict(load_toml_as_dict("cfg/brawl_stars_api.toml"))
+        config.update(load_toml_as_dict("cfg/brawl_stars_api.local.toml"))
+        player_tag = str(config.get("player_tag") or "").strip()
+        has_token = bool(str(config.get("api_token") or "").strip())
+        has_refresh_login = bool(
+            config.get("auto_refresh_token")
+            and str(config.get("developer_email") or "").strip()
+            and str(config.get("developer_password") or "").strip()
+        )
+        if not player_tag or player_tag == "#YOURTAG" or not (has_token or has_refresh_login):
+            return getattr(self, "last_player_total_trophies", None)
+        try:
+            player = self.fetch_push_all_player_data()
+            total = player.get("trophies")
+            if total is not None:
+                self.last_player_total_trophies = int(total)
+        except Exception as e:
+            print(f"Could not fetch player total trophies for webhook: {e}")
+        return getattr(self, "last_player_total_trophies", None)
 
     @staticmethod
     def validate_trophies(trophies_string):

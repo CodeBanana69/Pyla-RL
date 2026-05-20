@@ -33,7 +33,6 @@ width_ratio = width / orig_screen_width
 height_ratio = height / orig_screen_height
 scale_factor = min(width_ratio, height_ratio)
 scale_factor *= 96/get_dpi_scale()
-pyla_version = load_toml_as_dict("./cfg/general_config.toml")['pyla_version']
 
 class SelectBrawler:
 
@@ -42,31 +41,38 @@ class SelectBrawler:
         install_tk_background_error_filter(self.app)
         tk._default_root = self.app
 
-        square_size = int(75 * scale_factor)
-        amount_of_rows = ceil(len(brawlers)/10) + 1
-        necessary_height = (int(145 * scale_factor) + amount_of_rows*square_size + (amount_of_rows-1)*int(3 * scale_factor))
-        window_height = min(necessary_height, int(820 * scale_factor))
-        image_frame_height = max(int(240 * scale_factor), window_height - int(190 * scale_factor))
-        self.app.title(f"PylaAi-XXZ v{pyla_version}")
+        square_size = int(62 * scale_factor)
+        amount_of_rows = ceil(len(brawlers) / 6) + 1
+        necessary_height = int(230 * scale_factor) + amount_of_rows * int(118 * scale_factor)
+        window_height = min(max(necessary_height, int(560 * scale_factor)), int(760 * scale_factor))
+        self.content_width = int(720 * scale_factor)
+        image_frame_height = max(int(250 * scale_factor), window_height - int(212 * scale_factor))
+        self.app.title("PylaAi-XXZ")
         self.brawlers = brawlers
 
-        self.app.geometry(f"{str(int(860 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")
+        self.app.geometry(f"{str(int(820 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")
+        self._drag_offset = (0, 0)
         self.data_setter = data_setter
         self.colors = {
-            'gray': THEME["border"],
-            'red': THEME["accent_hover"],
-            'darker_white': THEME["muted"],
-            'dark gray': THEME["bg"],
-            'cherry red': THEME["accent"],
-            'ui box gray': THEME["surface"],
-            'chess white': THEME["text"],
-            'chess brown': THEME["surface_3"],
-            'indian red': THEME["accent_hover"]
+            "accent": "#ff9f0a",
+            'gray': "#2f2f2f",
+            'red': "#ffb23a",
+            'darker_white': "#b8b8b8",
+            'dark gray': "#0c0c0c",
+            'cherry red': "#ff9f0a",
+            'ui box gray': "#121212",
+            'chess white': "#f4f4f4",
+            'chess brown': "#202020",
+            'indian red': "#ffb23a",
+            'panel': "#181818",
+            'panel2': "#1f1f1f",
+            'border_soft': "#262626",
+            'accent_soft': "#32220c",
+            'accent_border': "#8f610e",
         }
 
         self.app.configure(fg_color=self.colors['ui box gray'])
-
-
+        self._configure_frameless_window(self.app)
 
         self.images = []
         self.image_by_brawler = {}
@@ -100,59 +106,131 @@ class SelectBrawler:
             self.images.append((brawler, img_tk))  # Store tuple of brawler name and image
             self.image_by_brawler[brawler] = img_tk
 
-        # Entry widget for filtering
-        self.filter_var = tk.StringVar()
-        self.filter_entry = ctk.CTkEntry(
-            self.app, textvariable=self.filter_var,
-            placeholder_text="Type brawler name...", font=("", int(20 * scale_factor)), width=int(200 * scale_factor),
-            fg_color=self.colors['ui box gray'], border_color=self.colors['cherry red'], text_color="white"
-        )
-        header_text = "Write brawler"
-        search_x = int(330 * scale_factor)
-        search_width = int(220 * scale_factor)
-        search_label = ctk.CTkLabel(
-            self.app,
-            text=header_text,
-            font=("Comic sans MS", int(20 * scale_factor)),
-            text_color=self.colors['cherry red'],
-            width=search_width,
-            anchor="center",
-        )
-        search_label.place(x=search_x, y=int(scale_factor * 18))
-        self.filter_entry.configure(width=search_width)
-        self.filter_entry.place(x=search_x, y=int(scale_factor * 52))
-        self.filter_var.trace_add("write", lambda *args: self.queue_image_filter_update())
+        self._create_window_chrome(self.app, "Brawler Select", self.close_app)
 
-        # Frame to hold the images
-        self.image_frame = ctk.CTkScrollableFrame(
+        header = ctk.CTkFrame(
             self.app,
             fg_color=self.colors['ui box gray'],
-            width=int(845 * scale_factor),
-            height=image_frame_height,
+            border_color=self.colors['border_soft'],
+            border_width=1,
+            corner_radius=0,
+            height=int(86 * scale_factor),
         )
-        self.image_frame.place(x=0, y=int(100 * scale_factor))
+        header.pack(fill="x")
+
+        search_wrap = ctk.CTkFrame(
+            header,
+            fg_color=self.colors['panel'],
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+            width=int(380 * scale_factor),
+            height=int(38 * scale_factor),
+        )
+        search_wrap.place(relx=0.5, y=int(24 * scale_factor), anchor="n")
+
+        self.filter_var = tk.StringVar()
+        self.filter_entry = ctk.CTkEntry(
+            search_wrap,
+            textvariable=self.filter_var,
+            placeholder_text="Search brawler",
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            width=int(348 * scale_factor),
+            height=int(30 * scale_factor),
+            fg_color=self.colors['panel'],
+            border_color=self.colors['panel'],
+            text_color=self.colors['chess white'],
+            placeholder_text_color=self.colors['darker_white'],
+        )
+        self.filter_entry.place(relx=0.5, rely=0.5, anchor="center")
+        self.filter_var.trace_add("write", lambda *args: self.queue_image_filter_update())
+
+        body = ctk.CTkFrame(
+            self.app,
+            fg_color=self.colors['dark gray'],
+            corner_radius=0,
+        )
+        body.pack(fill="both", expand=True)
+        body.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
+        body.grid_rowconfigure(1, weight=0)
+
+        self.image_frame = ctk.CTkScrollableFrame(
+            body,
+            fg_color=self.colors['dark gray'],
+            width=self.content_width,
+            height=image_frame_height,
+            scrollbar_button_color=self.colors['panel2'],
+            scrollbar_button_hover_color=self.colors['gray'],
+        )
+        self.image_frame.grid(
+            row=0,
+            column=0,
+            padx=int(30 * scale_factor),
+            pady=(int(20 * scale_factor), int(8 * scale_factor)),
+            sticky="nsew",
+        )
+        self.grid_frame = ctk.CTkFrame(self.image_frame, fg_color="transparent")
+        self.grid_frame.pack(anchor="n", pady=(0, int(10 * scale_factor)))
 
         self.update_images("")
-        ctk.CTkButton(self.app, text="Start", command=self.start_bot, fg_color=self.colors['ui box gray'],
-                      text_color="white",
-                      font=("Comic sans MS", int(25 * scale_factor)), border_color=self.colors['cherry red'],
-                      border_width=int(2 * scale_factor), width=int(140 * scale_factor)).place(
-            x=int(360 * scale_factor),
-            y=int((window_height - 60 * scale_factor))
-        )
 
-        ctk.CTkButton(self.app, text="Push All", command=self.open_push_all_target_window, fg_color=self.colors['ui box gray'],
-                      text_color="white",
-                      font=("Comic sans MS", int(25 * scale_factor)), border_color=self.colors['cherry red'],
-                      border_width=int(2 * scale_factor), width=int(140 * scale_factor)).place(x=int(72 * scale_factor),
-                                                                y=int((window_height-60* scale_factor) ))
-        ctk.CTkButton(self.app, text="Push Order", command=self.open_push_order_window, fg_color=self.colors['ui box gray'],
-                      text_color="white",
-                      font=("Comic sans MS", int(20 * scale_factor)), border_color=self.colors['cherry red'],
-                      border_width=int(2 * scale_factor), width=int(150 * scale_factor)).place(
-            x=int(638 * scale_factor),
-            y=int((window_height - 57 * scale_factor))
+        actions_width = int(472 * scale_factor)
+        actions_height = int(44 * scale_factor)
+        actions = ctk.CTkFrame(
+            body,
+            fg_color="transparent",
+            width=actions_width,
+            height=actions_height,
+            corner_radius=0,
         )
+        actions.grid(row=1, column=0, pady=(int(4 * scale_factor), int(14 * scale_factor)))
+        actions.pack_propagate(False)
+        actions.grid_propagate(False)
+
+        ctk.CTkButton(
+            actions,
+            text="Push All",
+            command=self.open_push_all_target_window,
+            fg_color=self.colors['panel'],
+            hover_color=self.colors['panel2'],
+            text_color=self.colors['chess white'],
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(9 * scale_factor),
+            width=int(130 * scale_factor),
+            height=int(38 * scale_factor),
+        ).place(x=0, y=int(3 * scale_factor))
+        self.start_button = ctk.CTkButton(
+            actions,
+            text="Start Pyla",
+            command=self.start_bot,
+            fg_color=self.colors['cherry red'],
+            hover_color=self.colors['red'],
+            text_color="white",
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            border_color="#ffd18a",
+            border_width=1,
+            corner_radius=int(12 * scale_factor),
+            width=int(148 * scale_factor),
+            height=int(38 * scale_factor),
+        )
+        self.start_button.place(x=int(162 * scale_factor), y=int(3 * scale_factor))
+        ctk.CTkButton(
+            actions,
+            text="Push Order",
+            command=self.open_push_order_window,
+            fg_color=self.colors['panel'],
+            hover_color=self.colors['panel2'],
+            text_color=self.colors['chess white'],
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(9 * scale_factor),
+            width=int(130 * scale_factor),
+            height=int(38 * scale_factor),
+        ).place(x=int(342 * scale_factor), y=int(3 * scale_factor))
 
         self.app.mainloop()
 
@@ -226,6 +304,86 @@ class SelectBrawler:
         except Exception:
             pass
         self._closed = True
+
+    def _configure_frameless_window(self, window):
+        window.overrideredirect(True)
+        window.configure(fg_color=self.colors['ui box gray'])
+
+    def _create_window_chrome(self, window, title, close_command):
+        chrome = ctk.CTkFrame(
+            window,
+            fg_color=self.colors['ui box gray'],
+            border_color=self.colors['border_soft'],
+            border_width=1,
+            corner_radius=0,
+            height=int(42 * scale_factor),
+        )
+        chrome.pack(fill="x")
+        chrome.pack_propagate(False)
+
+        def start_move(event):
+            window._pyla_drag_offset = (event.x_root - window.winfo_x(), event.y_root - window.winfo_y())
+
+        def drag_move(event):
+            drag_x, drag_y = getattr(window, "_pyla_drag_offset", (0, 0))
+            window.geometry(f"+{event.x_root - drag_x}+{event.y_root - drag_y}")
+
+        chrome.bind("<ButtonPress-1>", start_move)
+        chrome.bind("<B1-Motion>", drag_move)
+
+        ctk.CTkLabel(
+            chrome,
+            text=f"Pyla  ·  {title}",
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            text_color=self.colors['chess white'],
+        ).place(relx=0.5, rely=0.5, anchor="center")
+
+        ctk.CTkButton(
+            chrome,
+            text="×",
+            command=close_command,
+            fg_color="transparent",
+            hover_color=self.colors['panel2'],
+            text_color=self.colors['darker_white'],
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            width=int(34 * scale_factor),
+            height=int(28 * scale_factor),
+            corner_radius=int(6 * scale_factor),
+        ).place(relx=0.985, rely=0.5, anchor="e")
+        return chrome
+
+    def _hub_button(self, parent, text, command, primary=False, width=None, height=None):
+        return ctk.CTkButton(
+            parent,
+            text=text,
+            command=command,
+            fg_color=self.colors['cherry red'] if primary else self.colors['panel'],
+            hover_color=self.colors['red'] if primary else self.colors['panel2'],
+            text_color="white" if primary else self.colors['chess white'],
+            font=("Segoe UI", int(13 * scale_factor), "bold"),
+            border_color="#ffd18a" if primary else self.colors['gray'],
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+            width=width or int(120 * scale_factor),
+            height=height or int(36 * scale_factor),
+        )
+
+    def _modal_body(self, window, padx=18, pady=18):
+        body = ctk.CTkFrame(window, fg_color=self.colors['dark gray'], corner_radius=0)
+        body.pack(fill="both", expand=True)
+        body.grid_columnconfigure(0, weight=1)
+        body._pyla_padx = int(padx * scale_factor)
+        body._pyla_pady = int(pady * scale_factor)
+        return body
+
+    def _section_label(self, parent, text):
+        return ctk.CTkLabel(
+            parent,
+            text=text.upper(),
+            font=("Segoe UI", int(11 * scale_factor), "bold"),
+            text_color=self.colors['darker_white'],
+            anchor="w",
+        )
 
     def load_brawler_config(self):
         # open file select dialog to select a json file
@@ -348,77 +506,72 @@ class SelectBrawler:
 
     def open_push_order_window(self):
         top = ctk.CTkToplevel(self.app)
-        top.configure(fg_color=self.colors['ui box gray'])
+        self._configure_frameless_window(top)
         top.title("Push Order")
         top.attributes("-topmost", True)
-        win_w = int(860 * scale_factor)
-        win_h = int(560 * scale_factor)
+        win_w = int(820 * scale_factor)
+        win_h = int(570 * scale_factor)
         top.geometry(f"{win_w}x{win_h}+{str(int(820 * scale_factor))}+{str(int(180 * scale_factor))}")
+        self._create_window_chrome(top, "Push Order", top.destroy)
 
-        header_frame = ctk.CTkFrame(top, fg_color=self.colors['ui box gray'])
-        header_frame.pack(fill="x", padx=int(18 * scale_factor), pady=(int(14 * scale_factor), int(4 * scale_factor)))
+        body = self._modal_body(top, padx=18, pady=14)
 
-        ctk.CTkLabel(
-            header_frame,
-            text="Push Order",
-            font=("Comic sans MS", int(24 * scale_factor), "bold"),
-            text_color=self.colors['red'],
-            anchor="w",
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            header_frame,
-            text="Drag brawlers into the priority line. Empty line = normal Push All.",
-            font=("Comic sans MS", int(14 * scale_factor)),
-            text_color=self.colors['chess white'],
-            anchor="w",
-        ).pack(anchor="w", pady=(int(2 * scale_factor), 0))
+        top_bar = ctk.CTkFrame(body, fg_color="transparent")
+        top_bar.grid(row=0, column=0, sticky="ew", padx=body._pyla_padx, pady=(body._pyla_pady, int(8 * scale_factor)))
+        top_bar.grid_columnconfigure(0, weight=1)
+        self._section_label(top_bar, "Priority").grid(row=0, column=0, sticky="w")
 
-        ctk.CTkLabel(
-            top,
-            text="Priority line",
-            font=("Comic sans MS", int(15 * scale_factor), "bold"),
-            text_color=self.colors['chess white'],
-        ).pack(anchor="w", padx=int(22 * scale_factor), pady=(int(8 * scale_factor), 0))
+        selected_count_label = ctk.CTkLabel(
+            top_bar,
+            text="0 selected",
+            font=("Segoe UI", int(12 * scale_factor), "bold"),
+            text_color=self.colors['darker_white'],
+        )
+        selected_count_label.grid(row=0, column=1, sticky="e")
 
         queue_frame = ctk.CTkScrollableFrame(
-            top,
-            fg_color=self.colors['dark gray'],
-            border_color=self.colors['cherry red'],
-            border_width=int(1 * scale_factor),
-            width=int(810 * scale_factor),
-            height=int(92 * scale_factor),
+            body,
+            fg_color=self.colors['panel'],
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+            width=int(780 * scale_factor),
+            height=int(88 * scale_factor),
             orientation="horizontal",
         )
-        queue_frame.pack(padx=int(18 * scale_factor), pady=(int(4 * scale_factor), int(8 * scale_factor)), fill="x")
+        queue_frame.grid(row=1, column=0, sticky="ew", padx=body._pyla_padx, pady=(0, int(14 * scale_factor)))
 
-        action_frame = ctk.CTkFrame(top, fg_color=self.colors['ui box gray'])
-        action_frame.pack(fill="x", padx=int(18 * scale_factor), pady=(0, int(8 * scale_factor)))
-
-        ctk.CTkLabel(
-            top,
-            text="Brawlers",
-            font=("Comic sans MS", int(15 * scale_factor), "bold"),
-            text_color=self.colors['chess white'],
-        ).pack(anchor="w", padx=int(22 * scale_factor), pady=(int(2 * scale_factor), 0))
+        self._section_label(body, "Brawlers").grid(
+            row=2,
+            column=0,
+            sticky="w",
+            padx=body._pyla_padx,
+            pady=(0, int(8 * scale_factor)),
+        )
 
         grid_frame = ctk.CTkScrollableFrame(
-            top,
+            body,
             fg_color=self.colors['dark gray'],
             border_color=self.colors['gray'],
-            border_width=int(1 * scale_factor),
-            width=int(810 * scale_factor),
-            height=int(305 * scale_factor),
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+            width=int(780 * scale_factor),
+            height=int(300 * scale_factor),
+            scrollbar_button_color=self.colors['panel2'],
+            scrollbar_button_hover_color=self.colors['gray'],
         )
-        grid_frame.pack(padx=int(18 * scale_factor), pady=(int(4 * scale_factor), int(12 * scale_factor)), fill="both", expand=True)
+        grid_frame.grid(row=3, column=0, sticky="nsew", padx=body._pyla_padx)
+        body.grid_rowconfigure(3, weight=1)
+
+        action_frame = ctk.CTkFrame(
+            body,
+            fg_color="transparent",
+            height=int(48 * scale_factor),
+        )
+        action_frame.grid(row=4, column=0, pady=(int(12 * scale_factor), int(14 * scale_factor)))
+        action_frame.pack_propagate(False)
 
         grid_cards = {}
-        selected_count_label = ctk.CTkLabel(
-            action_frame,
-            text="0 selected",
-            font=("Comic sans MS", int(13 * scale_factor), "bold"),
-            text_color=self.colors['chess white'],
-        )
-        selected_count_label.pack(side="left", padx=(int(8 * scale_factor), int(14 * scale_factor)))
 
         def refresh_grid_state():
             queued_brawlers = set(self.push_all_priority_order)
@@ -442,18 +595,19 @@ class SelectBrawler:
             if not self.push_all_priority_order:
                 ctk.CTkLabel(
                     queue_frame,
-                    text="Drop brawlers here. Leave empty for normal Push All.",
-                    font=("Comic sans MS", int(15 * scale_factor)),
-                    text_color=self.colors['gray'],
+                    text="No priority order selected",
+                    font=("Segoe UI", int(13 * scale_factor), "bold"),
+                    text_color=self.colors['darker_white'],
                 ).grid(row=0, column=0, padx=int(14 * scale_factor), pady=int(24 * scale_factor), sticky="w")
                 return
 
             for index, brawler in enumerate(self.push_all_priority_order):
                 frame = ctk.CTkFrame(
                     queue_frame,
-                    fg_color=self.colors['ui box gray'],
+                    fg_color=self.colors['accent_soft'],
                     border_color=self.colors['cherry red'],
-                    border_width=int(2 * scale_factor),
+                    border_width=1,
+                    corner_radius=int(10 * scale_factor),
                     width=int(124 * scale_factor),
                     height=int(72 * scale_factor),
                 )
@@ -473,7 +627,7 @@ class SelectBrawler:
                 label = ctk.CTkLabel(
                     frame,
                     text=f"{index + 1}. {brawler}",
-                    font=("Comic sans MS", int(11 * scale_factor)),
+                    font=("Segoe UI", int(11 * scale_factor), "bold"),
                     text_color="white",
                     width=int(60 * scale_factor),
                     anchor="w",
@@ -483,12 +637,13 @@ class SelectBrawler:
                     frame,
                     text="X",
                     command=lambda b=brawler: (self.remove_push_order_brawler(b), refresh_order_view()),
-                    fg_color=self.colors['cherry red'],
-                    hover_color=self.colors['red'],
-                    text_color="white",
-                    font=("Arial", int(10 * scale_factor), "bold"),
+                    fg_color=self.colors['panel2'],
+                    hover_color=self.colors['gray'],
+                    text_color=self.colors['darker_white'],
+                    font=("Segoe UI", int(10 * scale_factor), "bold"),
                     width=int(20 * scale_factor),
                     height=int(20 * scale_factor),
+                    corner_radius=int(6 * scale_factor),
                 )
                 remove_btn.place(x=int(92 * scale_factor), y=int(4 * scale_factor))
 
@@ -503,9 +658,10 @@ class SelectBrawler:
             for index, (brawler, img_tk) in enumerate(self.images):
                 frame = ctk.CTkFrame(
                     grid_frame,
-                    fg_color=self.colors['ui box gray'],
+                    fg_color=self.colors['panel'],
                     border_color=self.colors['gray'],
-                    border_width=int(1 * scale_factor),
+                    border_width=1,
+                    corner_radius=int(10 * scale_factor),
                     width=int(86 * scale_factor),
                     height=int(102 * scale_factor),
                 )
@@ -517,7 +673,7 @@ class SelectBrawler:
                 name = ctk.CTkLabel(
                     frame,
                     text=brawler,
-                    font=("Comic sans MS", int(10 * scale_factor)),
+                    font=("Segoe UI", int(10 * scale_factor), "bold"),
                     text_color="white",
                     width=int(78 * scale_factor),
                 )
@@ -529,26 +685,19 @@ class SelectBrawler:
                     widget.bind("<Double-Button-1>", lambda event, b=brawler: (self.add_push_order_brawler(b), refresh_order_view()))
             refresh_grid_state()
 
-        ctk.CTkButton(
+        self._hub_button(
             action_frame,
-            text="Clear Order",
-            command=lambda: (self.push_all_priority_order.clear(), refresh_order_view()),
-            fg_color=self.colors['ui box gray'],
-            hover_color=self.colors['cherry red'],
-            text_color="white",
-            border_color=self.colors['cherry red'],
-            border_width=int(2 * scale_factor),
+            "Clear Order",
+            lambda: (self.push_all_priority_order.clear(), refresh_order_view()),
             width=int(120 * scale_factor),
-        ).pack(side="left", padx=int(6 * scale_factor))
-        ctk.CTkButton(
+        ).pack(side="left", padx=int(10 * scale_factor))
+        self._hub_button(
             action_frame,
-            text="Done",
-            command=top.destroy,
-            fg_color=self.colors['cherry red'],
-            hover_color=self.colors['red'],
-            text_color="white",
+            "Done",
+            top.destroy,
+            primary=True,
             width=int(110 * scale_factor),
-        ).pack(side="right", padx=int(6 * scale_factor))
+        ).pack(side="left", padx=int(10 * scale_factor))
 
         render_queue()
         render_grid()
@@ -776,22 +925,32 @@ class SelectBrawler:
 
     def open_push_all_target_window(self):
         top = ctk.CTkToplevel(self.app)
-        top.configure(fg_color=self.colors['ui box gray'])
+        self._configure_frameless_window(top)
         top.title("Push All Target")
         top.attributes("-topmost", True)
-        win_w = int(360 * scale_factor)
+        win_w = int(390 * scale_factor)
         win_h = int(300 * scale_factor)
         top.geometry(f"{win_w}x{win_h}+{str(int(950 * scale_factor))}+{str(int(260 * scale_factor))}")
+        self._create_window_chrome(top, "Push All Target", top.destroy)
 
-        ctk.CTkLabel(
-            top,
-            text="Push all brawlers to:",
-            font=("Comic sans MS", int(22 * scale_factor)),
-            text_color=self.colors['red'],
-        ).pack(pady=(int(18 * scale_factor), int(10 * scale_factor)))
+        body = self._modal_body(top, padx=22, pady=18)
+        self._section_label(body, "Target Trophies").grid(
+            row=0,
+            column=0,
+            sticky="w",
+            padx=body._pyla_padx,
+            pady=(body._pyla_pady, int(12 * scale_factor)),
+        )
 
-        button_frame = ctk.CTkFrame(top, fg_color=self.colors['ui box gray'])
-        button_frame.pack(pady=int(8 * scale_factor))
+        button_frame = ctk.CTkFrame(
+            body,
+            fg_color=self.colors['panel'],
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+        )
+        button_frame.grid(row=1, column=0, padx=body._pyla_padx, sticky="ew")
+        button_frame.grid_columnconfigure((0, 1), weight=1)
 
         def choose_target(target):
             try:
@@ -804,19 +963,13 @@ class SelectBrawler:
         for index, target in enumerate(targets):
             row = index // 2
             col = index % 2
-            ctk.CTkButton(
+            self._hub_button(
                 button_frame,
-                text=str(target),
-                command=lambda t=target: choose_target(t),
-                fg_color=self.colors['ui box gray'],
-                hover_color=self.colors['cherry red'],
-                text_color="white",
-                font=("Comic sans MS", int(20 * scale_factor)),
-                border_color=self.colors['cherry red'],
-                border_width=int(2 * scale_factor),
+                str(target),
+                lambda t=target: choose_target(t),
                 width=int(120 * scale_factor),
                 height=int(42 * scale_factor),
-            ).grid(row=row, column=col, padx=int(10 * scale_factor), pady=int(8 * scale_factor))
+            ).grid(row=row, column=col, padx=int(10 * scale_factor), pady=int(10 * scale_factor))
 
     def push_all(self, target_trophies=1000):
         if self._closing:
@@ -911,13 +1064,14 @@ class SelectBrawler:
 
     def open_brawler_entry(self, brawler):
         top = ctk.CTkToplevel(self.app)
-        top.configure(fg_color=self.colors['ui box gray'])
-        win_w = int(300 * scale_factor)
-        win_h = int(400 * scale_factor)
+        self._configure_frameless_window(top)
+        win_w = int(390 * scale_factor)
+        win_h = int(470 * scale_factor)
         top.geometry(
             f"{win_w}x{win_h}+{str(int(1100 * scale_factor))}+{str(int(200 * scale_factor))}")
         top.title("Enter Brawler Data")
         top.attributes("-topmost", True)
+        self._create_window_chrome(top, "Brawler Setup", top.destroy)
 
         # --- Variables ---
         push_until_var = tk.StringVar()
@@ -929,66 +1083,76 @@ class SelectBrawler:
         if api_trophies is not None:
             trophies_var.set(str(api_trophies))
 
-        # --- Fixed Y positions for placed widgets ---
-        y_title = int(7 * scale_factor)
-        y_buttons = int(50 * scale_factor)
-        y_field1_label = int(100 * scale_factor)
-        y_field1_entry = int(125 * scale_factor)
-        y_field2_label = int(165 * scale_factor)
-        y_field2_entry = int(190 * scale_factor)
-        y_field3_label = int(230 * scale_factor)
-        y_field3_entry = int(255 * scale_factor)
-        y_auto_pick = int(300 * scale_factor)
-        y_submit = int(350 * scale_factor)
-        x_center_label = int(70 * scale_factor)
-        x_center_entry = int(60 * scale_factor)
-        entry_width = int(170 * scale_factor)
+        body = self._modal_body(top, padx=22, pady=16)
+        card = ctk.CTkFrame(
+            body,
+            fg_color=self.colors['panel'],
+            border_color=self.colors['gray'],
+            border_width=1,
+            corner_radius=int(10 * scale_factor),
+        )
+        card.grid(row=0, column=0, padx=body._pyla_padx, pady=body._pyla_pady, sticky="nsew")
+        card.grid_columnconfigure(0, weight=1)
+        body.grid_rowconfigure(0, weight=1)
 
-        # --- Title ---
-        ctk.CTkLabel(top, text=f"Brawler: {brawler}", font=("Comic sans MS", int(20 * scale_factor)),
-                     text_color=self.colors['red']).place(x=x_center_label, y=y_title)
+        ctk.CTkLabel(
+            card,
+            text=brawler.title(),
+            font=("Segoe UI", int(18 * scale_factor), "bold"),
+            text_color=self.colors['chess white'],
+        ).grid(row=0, column=0, pady=(int(16 * scale_factor), int(10 * scale_factor)))
 
-        # --- Push type buttons ---
-        farm_type_button_frame = ctk.CTkFrame(top, width=int(210 * scale_factor), height=int(40 * scale_factor),
-                                              fg_color=self.colors['ui box gray'])
-        farm_type_button_frame.place(x=int(45 * scale_factor), y=y_buttons)
+        farm_type_button_frame = ctk.CTkFrame(card, fg_color="transparent")
+        farm_type_button_frame.grid(row=1, column=0, pady=(0, int(14 * scale_factor)))
 
-        # --- Entry widgets (created but NOT placed yet) ---
-        push_until_label = ctk.CTkLabel(top, text="Target Amount", font=("Comic sans MS", int(15 * scale_factor)),
-                     text_color=self.colors['chess white'])
+        fields_frame = ctk.CTkFrame(card, fg_color="transparent")
+        fields_frame.grid(row=2, column=0, sticky="ew", padx=int(18 * scale_factor))
+        fields_frame.grid_columnconfigure(0, weight=1)
+        entry_width = int(230 * scale_factor)
+
+        def form_label(text):
+            return ctk.CTkLabel(
+                fields_frame,
+                text=text,
+                font=("Segoe UI", int(12 * scale_factor), "bold"),
+                text_color=self.colors['darker_white'],
+                anchor="w",
+            )
+
+        push_until_label = form_label("Target Amount")
         push_until_entry = ctk.CTkEntry(
-            top, textvariable=push_until_var, fg_color=self.colors['ui box gray'], text_color="white",
-            border_color=self.colors['cherry red'], border_width=int(2 * scale_factor),
-            height=int(28 * scale_factor), width=entry_width
+            fields_frame, textvariable=push_until_var, fg_color=self.colors['dark gray'], text_color="white",
+            border_color=self.colors['gray'], border_width=1, corner_radius=int(8 * scale_factor),
+            height=int(34 * scale_factor), width=entry_width
         )
 
-        trophies_label = ctk.CTkLabel(top, text="Current Trophies", font=("Comic sans MS", int(15 * scale_factor)),
-                     text_color=self.colors['chess white'])
+        trophies_label = form_label("Current Trophies")
         trophies_entry = ctk.CTkEntry(
-            top, textvariable=trophies_var, fg_color=self.colors['ui box gray'], text_color="white",
-            border_color=self.colors['cherry red'], border_width=int(2 * scale_factor),
-            height=int(28 * scale_factor), width=entry_width
+            fields_frame, textvariable=trophies_var, fg_color=self.colors['dark gray'], text_color="white",
+            border_color=self.colors['gray'], border_width=1, corner_radius=int(8 * scale_factor),
+            height=int(34 * scale_factor), width=entry_width
         )
 
-        wins_label = ctk.CTkLabel(top, text="Current Wins", font=("Comic sans MS", int(15 * scale_factor)),
-                     text_color=self.colors['chess white'])
+        wins_label = form_label("Current Wins")
         wins_entry = ctk.CTkEntry(
-            top, textvariable=wins_var, fg_color=self.colors['ui box gray'], text_color="white",
-            border_color=self.colors['cherry red'], border_width=int(2 * scale_factor),
-            height=int(28 * scale_factor), width=entry_width
+            fields_frame, textvariable=wins_var, fg_color=self.colors['dark gray'], text_color="white",
+            border_color=self.colors['gray'], border_width=1, corner_radius=int(8 * scale_factor),
+            height=int(34 * scale_factor), width=entry_width
         )
 
-        win_streak_label = ctk.CTkLabel(top, text="Current Brawler's Win Streak", font=("Comic sans MS", int(15 * scale_factor)),
-                     text_color=self.colors['chess white'])
+        win_streak_label = form_label("Current Win Streak")
         current_win_streak_entry = ctk.CTkEntry(
-            top, textvariable=current_win_streak_var, fg_color=self.colors['ui box gray'], text_color="white",
-            border_color=self.colors['cherry red'], border_width=int(2 * scale_factor),
-            height=int(28 * scale_factor), width=entry_width
+            fields_frame, textvariable=current_win_streak_var, fg_color=self.colors['dark gray'], text_color="white",
+            border_color=self.colors['gray'], border_width=1, corner_radius=int(8 * scale_factor),
+            height=int(34 * scale_factor), width=entry_width
         )
 
         auto_pick_checkbox = ctk.CTkCheckBox(
-            top, text="Bot auto-selects brawler", variable=auto_pick_var,
-            fg_color=self.colors['cherry red'], text_color="white", checkbox_height=int(24 * scale_factor)
+            card, text="Auto select brawler", variable=auto_pick_var,
+            fg_color=self.colors['cherry red'], hover_color=self.colors['red'],
+            border_color=self.colors['gray'], text_color="white",
+            font=("Segoe UI", int(12 * scale_factor), "bold"),
+            checkbox_height=int(22 * scale_factor), checkbox_width=int(22 * scale_factor),
         )
 
         def submit_data():
@@ -1016,11 +1180,7 @@ class SelectBrawler:
             print("Selected Brawler Data :", self.brawlers_data)
             top.destroy()
 
-        submit_button = ctk.CTkButton(
-            top, text="Submit", command=submit_data, fg_color=self.colors['ui box gray'],
-            border_color=self.colors['cherry red'],
-            text_color="white", border_width=int(2 * scale_factor), width=int(80 * scale_factor)
-        )
+        submit_button = self._hub_button(card, "Submit", submit_data, primary=True, width=int(116 * scale_factor), height=int(38 * scale_factor))
 
         # --- All dynamic widgets that can be shown/hidden ---
         all_dynamic_widgets = [
@@ -1033,12 +1193,16 @@ class SelectBrawler:
 
         def hide_all_fields():
             for w in all_dynamic_widgets:
-                w.place_forget()
+                w.grid_forget()
+
+        def add_field(row, label, entry):
+            label.grid(row=row * 2, column=0, sticky="w", pady=(0, int(4 * scale_factor)))
+            entry.grid(row=row * 2 + 1, column=0, pady=(0, int(12 * scale_factor)))
 
         def check_submit_visibility():
             """Show submit only when push type is selected and required numeric fields are filled."""
             if self.farm_type == "":
-                submit_button.place_forget()
+                submit_button.grid_forget()
                 return
             target_ok = push_until_var.get().isdigit()
             if self.farm_type == "trophies":
@@ -1046,9 +1210,9 @@ class SelectBrawler:
             else:  # wins
                 fields_ok = target_ok and wins_var.get().isdigit()
             if fields_ok:
-                submit_button.place(x=int(110 * scale_factor), y=y_submit)
+                submit_button.grid(row=4, column=0, pady=(int(10 * scale_factor), int(16 * scale_factor)))
             else:
-                submit_button.place_forget()
+                submit_button.grid_forget()
 
         # Trace all entry vars to re-check submit visibility on every keystroke
         push_until_var.trace_add("write", lambda *a: check_submit_visibility())
@@ -1059,54 +1223,29 @@ class SelectBrawler:
         def show_trophies_fields():
             hide_all_fields()
             self.farm_type = "trophies"
-            self.wins_button.configure(fg_color=self.colors['ui box gray'])
+            self.wins_button.configure(fg_color=self.colors['panel'])
             self.trophies_button.configure(fg_color=self.colors['cherry red'])
-            # Field 1: Target Amount
-            push_until_label.place(x=x_center_label, y=y_field1_label)
-            push_until_entry.place(x=x_center_entry, y=y_field1_entry)
-            # Field 2: Current Trophies
-            trophies_label.place(x=x_center_label, y=y_field2_label)
-            trophies_entry.place(x=x_center_entry, y=y_field2_entry)
-            # Field 3: Win Streak
-            win_streak_label.place(x=int(40 * scale_factor), y=y_field3_label)
-            current_win_streak_entry.place(x=x_center_entry, y=y_field3_entry)
-            # Auto-pick checkbox
-            auto_pick_checkbox.place(x=int(60 * scale_factor), y=y_auto_pick)
+            add_field(0, push_until_label, push_until_entry)
+            add_field(1, trophies_label, trophies_entry)
+            add_field(2, win_streak_label, current_win_streak_entry)
+            auto_pick_checkbox.grid(row=3, column=0, pady=(0, int(4 * scale_factor)))
             check_submit_visibility()
 
         def show_wins_fields():
             hide_all_fields()
             self.farm_type = "wins"
             self.wins_button.configure(fg_color=self.colors['cherry red'])
-            self.trophies_button.configure(fg_color=self.colors['ui box gray'])
-            # Field 1: Target Amount
-            push_until_label.place(x=x_center_label, y=y_field1_label)
-            push_until_entry.place(x=x_center_entry, y=y_field1_entry)
-            # Field 2: Current Wins
-            wins_label.place(x=x_center_label, y=y_field2_label)
-            wins_entry.place(x=x_center_entry, y=y_field2_entry)
-            # Auto-pick checkbox
-            auto_pick_checkbox.place(x=int(60 * scale_factor), y=y_auto_pick)
+            self.trophies_button.configure(fg_color=self.colors['panel'])
+            add_field(0, push_until_label, push_until_entry)
+            add_field(1, wins_label, wins_entry)
+            auto_pick_checkbox.grid(row=3, column=0, pady=(int(8 * scale_factor), int(4 * scale_factor)))
             check_submit_visibility()
 
-        self.wins_button = ctk.CTkButton(farm_type_button_frame, text="Win Amount", width=int(90 * scale_factor),
-                                            command=show_wins_fields,
-                                            hover_color=self.colors['cherry red'],
-                                            font=("", int(15 * scale_factor)),
-                                            fg_color=self.colors["ui box gray"],
-                                            border_color=self.colors['cherry red'],
-                                            border_width=int(2 * scale_factor)
-                                            )
-        self.trophies_button = ctk.CTkButton(farm_type_button_frame, text="Trophies", width=int(85 * scale_factor),
-                                             command=show_trophies_fields,
-                                             hover_color=self.colors['cherry red'],
-                                             font=("", int(15 * scale_factor)),
-                                             fg_color=self.colors["ui box gray"],
-                                             border_color=self.colors['cherry red'], border_width=int(2 * scale_factor)
-                                             )
+        self.wins_button = self._hub_button(farm_type_button_frame, "Win Amount", show_wins_fields, width=int(96 * scale_factor))
+        self.trophies_button = self._hub_button(farm_type_button_frame, "Trophies", show_trophies_fields, width=int(88 * scale_factor))
 
-        self.trophies_button.place(x=int(10 * scale_factor))
-        self.wins_button.place(x=int(110 * scale_factor))
+        self.trophies_button.grid(row=0, column=0, padx=int(5 * scale_factor))
+        self.wins_button.grid(row=0, column=1, padx=int(5 * scale_factor))
 
 
     def update_images(self, filter_text):
@@ -1123,13 +1262,13 @@ class SelectBrawler:
                 pass
             self._image_render_after_id = None
         self.visible_image_labels = []
-        for widget in self.image_frame.winfo_children():
+        for widget in self.grid_frame.winfo_children():
             widget.destroy()
 
         matches = [
             (brawler, img_tk)
             for brawler, img_tk in self.images
-            if brawler.startswith(filter_text)
+            if normalize_brawler_name(brawler).startswith(normalize_brawler_name(filter_text))
         ]
 
         def render_batch(start_index=0):
@@ -1137,13 +1276,52 @@ class SelectBrawler:
                 return
             for index in range(start_index, min(start_index + 16, len(matches))):
                 brawler, img_tk = matches[index]
-                row_num = index // 10
-                col_num = index % 10
-                label = ctk.CTkLabel(self.image_frame, image=img_tk, text="")
+                row_num = index // 6
+                col_num = index % 6
+                card = ctk.CTkFrame(
+                    self.grid_frame,
+                    fg_color=self.colors['panel'],
+                    border_color=self.colors['border_soft'],
+                    border_width=1,
+                    corner_radius=int(12 * scale_factor),
+                    width=int(112 * scale_factor),
+                    height=int(108 * scale_factor),
+                )
+                card._pyla_role = "BrawlerCard"
+                card.grid(row=row_num, column=col_num, padx=int(6 * scale_factor), pady=int(7 * scale_factor))
+                card.grid_propagate(False)
+
+                label = ctk.CTkLabel(card, image=img_tk, text="")
                 label._pyla_image_ref = img_tk
                 self.visible_image_labels.append(label)
-                label.bind("<Button-1>", lambda e, b=brawler: self.on_image_click(b))  # Bind click event
-                label.grid(row=row_num, column=col_num, padx=int(5 * scale_factor), pady=int(3 * scale_factor))
+                label.pack(pady=(int(9 * scale_factor), int(4 * scale_factor)))
+
+                name = ctk.CTkLabel(
+                    card,
+                    text=brawler.replace("_", " ").title(),
+                    font=("Segoe UI", int(11 * scale_factor), "bold"),
+                    text_color=self.colors['chess white'],
+                    width=int(96 * scale_factor),
+                    height=int(18 * scale_factor),
+                )
+                name.pack()
+
+                def enter(_event, current_card=card):
+                    current_card.configure(
+                        fg_color=self.colors['accent_soft'],
+                        border_color=self.colors['accent_border'],
+                    )
+
+                def leave(_event, current_card=card):
+                    current_card.configure(
+                        fg_color=self.colors['panel'],
+                        border_color=self.colors['border_soft'],
+                    )
+
+                for widget in (card, label, name):
+                    widget.bind("<Button-1>", lambda _event, b=brawler: self.on_image_click(b))
+                    widget.bind("<Enter>", enter)
+                    widget.bind("<Leave>", leave)
             next_index = start_index + 16
             if next_index < len(matches):
                 self._image_render_after_id = self.app.after(1, lambda: render_batch(next_index))

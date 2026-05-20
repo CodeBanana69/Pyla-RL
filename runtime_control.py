@@ -87,9 +87,11 @@ def run_window(state_path):
 
     root = ctk.CTk()
     root.title("PylaAi-XXZ Control")
-    root.geometry("280x170")
+    root.geometry("310x206")
     root.resizable(False, False)
     root.attributes("-topmost", True)
+    root.overrideredirect(True)
+    root.configure(fg_color="#121212")
     owner_pid = None
     try:
         owner_pid = int(Path(state_path).stem.rsplit("_", 1)[1])
@@ -99,24 +101,77 @@ def run_window(state_path):
     status_var = tk.StringVar(value="Running")
     button_var = tk.StringVar(value="Pause Bot")
 
-    card = ctk.CTkFrame(root, fg_color="#242424", corner_radius=8)
-    card.pack(fill="both", expand=True, padx=12, pady=12)
+    def start_move(event):
+        root._pyla_drag_offset = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+    def drag_move(event):
+        drag_x, drag_y = getattr(root, "_pyla_drag_offset", (0, 0))
+        root.geometry(f"+{event.x_root - drag_x}+{event.y_root - drag_y}")
+
+    chrome = ctk.CTkFrame(
+        root,
+        fg_color="#121212",
+        border_color="#262626",
+        border_width=1,
+        corner_radius=0,
+        height=42,
+    )
+    chrome.pack(fill="x")
+    chrome.pack_propagate(False)
+    chrome.bind("<ButtonPress-1>", start_move)
+    chrome.bind("<B1-Motion>", drag_move)
+
+    ctk.CTkLabel(
+        chrome,
+        text="Pyla  ·  Running",
+        text_color="#f4f4f4",
+        font=("Segoe UI", 13, "bold"),
+    ).place(relx=0.5, rely=0.5, anchor="center")
+
+    def on_close():
+        write_state(state_path, RUNNING)
+        root.destroy()
+
+    ctk.CTkButton(
+        chrome,
+        text="×",
+        command=on_close,
+        fg_color="transparent",
+        hover_color="#1f1f1f",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 13, "bold"),
+        width=34,
+        height=28,
+        corner_radius=6,
+    ).place(relx=0.985, rely=0.5, anchor="e")
+
+    card = ctk.CTkFrame(root, fg_color="#0c0c0c", corner_radius=0)
+    card.pack(fill="both", expand=True)
+
+    panel = ctk.CTkFrame(
+        card,
+        fg_color="#181818",
+        border_color="#262626",
+        border_width=1,
+        corner_radius=10,
+    )
+    panel.pack(fill="both", expand=True, padx=14, pady=14)
 
     title = ctk.CTkLabel(
-        card,
-        text="PylaAi-XXZ Bot Control",
-        text_color="#FFFFFF",
-        font=("Arial", 17, "bold"),
+        panel,
+        text="STATUS",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 11, "bold"),
     )
-    title.pack(pady=(14, 2))
+    title.pack(pady=(12, 0))
 
     status_label = ctk.CTkLabel(
-        card,
+        panel,
         textvariable=status_var,
-        text_color="#2FCE66",
-        font=("Arial", 14, "bold"),
+        text_color="#30d158",
+        font=("Segoe UI", 18, "bold"),
     )
-    status_label.pack(pady=(0, 12))
+    status_label.pack(pady=(0, 10))
 
     def refresh():
         if owner_pid and not process_is_alive(owner_pid):
@@ -125,10 +180,11 @@ def run_window(state_path):
         paused = read_state(state_path) == PAUSED
         status_var.set("Paused" if paused else "Running")
         button_var.set("Resume Bot" if paused else "Pause Bot")
-        status_label.configure(text_color="#FFB23F" if paused else "#2FCE66")
+        status_label.configure(text_color="#ff9f0a" if paused else "#30d158")
         pause_button.configure(
-            fg_color="#2F8F4E" if paused else "#AA2A2A",
-            hover_color="#3DAF62" if paused else "#BB3A3A",
+            fg_color="#ff9f0a" if paused else "#1f1f1f",
+            hover_color="#ffb23a" if paused else "#2a2a2a",
+            border_color="#8f610e" if paused else "#333333",
         )
 
     def root_exists():
@@ -148,31 +204,21 @@ def run_window(state_path):
         write_state(state_path, RUNNING if read_state(state_path) == PAUSED else PAUSED)
         refresh()
 
-    def on_close():
-        write_state(state_path, RUNNING)
-        root.destroy()
-
     pause_button = ctk.CTkButton(
-        card,
+        panel,
         textvariable=button_var,
         command=toggle_pause,
         width=170,
-        height=40,
+        height=38,
         corner_radius=8,
-        fg_color="#AA2A2A",
-        hover_color="#BB3A3A",
+        fg_color="#1f1f1f",
+        hover_color="#2a2a2a",
+        border_color="#333333",
+        border_width=1,
         text_color="#FFFFFF",
-        font=("Arial", 15, "bold"),
+        font=("Segoe UI", 15, "bold"),
     )
-    pause_button.pack(pady=(0, 8))
-
-    hint = ctk.CTkLabel(
-        card,
-        text="Movement stops instantly while paused.",
-        text_color="#BEBEBE",
-        font=("Arial", 11),
-    )
-    hint.pack()
+    pause_button.pack(pady=(0, 12))
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     refresh_loop()

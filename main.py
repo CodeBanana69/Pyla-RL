@@ -16,6 +16,7 @@ setup_logging_if_enabled()
 import window_controller
 from discord_control import DiscordControlServer
 from gui.hub import Hub
+from gui.qml_hub import QmlHub
 from gui.login import login
 from gui.main import App
 from gui.select_brawler import SelectBrawler
@@ -54,6 +55,14 @@ if platform.architecture()[0] != "64bit":
     print(f"Current Python: {sys.executable}")
 
 pyla_version = load_toml_as_dict("./cfg/general_config.toml")['pyla_version']
+
+
+def HubMenu(*args, **kwargs):
+    try:
+        return QmlHub(*args, **kwargs)
+    except Exception as exc:
+        print(f"QML hub unavailable, falling back to legacy hub: {exc}")
+        return Hub(*args, **kwargs)
 
 
 def parse_max_ips(value):
@@ -1195,7 +1204,7 @@ def run_app():
             print("New Wall detection model found, downloading... (this might take a few minutes depending on your internet speed)")
             get_latest_wall_model_file()
 
-    app = App(login, SelectBrawler, pyla_main, all_brawlers, Hub)
+    app = App(login, SelectBrawler, pyla_main, all_brawlers, HubMenu)
     app.start(pyla_version, get_latest_version)
 
 
