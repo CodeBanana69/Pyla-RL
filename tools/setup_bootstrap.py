@@ -2,6 +2,7 @@
 import platform
 import shutil
 import subprocess
+import ssl
 import sys
 import tempfile
 import urllib.request
@@ -40,21 +41,113 @@ def ensure_supported_windows():
     return True
 
 
+def verify_windows_signature(path, label):
+    if platform.system() != "Windows" or path.suffix.lower() != ".exe":
+        return True
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                (
+                    "$sig = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+                    "if ($sig.Status -eq 'Valid') { exit 0 } "
+                    "Write-Host ('Signature status: ' + $sig.Status); exit 1"
+                ),
+                str(path),
+            ],
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
+        if result.returncode == 0:
+            return True
+        print(f"{label} signature check failed.")
+        if result.stdout.strip():
+            print(result.stdout.strip())
+        if result.stderr.strip():
+            print(result.stderr.strip())
+    except Exception as exc:
+        print(f"Could not verify {label} signature: {exc}")
+    return False
+
+
+def download_with_urllib(url, destination, timeout=45, insecure=False):
+    context = ssl._create_unverified_context() if insecure else None
+    with urllib.request.urlopen(url, timeout=timeout, context=context) as response, destination.open("wb") as handle:
+        shutil.copyfileobj(response, handle)
+
+
+def download_with_powershell(url, destination):
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            (
+                "$ProgressPreference='SilentlyContinue'; "
+                "Invoke-WebRequest -Uri $args[0] -OutFile $args[1] -UseBasicParsing"
+            ),
+            url,
+            str(destination),
+        ],
+        text=True,
+        capture_output=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(message or f"PowerShell download failed with exit code {result.returncode}")
+
+
 def download_file(url, destination, label):
     if destination.exists() and destination.stat().st_size > 1_000_000:
         return destination
 
     print(f"Downloading {label}...")
-    try:
-        with urllib.request.urlopen(url, timeout=45) as response, destination.open("wb") as handle:
-            shutil.copyfileobj(response, handle)
-    except Exception as exc:
-        print("")
-        print(f"Could not download {label}.")
-        print("Check your internet connection, antivirus/firewall, or try again later.")
-        print(f"Error: {exc}")
-        input("Press Enter to close...")
-        raise SystemExit(1)
+    errors = []
+    attempts = [
+        ("Python HTTPS", lambda: download_with_urllib(url, destination)),
+        ("Windows downloader", lambda: download_with_powershell(url, destination)),
+        ("certificate fallback", lambda: download_with_urllib(url, destination, insecure=True)),
+    ]
+    for name, action in attempts:
+        try:
+            if destination.exists():
+                destination.unlink()
+            action()
+            if destination.exists() and destination.stat().st_size > 1_000_000:
+                if verify_windows_signature(destination, label):
+                    return destination
+                errors.append(f"{name}: downloaded file did not have a valid Windows signature")
+            else:
+                errors.append(f"{name}: downloaded file was empty or incomplete")
+        except Exception as exc:
+            errors.append(f"{name}: {exc}")
+
+    print("")
+    print(f"Could not download {label}.")
+    print("This is usually a broken Windows/Python certificate store, antivirus HTTPS scanning, proxy/VPN filtering, or the wrong PC date/time.")
+    print("Setup tried Python HTTPS, Windows PowerShell download, and a signed-installer fallback.")
+    print("")
+    print("What to try:")
+    print("- Check Windows date/time.")
+    print("- Run Windows Update, then restart.")
+    print("- Temporarily disable antivirus HTTPS/SSL scanning or try another network/VPN.")
+    print("- Download this file manually in a browser and place it here:")
+    print(f"  {destination}")
+    print(f"  {url}")
+    print("")
+    print("Download errors:")
+    for error in errors:
+        print(f"- {error}")
+    input("Press Enter to close...")
+    raise SystemExit(1)
     return destination
 
 

@@ -19,6 +19,14 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertGreater(pyla_install_index, setup_function_index)
         self.assertLess(pyla_install_index, setuptools_setup_index)
 
+    def test_setup_bootstrap_has_certificate_download_fallbacks(self):
+        source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("download_with_powershell", source)
+        self.assertIn("certificate fallback", source)
+        self.assertIn("verify_windows_signature", source)
+        self.assertIn("ssl._create_unverified_context", source)
+
 
 if __name__ == "__main__":
     unittest.main()

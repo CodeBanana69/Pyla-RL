@@ -1,0 +1,203 @@
+PylaAi-XXZ Discord Remote Control Tutorial
+=========================================
+
+What this feature is
+--------------------
+Discord Remote Control lets you control your running PylaAi-XXZ bot from Discord with slash commands.
+It is meant as an emergency/control tool for when the bot is running overnight or when something goes wrong and you are not at the PC.
+
+With it, you can pause or resume the bot, check status, request a screenshot, restart the game, restart scrcpy, restart the emulator profile, press Android Back, or press a few in-game buttons.
+
+This is different from the normal Discord webhook.
+The webhook only sends notifications.
+The remote-control bot receives commands and controls your local PylaAi-XXZ instance.
+
+
+Important safety note
+---------------------
+Only enable Discord Remote Control for your own Discord user ID and your own command channel.
+Do not leave Allowed User ID empty on a public server.
+Anyone who is allowed by the config can control the bot.
+
+The bot token is private.
+Never post your Discord bot token in Discord, GitHub, screenshots, or support chats.
+
+
+Available commands
+------------------
+/start
+Resumes PylaAi-XXZ if it was paused.
+
+/stop
+Pauses PylaAi-XXZ movement and actions.
+
+/status
+Shows whether the bot is running or paused.
+It also shows useful live details like current detected state, IPS, feed FPS, emulator, ADB device, brawler, and target.
+
+/screenshot
+Sends a current emulator screenshot to Discord.
+Use this to check what the bot is seeing without opening the PC.
+
+/restart_game
+Restarts Brawl Stars and restarts the scrcpy video feed.
+Use this when the game is stuck, crashed, opened the wrong screen, or the bot cannot recover normally.
+
+/restart_scrcpy
+Restarts only the scrcpy video feed.
+Use this when the game is still running, but the bot feed seems frozen or stale.
+
+/restart_emulator
+Restarts the full saved emulator profile.
+Use this only when the emulator itself is frozen, offline, or ADB/scrcpy cannot recover.
+This is the strongest recovery command.
+
+/back
+Presses Android Back in the emulator.
+Use this when the bot is stuck in a menu or popup.
+
+/press
+Presses a game button.
+Allowed values: q, e, f, g, h, m, back.
+Examples:
+/press q
+/press e
+/press back
+
+
+Setup step 1: create the Discord bot
+------------------------------------
+1. Open https://discord.com/developers/applications
+2. Click New Application.
+3. Give it a name, for example PylaAi-XXZ Control.
+4. Open the Bot page.
+5. Click Reset Token or View Token.
+6. Copy the bot token.
+7. Paste it into the PylaAi-XXZ Discord tab under Bot Token.
+
+
+Setup step 2: invite the bot to your server
+------------------------------------------
+1. In the Discord Developer Portal, open OAuth2.
+2. Open URL Generator.
+3. Enable these scopes:
+   - bot
+   - applications.commands
+4. In Bot Permissions, you can keep permissions minimal.
+   The bot mainly needs permission to send messages in your command channel.
+5. Copy the generated URL.
+6. Open the URL in your browser and invite the bot to your server.
+
+
+Setup step 3: copy your IDs
+---------------------------
+You need Discord Developer Mode for this.
+
+1. Open Discord.
+2. Go to User Settings.
+3. Open Advanced.
+4. Enable Developer Mode.
+
+Now copy these IDs:
+
+Allowed User ID:
+Right-click your Discord profile and click Copy User ID.
+Paste it into Allowed User ID.
+
+Allowed Channel ID:
+Right-click the channel where you want to use the commands and click Copy Channel ID.
+Paste it into Allowed Channel ID.
+
+Guild ID:
+Right-click your Discord server icon and click Copy Server ID.
+Paste it into Guild ID.
+
+Using a Guild ID makes slash commands appear faster because they sync only to your server.
+
+
+Setup step 4: enable remote control
+-----------------------------------
+In the PylaAi-XXZ Discord tab:
+
+1. Enable Discord Remote Control.
+2. Fill Bot Token.
+3. Fill Allowed User ID.
+4. Fill Allowed Channel ID.
+5. Fill Guild ID.
+6. Restart PylaAi-XXZ.
+
+After startup, the console should print that Discord control commands were synced.
+
+
+Recommended config example
+--------------------------
+discord_control_enabled = true
+discord_bot_token = "YOUR_PRIVATE_BOT_TOKEN"
+discord_control_user_id = "YOUR_DISCORD_USER_ID"
+discord_control_channel_id = "YOUR_COMMAND_CHANNEL_ID"
+discord_control_guild_id = "YOUR_SERVER_ID"
+
+
+How to test it
+--------------
+1. Start PylaAi-XXZ normally.
+2. Wait until the console says Discord control commands synced.
+3. In your Discord command channel, type /status.
+4. If /status works, try /screenshot.
+5. If the screenshot arrives, remote control is working.
+
+
+Troubleshooting
+---------------
+Slash commands do not appear:
+- Restart PylaAi-XXZ after changing the token or guild ID.
+- Make sure the bot was invited with applications.commands.
+- If no Guild ID is set, global Discord slash commands can take longer to appear.
+- Fill Guild ID for faster command sync.
+
+The bot says you are not allowed:
+- Check Allowed User ID.
+- Check Allowed Channel ID.
+- Check Guild ID.
+- Make sure you copied the real numeric ID, not the username.
+
+Screenshot does not send:
+- Make sure PylaAi-XXZ is running and connected to the emulator.
+- Try /status first.
+- If status works but screenshot fails, the emulator feed may be unavailable.
+- Try /restart_scrcpy.
+
+/restart_game does not fix it:
+- Try /restart_scrcpy if only the feed is stuck.
+- Try /restart_emulator if the emulator itself is frozen or ADB is offline.
+
+Bot token invalid:
+- Create or reset the token in the Discord Developer Portal.
+- Paste the full token into Bot Token.
+- Do not include extra spaces.
+
+
+When to use each recovery command
+---------------------------------
+Use /back when the bot is stuck in a menu.
+Use /restart_scrcpy when the bot feed is frozen but the emulator still works.
+Use /restart_game when Brawl Stars crashed or is stuck.
+Use /restart_emulator when the whole emulator is frozen or ADB is offline.
+
+
+Privacy
+-------
+/screenshot sends the current emulator screenshot into the allowed Discord channel.
+Only use it in a private/admin channel.
+
+The screenshot is sent directly through Discord.
+The command does not intentionally save a permanent screenshot file in the project.
+
+
+Best practice
+-------------
+Create one private Discord channel just for PylaAi-XXZ commands.
+Put only your own Allowed User ID and that channel ID in the config.
+Keep the bot token secret.
+Use /status and /screenshot first before using restart commands.
+
