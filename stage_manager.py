@@ -367,6 +367,16 @@ class StageManager:
         except (TypeError, ValueError):
             return default
 
+    def _sync_observer_to_current_row(self):
+        if not self.brawlers_pick_data:
+            return
+        current = self.brawlers_pick_data[0]
+        self.Trophy_observer.change_trophies(
+            self._number_or_default(current.get("trophies", 0), 0)
+        )
+        self.Trophy_observer.current_wins = self._number_or_default(current.get("wins", 0), 0)
+        self.Trophy_observer.win_streak = self._number_or_default(current.get("win_streak", 0), 0)
+
     def _prepare_next_push_all_brawler(self, target, type_of_push="trophies"):
         """Remove completed Push All rows and choose the current lowest remaining row.
 
@@ -419,10 +429,7 @@ class StageManager:
                 row["automatically_pick"] = True
 
         self.brawlers_pick_data = remaining
-        next_data = self.brawlers_pick_data[0]
-        self.Trophy_observer.change_trophies(self._number_or_default(next_data.get("trophies", 0), 0))
-        self.Trophy_observer.current_wins = self._number_or_default(next_data.get("wins", 0), 0)
-        self.Trophy_observer.win_streak = self._number_or_default(next_data.get("win_streak", 0), 0)
+        self._sync_observer_to_current_row()
         save_brawler_data(self.brawlers_pick_data)
         return True
 
@@ -523,10 +530,29 @@ class StageManager:
 
         self.brawlers_pick_data = refreshed_rows
 
-        current_trophies = self._number_or_default(self.brawlers_pick_data[0].get("trophies", 0), 0)
-        if getattr(self.Trophy_observer, "current_trophies", None) != current_trophies:
-            self.Trophy_observer.change_trophies(current_trophies)
+        new_front_brawler = self.brawlers_pick_data[0].get("brawler")
+        if new_front_brawler != old_front_brawler:
+            self._sync_observer_to_current_row()
             changed = True
+        else:
+            current_trophies = self._number_or_default(self.brawlers_pick_data[0].get("trophies", 0), 0)
+            if getattr(self.Trophy_observer, "current_trophies", None) != current_trophies:
+                self.Trophy_observer.change_trophies(current_trophies)
+                changed = True
+            current_wins = self._number_or_default(
+                getattr(self.Trophy_observer, "current_wins", self.brawlers_pick_data[0].get("wins", 0)),
+                self.brawlers_pick_data[0].get("wins", 0),
+            )
+            current_streak = self._number_or_default(
+                getattr(self.Trophy_observer, "win_streak", self.brawlers_pick_data[0].get("win_streak", 0)),
+                self.brawlers_pick_data[0].get("win_streak", 0),
+            )
+            if self.brawlers_pick_data[0].get("wins") != current_wins:
+                self.brawlers_pick_data[0]["wins"] = current_wins
+                changed = True
+            if self.brawlers_pick_data[0].get("win_streak") != current_streak:
+                self.brawlers_pick_data[0]["win_streak"] = current_streak
+                changed = True
 
         if changed:
             if self.push_all_needs_selection:

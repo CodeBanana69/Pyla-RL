@@ -207,8 +207,43 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
                 self.assertTrue(manager.brawlers_pick_data[0]["automatically_pick"])
                 self.assertEqual(manager.Trophy_observer.current_trophies, 25)
+                self.assertEqual(manager.Trophy_observer.current_wins, 0)
+                self.assertEqual(manager.Trophy_observer.win_streak, 0)
                 self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
                 mock_fetch_player.reset_mock()
+
+    @patch("stage_manager.save_brawler_data")
+    @patch("stage_manager.fetch_brawl_stars_player")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_api_target_switch_resets_stale_win_streak_for_next_brawler(
+            self,
+            mock_api_config,
+            mock_fetch_player,
+            _mock_save,
+    ):
+        manager = self.make_manager(500)
+        manager.Trophy_observer.win_streak = 13
+        manager.Trophy_observer.current_wins = 9
+        manager.brawlers_pick_data[1]["win_streak"] = 0
+        manager.brawlers_pick_data[1]["wins"] = 0
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "timeout_seconds": 15,
+        }
+        mock_fetch_player.return_value = {
+            "brawlers": [
+                {"name": "FIRST", "trophies": 500},
+                {"name": "SECOND", "trophies": 25},
+            ]
+        }
+
+        manager.refresh_push_all_trophies_from_api()
+
+        self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
+        self.assertEqual(manager.Trophy_observer.current_trophies, 25)
+        self.assertEqual(manager.Trophy_observer.current_wins, 0)
+        self.assertEqual(manager.Trophy_observer.win_streak, 0)
 
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.fetch_brawl_stars_player")
