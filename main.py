@@ -396,6 +396,49 @@ def pyla_main(data):
             self.pause_started_at = None
             self.pending_discord_brawler = None
             self.runtime_notice = "Running"
+            self.last_recovery = None
+            self.recovery_count_session = 0
+
+        def log_runtime_recovery(self, event_type, detail=""):
+            from recovery_events import count_session_events, log_recovery, should_send_recovery_alert
+            from utils import load_toml_as_dict
+
+            record = log_recovery(
+                event_type,
+                detail,
+                getattr(self, "runtime_notice", "Running"),
+                session_id=str(os.getpid()),
+            )
+            self.last_recovery = record
+            self.recovery_count_session = count_session_events(str(os.getpid()))
+            discord_config = load_toml_as_dict("cfg/discord_config.toml")
+            telegram_config = load_toml_as_dict("cfg/telegram_config.local.toml") or load_toml_as_dict("cfg/telegram_config.toml")
+            threshold = int(discord_config.get("recovery_alert_threshold", 3) or 3)
+            notify_enabled = bool(
+                discord_config.get("notify_on_recovery", False)
+                or telegram_config.get("notify_on_recovery", False)
+            )
+            if notify_enabled and should_send_recovery_alert(event_type, threshold=threshold):
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(async_notify_user(
+                            "recovery_alert",
+                            self.window_controller.screenshot(),
+                            details={
+                                "state": self.state or "unknown",
+                                "notice": record.get("notice", ""),
+                                "event_type": event_type,
+                                "detail": detail,
+                            },
+                        ))
+                    finally:
+                        loop.close()
+                        asyncio.set_event_loop(None)
+                except Exception:
+                    pass
+            return record
 
         def initialize_stage_manager(self):
             self.Stage_manager.Trophy_observer.win_streak = data[0]['win_streak']
@@ -444,11 +487,28 @@ def pyla_main(data):
                     pass
 
         def build_runtime_snapshot(self):
+            from match_journal import read_recent_matches
+
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
             total = self.Stage_manager.Trophy_observer.match_history.get("total", {})
             start = getattr(self, "session_totals_start", {})
             trophies = self.Stage_manager.Trophy_observer.current_trophies
-            return {
+            recent = read_recent_matches(limit=1)
+            last_match = ""
+            if recent:
+                item = recent[0]
+                last_match = f"{item.get('brawler', '')} {item.get('result', '')} ({item.get('delta', '')})"
+            queue_preview = ""
+            try:
+                from gui.brawler_queue import load_queue
+
+                queue = load_queue()
+                if queue:
+                    names = [row.get("brawler", "") for row in queue[:3] if isinstance(row, dict)]
+                    queue_preview = ", ".join(name for name in names if name)
+            except Exception:
+                queue_preview = ""
+            snapshot = {
                 "uptime_s": time.time() - self.started_at,
                 "state": self.state or "unknown",
                 "brawler": current.get("brawler", ""),
@@ -457,11 +517,17 @@ def pyla_main(data):
                 "session_wins": int(total.get("victory", 0) or 0) - int(start.get("victory", 0) or 0),
                 "session_losses": int(total.get("defeat", 0) or 0) - int(start.get("defeat", 0) or 0),
                 "notice": getattr(self, "runtime_notice", "Running"),
+                "last_match": last_match,
+                "queue_preview": queue_preview,
+                "last_recovery": (getattr(self, "last_recovery", None) or {}).get("event_type", ""),
+                "recovery_count_session": int(getattr(self, "recovery_count_session", 0) or 0),
             }
+            return snapshot
 
         def telegram_status(self):
+            snapshot = self.build_runtime_snapshot()
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
-            return {
+            status = {
                 "state": self.state or "unknown",
                 "ips": f"{self.ips_ema:.2f}" if self.ips_ema is not None else "",
                 "feed_fps": f"{self.perf_feed_fps:.2f}",
@@ -469,7 +535,11 @@ def pyla_main(data):
                 "adb_device": getattr(getattr(self.window_controller, "device", None), "serial", ""),
                 "brawler": current.get("brawler", ""),
                 "target": current.get("push_until", ""),
+                "last_match": snapshot.get("last_match", ""),
+                "queue_preview": snapshot.get("queue_preview", ""),
+                "last_recovery": snapshot.get("last_recovery", ""),
             }
+            return status
 
         def discord_press_key(self, key):
             normalized = str(key or "").strip().upper()
@@ -647,6 +717,7 @@ def pyla_main(data):
             self.low_feed_last_recovery = now
             self.slow_feed_recovery_attempts += 1
             self.runtime_notice = "Slow feed recovery"
+            self.log_runtime_recovery("slow_feed", f"attempt {self.slow_feed_recovery_attempts}")
             print(
                 f"Frame feed stayed under 3 FPS for {now - self.low_feed_since:.1f}s "
                 f"(feed_fps={self.perf_feed_fps:.2f}); recovery attempt {self.slow_feed_recovery_attempts}."
@@ -721,6 +792,7 @@ def pyla_main(data):
             self.last_low_ips_recovery = now
             self.low_ips_recovery_attempts += 1
             self.runtime_notice = "Low IPS recovery"
+            self.log_runtime_recovery("low_ips", f"ips={current_ips:.2f}")
             self.window_controller.keys_up(list("wasd"))
             print(
                 f"IPS stayed low ({current_ips:.2f}, frame age {frame_age:.1f}s) "
@@ -796,6 +868,7 @@ def pyla_main(data):
                 f"(diff {diff:.3f}); restarting Brawl Stars and scrcpy."
             )
             self.runtime_notice = "Visual freeze recovery"
+            self.log_runtime_recovery("visual_freeze", "debug overlay unchanged")
             self.window_controller.keys_up(list("wasd"))
             self.restart_brawl_stars()
             return True
@@ -820,6 +893,7 @@ def pyla_main(data):
 
             self.global_freeze_recovery_attempts += 1
             self.runtime_notice = "Screen freeze recovery"
+            self.log_runtime_recovery("global_freeze", "screen hash unchanged")
             print(
                 "Screen health check found no visible change for "
                 f"{self.global_freeze_health_interval:.0f}s (diff {diff:.3f}); "
@@ -926,6 +1000,7 @@ def pyla_main(data):
 
             print(f"Lobby did not enter a match for {lobby_age:.1f}s; restarting Brawl Stars.")
             self.runtime_notice = "Lobby stuck recovery"
+            self.log_runtime_recovery("lobby_stuck", f"state={state}")
             self.restart_brawl_stars()
             return True
 
@@ -1116,6 +1191,7 @@ def pyla_main(data):
 
             self.disconnect_reload_attempts += 1
             self.runtime_notice = "Disconnect recovery"
+            self.log_runtime_recovery("disconnect_reload", "idle disconnect dialog")
             self.window_controller.keys_up(list("wasd"))
             print(f"Disconnect/login screen detected, recovery attempt {self.disconnect_reload_attempts}.")
             if self.disconnect_reload_attempts >= 3:
@@ -1130,6 +1206,7 @@ def pyla_main(data):
         def handle_offline_emulator(self):
             now = time.time()
             self.runtime_notice = "Emulator offline"
+            self.log_runtime_recovery("emulator_offline", "adb device missing")
             if now - self.last_offline_emulator_message > 10:
                 if self.window_controller.emulator_autorestart:
                     remaining = max(
@@ -1182,6 +1259,7 @@ def pyla_main(data):
             self.last_stale_feed_recovery = now
             self.stale_feed_recovery_attempts += 1
             self.runtime_notice = "Recovering scrcpy"
+            self.log_runtime_recovery("stale_scrcpy", "restarting video feed")
 
             if self.stale_feed_recovery_attempts >= self.stale_feed_emulator_restart_after or stale_age > 60:
                 print("Scrcpy feed is still frozen after recovery attempts; restarting emulator profile.")

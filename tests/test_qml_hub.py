@@ -112,8 +112,8 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertEqual(state["telegram"]["notification_chat_ids"], "123, 456")
         self.assertEqual(state["api"]["player_tag"], "#TAG")
         self.assertEqual(state["timers"]["super"], 0.25)
-        self.assertEqual(state["history"][0]["brawler"], "shelly")
-        self.assertEqual(state["history"][0]["winRate"], 75.0)
+        self.assertEqual(state["history"]["items"][0]["brawler"], "shelly")
+        self.assertEqual(state["history"]["items"][0]["winRate"], 75.0)
 
     def test_qml_update_config_persists_to_correct_old_files(self):
         store, paths = self.make_store()
@@ -199,8 +199,8 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn('font.weight: Font.Bold\n                    }\n                    Text {\n                        text: "XXZ Hub', qml)
         self.assertIn("id: startButton", qml)
         self.assertIn('text: "START"', qml)
-        self.assertNotIn('text: "Start Pyla"\n                                    color: "#ffffff"\n                                    font.pixelSize: 13', qml)
-        self.assertIn("color: startMouse.containsMouse ? theme.accentHover : theme.accent", qml)
+        self.assertIn("hubState.preflight", qml)
+        self.assertIn("function startBot()", qml)
         self.assertNotIn("gradient: Gradient", qml)
         self.assertNotIn("scale: startMouse.pressed", qml)
 
@@ -232,19 +232,18 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn('hubBridge.updateSetting("mode", "showdown-trio")', qml)
         self.assertIn('hubBridge.updateSetting("emulator", "ldplayer")', qml)
         self.assertIn('hubBridge.updateSetting("emulator", "mumu")', qml)
-        self.assertIn("hubBridge.startPyla()", qml)
         self.assertIn("def startPyla(self):", bridge)
+        self.assertIn("runActionWithPayload", bridge)
+        self.assertIn("function startBot()", qml)
         self.assertIn("onClicked: hubBridge.openDiscord()", qml)
         self.assertIn("onClicked: hubBridge.openPatreon()", qml)
 
-    def test_qml_hub_is_primary_with_legacy_fallback(self):
+    def test_qml_hub_is_primary_without_legacy_fallback(self):
         main_source = Path("main.py").read_text(encoding="utf-8")
 
         self.assertIn("from gui.qml_hub import QmlHub", main_source)
         self.assertIn("return QmlHub(*args, **kwargs)", main_source)
-        self.assertIn("from gui.hub import Hub", main_source)
-        self.assertIn("falling back to legacy hub", main_source)
-        self.assertTrue(Path("gui/hub.py").exists())
+        self.assertNotIn("falling back to legacy hub", main_source)
 
     def test_qml_hub_can_repair_missing_pyside6(self):
         bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")

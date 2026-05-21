@@ -408,69 +408,18 @@ class SelectBrawler:
                 print(f"Error loading brawler data: {e}")
 
     def get_push_all_data(self, target_trophies=1000):
-        target_trophies = int(target_trophies)
-        api_config = load_brawl_stars_api_config("cfg/brawl_stars_api.toml")
-        player_data = fetch_brawl_stars_player(
-            api_config.get("api_token", "").strip(),
-            api_config.get("player_tag", "").strip(),
-            int(api_config.get("timeout_seconds", 15)),
-        )
-        known_by_normalized_name = {
-            normalize_brawler_name(brawler): brawler
-            for brawler in self.brawlers
-        }
-        rows = []
-        for index, api_brawler in enumerate(player_data.get("brawlers", [])):
-            brawler = known_by_normalized_name.get(normalize_brawler_name(api_brawler.get("name", "")))
-            if not brawler:
-                continue
-            trophies = int(api_brawler.get("trophies", 0))
-            if trophies < target_trophies:
-                rows.append((trophies, index, brawler))
+        from gui.brawler_queue import get_push_all_data as build_push_all_data
 
-        rows.sort(key=lambda item: (item[0], item[1]))
-        data = []
-        for idx, (trophies, _, brawler) in enumerate(rows):
-            data.append({
-                "brawler": brawler,
-                "push_until": target_trophies,
-                "trophies": trophies,
-                "wins": 0,
-                "type": "trophies",
-                "automatically_pick": idx != 0,
-                "selection_method": "lowest_trophies",
-                "win_streak": 0,
-            })
-        return data
+        return build_push_all_data(target_trophies, brawlers=self.brawlers)
 
     def get_push_all_1k_data(self):
         return self.get_push_all_data(1000)
 
     def apply_push_all_priority_order(self, data):
-        priority_order = [
-            brawler
-            for brawler in self.push_all_priority_order
-            if any(row.get("brawler") == brawler for row in data)
-        ]
-        if not priority_order:
-            return data
+        from gui.brawler_queue import apply_push_all_priority_order
 
-        priority_index = {brawler: index for index, brawler in enumerate(priority_order)}
-        priority_rows = []
-        remaining_rows = []
-        for row in data:
-            if row.get("brawler") in priority_index:
-                priority_rows.append(dict(row))
-            else:
-                remaining_rows.append(dict(row))
-
-        priority_rows.sort(key=lambda row: priority_index[row.get("brawler")])
-        ordered = priority_rows + remaining_rows
-        for index, row in enumerate(ordered):
-            row["automatically_pick"] = True if priority_rows else index != 0
-            if row.get("brawler") in priority_index:
-                row["selection_method"] = "named_brawler"
-        print("Push All priority order:", [row.get("brawler") for row in ordered[:len(priority_rows)]])
+        ordered = apply_push_all_priority_order(data, self.push_all_priority_order)
+        print("Push All priority order:", [row.get("brawler") for row in ordered[: len(self.push_all_priority_order)]])
         return ordered
 
     def add_push_order_brawler(self, brawler):

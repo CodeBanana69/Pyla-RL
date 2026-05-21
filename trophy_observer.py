@@ -243,6 +243,18 @@ class TrophyObserver:
         print(f"Trophies : {old} -> {self.current_trophies}")
         print("Current wins:", self.current_wins)
         self._log_match(current_brawler, game_result, old, self.current_trophies)
+        try:
+            from match_journal import append_match_record
+
+            append_match_record(
+                brawler=current_brawler,
+                result=game_result,
+                delta=self.current_trophies - old,
+                mode="showdown" if game_result in self._showdown_place_index else "other",
+                session_id=str(os.getpid()),
+            )
+        except Exception:
+            pass
         self._update_milestones(current_brawler, old, self.current_trophies)
         self.match_history[current_brawler][bucket] += 1
         self.match_history["total"][bucket] += 1

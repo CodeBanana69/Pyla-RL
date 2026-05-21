@@ -39,7 +39,7 @@ def _normalize_session(session):
         normalized["uptime_s"] = max(0.0, float(session.get("uptime_s", 0.0)))
     except (TypeError, ValueError):
         normalized["uptime_s"] = 0.0
-    for key in ("state", "brawler", "target", "notice"):
+    for key in ("state", "brawler", "target", "notice", "last_match", "queue_preview", "last_recovery"):
         value = session.get(key)
         normalized[key] = "" if value is None else str(value)
     try:
@@ -47,7 +47,7 @@ def _normalize_session(session):
         normalized["trophies"] = None if trophies in (None, "") else int(trophies)
     except (TypeError, ValueError):
         normalized["trophies"] = None
-    for key in ("session_wins", "session_losses"):
+    for key in ("session_wins", "session_losses", "recovery_count_session"):
         try:
             normalized[key] = max(0, int(session.get(key, 0) or 0))
         except (TypeError, ValueError):
@@ -91,9 +91,11 @@ def format_session_summary(metrics):
     feed_text = f"{feed_fps:.1f}" if isinstance(feed_fps, (int, float)) else "--"
     state = session.get("state") or "--"
     notice = session.get("notice") or "Running"
+    last_recovery = session.get("last_recovery") or ""
+    recovery_suffix = f" | Recovery {last_recovery}" if last_recovery else ""
     return (
         f"PylaAi-XXZ | {uptime} | {progress} | W{wins} L{losses} | "
-        f"IPS {ips_text} | Feed {feed_text} | {state} | {notice}"
+        f"IPS {ips_text} | Feed {feed_text} | {state} | {notice}{recovery_suffix}"
     )
 
 
