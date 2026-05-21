@@ -1,8 +1,32 @@
 import sys
 import json
+import subprocess
 from pathlib import Path
 
 from gui.hub_state import HubStateStore
+
+
+def ensure_pyside6_available():
+    try:
+        import PySide6  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    if str(Path(sys.executable).name).lower() in {"python.exe", "pythonw.exe"}:
+        print("PySide6 is missing; installing it so the new QML hub can start...")
+        subprocess.check_call([
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "PySide6>=6.7.0",
+        ])
+        return
+    raise ModuleNotFoundError(
+        "No module named 'PySide6'. Run setup.exe or `py -3.11-64 -m pip install PySide6>=6.7.0`."
+    )
 
 
 class QmlHub:
@@ -13,6 +37,7 @@ class QmlHub:
             correct_zoom=True,
             on_close_callback=None,
     ):
+        ensure_pyside6_available()
         from PySide6.QtCore import QObject, QUrl, Signal, Slot
         from PySide6.QtGui import QGuiApplication, QIcon
         from PySide6.QtQml import QQmlApplicationEngine

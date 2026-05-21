@@ -27,6 +27,11 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("verify_windows_signature", source)
         self.assertIn("ssl._create_unverified_context", source)
 
+    def test_gpu_repair_installs_qml_dependency(self):
+        source = Path("tools/fix_gpu_runtime.py").read_text(encoding="utf-8")
+
+        self.assertIn('"PySide6>=6.7.0"', source)
+
 
 if __name__ == "__main__":
     unittest.main()

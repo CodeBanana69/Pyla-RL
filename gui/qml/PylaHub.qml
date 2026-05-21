@@ -918,7 +918,7 @@ ApplicationWindow {
                         title: "PERFORMANCE"
                         FieldRow {
                             label: "Inference Device"
-                            Row { spacing: 8; Repeater { model: ["auto", "directml", "cuda", "openvino", "cpu"]; delegate: ChoicePill { label: modelData; selected: root.value("settings", "cpu_or_gpu") === modelData; onClicked: root.saveValue("settings", "cpu_or_gpu", modelData) } } }
+                            Row { spacing: 8; Repeater { model: ["auto", "directml", "amd", "cuda", "openvino", "cpu"]; delegate: ChoicePill { label: modelData; selected: root.value("settings", "cpu_or_gpu") === modelData; onClicked: root.saveValue("settings", "cpu_or_gpu", modelData) } } }
                         }
                         FieldRow {
                             label: "DirectML GPU ID"

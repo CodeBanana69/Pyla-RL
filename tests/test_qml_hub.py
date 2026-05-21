@@ -154,7 +154,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("implicitWidth: Math.max(66", qml)
         self.assertIn("anchors.leftMargin: 190", qml)
         self.assertIn("Layout.fillWidth: true", qml)
-        self.assertIn('model: ["auto", "directml", "cuda", "openvino", "cpu"]', qml)
+        self.assertIn('model: ["auto", "directml", "amd", "cuda", "openvino", "cpu"]', qml)
 
     def test_qml_config_inputs_have_visible_row_height(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
@@ -245,6 +245,12 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("from gui.hub import Hub", main_source)
         self.assertIn("falling back to legacy hub", main_source)
         self.assertTrue(Path("gui/hub.py").exists())
+
+    def test_qml_hub_can_repair_missing_pyside6(self):
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+
+        self.assertIn("ensure_pyside6_available", bridge)
+        self.assertIn('"PySide6>=6.7.0"', bridge)
 
 
 if __name__ == "__main__":

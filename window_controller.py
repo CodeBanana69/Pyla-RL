@@ -975,7 +975,8 @@ class WindowController:
 
         def on_frame(frame):
             if frame is not None:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                if not getattr(scrcpy, "PYLA_RGB_FRAMES", False):
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 with self.frame_lock:
                     if generation != self.scrcpy_generation:
                         return

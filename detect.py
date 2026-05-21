@@ -9,6 +9,7 @@ from cuda_runtime_paths import add_cuda_dll_directories
 add_cuda_dll_directories()
 import onnxruntime as ort
 
+from gpu_support import gpu_help_message, normalize_preferred_device
 from utils import load_toml_as_dict
 
 warnings.filterwarnings(
@@ -55,7 +56,7 @@ def _directml_provider():
 
 def _build_providers(preferred_device):
     global _provider_message_printed
-    preferred_device = str(preferred_device or "auto").strip().lower()
+    preferred_device = normalize_preferred_device(preferred_device)
     available_providers = set(ort.get_available_providers())
     providers = []
 
@@ -106,10 +107,7 @@ def _build_providers(preferred_device):
                 f"Python={platform.python_version()} {platform.architecture()[0]}."
             )
             if preferred_device in ("auto", "gpu", "directml", "dml", "cuda"):
-                print(
-                    "WARNING: GPU inference was requested but no usable GPU ONNX provider is installed. "
-                    "NVIDIA users run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
-                )
+                print(gpu_help_message("missing_gpu_provider", provider=selected))
         else:
             print(
                 f"Using {selected} for ONNX inference with CPU fallback. "

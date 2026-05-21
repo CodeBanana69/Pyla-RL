@@ -27,6 +27,8 @@ if any(cmd in sys.argv for cmd in ["install", "develop"]):
 
 from setuptools import setup, find_packages
 
+from gpu_support import apply_gpu_config, detect_graphics_cards, get_gpu_data as detect_gpu_data
+
 def force_install(reqs, no_deps=False):
     cmd = [sys.executable, "-m", "pip", "install"]
     if no_deps: cmd += ["--force-reinstall", "--no-deps"]
@@ -43,24 +45,7 @@ def install_onnxruntime_variant(req):
     force_install([req])
 
 def get_gpu_data():
-    """Detects exact NVIDIA/AMD/Intel architecture for Windows."""
-    # NVIDIA cards Check
-    try:
-        output = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name,compute_cap", "--format=csv,noheader,nounits"],
-            encoding='utf-8', stderr=subprocess.DEVNULL).strip()
-        name, cc = output.split(', ')
-        return "nvidia", float(cc), name
-    except: pass
-
-    # AMD/Intel cards Check
-    try:
-        wmic = subprocess.check_output(["wmic", "path", "win32_VideoController", "get", "name"], encoding='utf-8')
-        if "AMD" in wmic or "Radeon" in wmic: return "amd_windows", 0.0, "AMD Radeon"
-        if "Intel" in wmic: return "intel", 0.0, "Intel HD/Arc Graphics"
-    except: pass
-
-    return "cpu", 0.0, "Generic CPU"
+    return detect_gpu_data()
 
 def ask_user(prompt_text):
     if os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes"):
@@ -72,6 +57,8 @@ def ask_user(prompt_text):
 
 def setup_pyla():
     print("\n" + "="*50 + "\n   PylaAi-XXZ - Windows Setup   \n" + "="*50)
+    cards = detect_graphics_cards()
+    auto_setup = os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes")
     
     # installing must have Pytorch CPU
     force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
@@ -90,6 +77,7 @@ def setup_pyla():
     
     # We will use this flag to check if we need the standard CPU onnxruntime
     onnx_installed = False
+    onnx_variant = None
 
     # --- THE CHOICE BRANCHES ---
 
@@ -103,15 +91,17 @@ def setup_pyla():
     # NVIDIA BRANCH (Series 10-50)
     if target == "nvidia":
         print(f"\n NVIDIA: {name} detected.")
-        if os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes"):
+        if auto_setup:
             print("\nAuto setup: installing DirectML GPU acceleration for stable Windows NVIDIA systems.")
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
+            onnx_variant = "directml"
             status_pytorch = "DirectML Edition"
             status_accel = "DirectML"
         elif ask_user("Install DirectML GPU acceleration? (recommended; stable on most Windows NVIDIA systems)"):
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
+            onnx_variant = "directml"
             status_pytorch = "DirectML Edition"
             status_accel = "DirectML"
         elif ask_user("Install NVIDIA CUDA acceleration? (advanced; only if CUDA/cuDNN is installed correctly)"):
@@ -119,34 +109,39 @@ def setup_pyla():
             force_install(torch_cmd)
             install_onnxruntime_variant("onnxruntime-gpu")
             onnx_installed = True
+            onnx_variant = "cuda"
             status_pytorch = "CUDA Edition"
 
     # INTEL BRANCH (OpenVINO)
     elif target == "intel":
         print(f"\n Intel: {name} detected.")
-        if ask_user("Install DirectML GPU acceleration? (recommended for most Windows Intel GPUs)"):
+        if auto_setup or ask_user("Install DirectML GPU acceleration? (recommended for most Windows Intel GPUs)"):
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
+            onnx_variant = "directml"
             status_pytorch = "DirectML Edition"
             status_accel = "DirectML"
         elif ask_user("Install Intel OpenVINO acceleration instead?"):
             install_onnxruntime_variant("onnxruntime-openvino")
             onnx_installed = True
+            onnx_variant = "openvino"
             status_pytorch = "OpenVINO Edition"
             status_accel = "OpenVINO"
 
     # AMD BRANCH (DirectML)
     elif "amd" in target:
         print(f"\n AMD: {name} detected.")
-        if ask_user("Install AMD DirectML acceleration?"):
+        if auto_setup or ask_user("Install AMD DirectML acceleration?"):
             install_onnxruntime_variant("onnxruntime-directml")
             onnx_installed = True
+            onnx_variant = "directml"
             status_pytorch = "DirectML Edition"
             status_accel = "DirectML"
 
-    elif ask_user("Install DirectML GPU acceleration? (works on many Windows GPUs)"):
+    elif auto_setup or ask_user("Install DirectML GPU acceleration? (works on many Windows GPUs)"):
         install_onnxruntime_variant("onnxruntime-directml")
         onnx_installed = True
+        onnx_variant = "directml"
         status_pytorch = "DirectML Edition"
         status_accel = "DirectML"
 
@@ -155,12 +150,27 @@ def setup_pyla():
         print("\n Installing standard CPU ONNX Runtime...")
         install_onnxruntime_variant("onnxruntime")
         status_accel = "Standard CPU"
+        onnx_variant = "cpu"
+
+    if onnx_variant:
+        from utils import load_toml_as_dict, save_dict_as_toml
+
+        config_path = "cfg/general_config.toml"
+        config = load_toml_as_dict(config_path)
+        apply_gpu_config(config, onnx_variant, cards)
+        save_dict_as_toml(config, config_path)
+        print(
+            f"Saved GPU runtime config: cpu_or_gpu={config.get('cpu_or_gpu')}, "
+            f"directml_device_id={config.get('directml_device_id', 'auto')}"
+        )
 
     # some conflict fixes
     print("\n Finalizing and Repairing Conflicts...")
     force_install(["numpy<2.0.0"], no_deps=True)
     force_install(["adbutils==2.12.0", "av==12.3.0"])
     force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
+    force_install(["opencv-python==4.8.0.76"], no_deps=True)
 
     # the setup completes
     os.system('cls')

@@ -4,6 +4,17 @@ from pathlib import Path
 import subprocess
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from gpu_support import (
+    apply_gpu_config,
+    auto_candidate_variants as gpu_auto_candidate_variants,
+    detect_graphics_cards as gpu_detect_graphics_cards,
+    detect_runtime_variant as gpu_detect_runtime_variant,
+)
+
 
 BASE_REQUIREMENTS = [
     "customtkinter>=5.2.0",
@@ -18,6 +29,7 @@ BASE_REQUIREMENTS = [
     "google-play-scraper",
     "pyautogui>=0.9.54",
     "packaging>=23.0",
+    "PySide6>=6.7.0",
     "numpy<2.0.0",
     "adbutils==2.12.0",
     "av==12.3.0",
@@ -41,6 +53,8 @@ def install_base_requirements():
     print("Installing/repairing PylaAi core Python packages...")
     run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
     run([sys.executable, "-m", "pip", "install", "--upgrade", *BASE_REQUIREMENTS])
+    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
+    run([sys.executable, "-m", "pip", "install", "--upgrade", "opencv-python==4.8.0.76"])
     run([
         sys.executable,
         "-m",
@@ -52,40 +66,7 @@ def install_base_requirements():
 
 
 def detect_graphics_cards():
-    cards = []
-    try:
-        output = subprocess.check_output(
-            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader,nounits"],
-            encoding="utf-8",
-            stderr=subprocess.DEVNULL,
-        ).strip()
-        if output:
-            for line in output.splitlines():
-                name = line.strip()
-                if name:
-                    cards.append(("nvidia", name))
-    except Exception:
-        pass
-
-    try:
-        wmic = subprocess.check_output(
-            ["wmic", "path", "win32_VideoController", "get", "name"],
-            encoding="utf-8",
-            stderr=subprocess.DEVNULL,
-        )
-        for line in wmic.splitlines():
-            name = line.strip()
-            if not name or name.lower() == "name":
-                continue
-            lower = name.lower()
-            if "nvidia" in lower and not any(card[1] == name for card in cards):
-                cards.append(("nvidia", name))
-            elif "amd" in lower or "radeon" in lower:
-                cards.append(("amd", name))
-            elif "intel" in lower:
-                cards.append(("intel", name))
-    except Exception:
-        pass
+    cards = gpu_detect_graphics_cards()
 
     if cards:
         print("Detected graphics cards:")
@@ -97,16 +78,11 @@ def detect_graphics_cards():
 
 
 def auto_candidate_variants(cards):
-    vendors = {vendor for vendor, _name in cards}
-    candidates = ["directml"]
-    if "nvidia" in vendors:
-        candidates.append("cuda")
-    candidates.append("cpu")
-    return candidates
+    return gpu_auto_candidate_variants(cards)
 
 
 def detect_runtime_variant():
-    return auto_candidate_variants(detect_graphics_cards())[0]
+    return gpu_detect_runtime_variant()
 
 
 def install_variant(variant):
@@ -161,15 +137,16 @@ def update_config(variant):
 
     config_path = root / "cfg" / "general_config.toml"
     config = load_toml_as_dict(str(config_path))
-    config["cpu_or_gpu"] = variant
-    if variant == "directml":
-        config.setdefault("directml_device_id", "auto")
+    apply_gpu_config(config, variant, detect_graphics_cards())
     save_dict_as_toml(config, str(config_path))
-    print(f"Updated {config_path}: cpu_or_gpu = {variant!r}")
+    print(
+        f"Updated {config_path}: cpu_or_gpu = {config.get('cpu_or_gpu')!r}, "
+        f"directml_device_id = {config.get('directml_device_id', 'auto')!r}"
+    )
 
 
 def benchmark_variant(variant, runs=12):
-    root = Path(__file__).resolve().parents[1]
+    root = ROOT
     code = f"""
 import json
 import sys
