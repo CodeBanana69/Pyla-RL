@@ -70,7 +70,8 @@ Recovery features :
 Discord webhook and remote control :
 - Open `cfg/discord_config.toml`.
 - Webhook notifications only need `webhook_url`.
-- Discord `/start`, `/stop`, and `/status` need a Discord bot token, because normal webhooks cannot receive commands.
+- Discord `/pause`, `/start`, and `/status` need a Discord bot token, because normal webhooks cannot receive commands.
+- Slash commands: `/pause` (pause), `/start` (resume), `/stop_all` (exit bot), `/status`, `/screenshot`, `/push`, `/pause_menu`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`. `/stop` still pauses but is deprecated — use `/pause` instead.
 - Create a bot token:
   1. Go to https://discord.com/developers/applications
   2. Click `New Application`.
@@ -105,9 +106,9 @@ Telegram notifications and remote control :
 - Open `cfg/telegram_config.toml`.
 - Create a bot with `@BotFather`, then paste the token into `bot_token`.
 - Set `enabled = true`.
-- Open the Telegram bot on your phone and send `/start` or `/help` once. That chat is remembered for notifications.
+- Open the Telegram bot on your phone and send `/setup` or `/help` once. That chat is remembered for notifications.
 - Commands:
-  `/status`, `/pause`, `/resume`, `/screenshot`, `/restart_game`, `/help`.
+  `/status`, `/pause`, `/resume`, `/quit`, `/push`, `/pause_menu`, `/screenshot`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`, `/help`.
 - Restart PylaAi-XXZ after changing the Telegram token or remote-control settings.
 
 Performance troubleshooting :

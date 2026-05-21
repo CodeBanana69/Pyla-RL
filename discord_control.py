@@ -9,8 +9,8 @@ from typing import Any, Callable
 import discord
 from discord import app_commands
 
-from runtime_control import PAUSED, RUNNING, read_state, write_state
-from utils import _config_bool
+from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, read_state, request_stop, write_state
+from utils import _config_bool, load_brawlers_info, normalize_brawler_name, resolve_brawler_name_alias
 from discord_notifier import _image_to_file, load_webhook_settings
 
 
@@ -42,15 +42,38 @@ def set_runtime_state(state_path: str | Path, paused: bool) -> str:
     return state
 
 
+def resolve_brawler_choice(name: str) -> str | None:
+    raw = str(name or "").strip()
+    if not raw:
+        return None
+    brawlers_info = load_brawlers_info()
+    if not brawlers_info:
+        return raw.lower()
+
+    normalized_input = resolve_brawler_name_alias(raw)
+    for brawler_key in brawlers_info.keys():
+        if normalize_brawler_name(brawler_key) == normalized_input:
+            return brawler_key
+    if normalized_input in brawlers_info:
+        return normalized_input
+    return None
+
+
 def status_text(state_path: str | Path, status_provider: Callable[[], dict[str, Any]] | None = None) -> str:
     state = read_state(state_path)
     try:
         details = status_provider() if status_provider else {}
     except Exception as exc:
         details = {"status_error": exc}
+    if state == STOP_REQUESTED:
+        runtime_label = "stopping"
+    elif state == PAUSED:
+        runtime_label = "paused"
+    else:
+        runtime_label = "running"
     lines = [
         "PylaAi-XXZ status",
-        f"Runtime: {'paused' if state == PAUSED else 'running'}",
+        f"Runtime: {runtime_label}",
     ]
     for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target"):
         value = details.get(key)
@@ -75,6 +98,8 @@ async def run_callback(callback: Callable[..., Any] | None, *args: Any) -> tuple
         return False, f"Command failed: {exc}"
     if result is False:
         return False, "Command ran, but recovery reported a problem."
+    if isinstance(result, str) and result.strip():
+        return True, result.strip()
     return True, "Command finished."
 
 
@@ -90,6 +115,9 @@ class DiscordControlServer:
             press_key_callback: Callable[[str], Any] | None = None,
             back_callback: Callable[[], Any] | None = None,
             status_provider: Callable[[], dict[str, Any]] | None = None,
+            start_push_callback: Callable[[str, int | None], Any] | None = None,
+            stop_all_callback: Callable[[], Any] | None = None,
+            pause_menu_callback: Callable[[], Any] | None = None,
     ):
         self.state_path = Path(state_path)
         self.settings_loader = settings_loader
@@ -100,6 +128,9 @@ class DiscordControlServer:
         self.press_key_callback = press_key_callback
         self.back_callback = back_callback
         self.status_provider = status_provider
+        self.start_push_callback = start_push_callback
+        self.stop_all_callback = stop_all_callback
+        self.pause_menu_callback = pause_menu_callback
         self.thread: threading.Thread | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client: discord.Client | None = None
@@ -166,16 +197,30 @@ class DiscordControlServer:
                 getattr(interaction.guild, "id", None),
             ):
                 return True
-            await _followup(interaction, "You are not allowed to control this PylaAi-XXZ bot.")
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "You are not allowed to control this PylaAi-XXZ bot.",
+                    ephemeral=True,
+                )
             return False
 
-        @tree.command(name="stop", description="Pause PylaAi-XXZ.")
+        async def _pause_bot(interaction: discord.Interaction) -> None:
+            set_runtime_state(self.state_path, paused=True)
+            await _followup(interaction, "PylaAi-XXZ paused. Use /start to resume.")
+
+        @tree.command(name="pause", description="Pause PylaAi-XXZ.")
+        async def pause_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            await _pause_bot(interaction)
+
+        @tree.command(name="stop", description="Pause PylaAi-XXZ. Prefer /pause (/stop is deprecated).")
         async def stop_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
-            set_runtime_state(self.state_path, paused=True)
-            await _followup(interaction, "PylaAi-XXZ paused. Use /start to resume.")
+            await _pause_bot(interaction)
 
         @tree.command(name="start", description="Resume PylaAi-XXZ.")
         async def start_command(interaction: discord.Interaction) -> None:
@@ -184,6 +229,23 @@ class DiscordControlServer:
             await _ack(interaction)
             set_runtime_state(self.state_path, paused=False)
             await _followup(interaction, "PylaAi-XXZ resumed.")
+
+        @tree.command(name="stop_all", description="Stop the bot completely and exit the main loop.")
+        async def stop_all_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            request_stop(self.state_path)
+            ok, message = await run_callback(self.stop_all_callback)
+            if ok:
+                await _followup(
+                    interaction,
+                    message if message != "Command finished." else (
+                        "PylaAi-XXZ is stopping. The bot process will exit shortly."
+                    ),
+                )
+            else:
+                await _followup(interaction, f"Stop request failed: {message}")
 
         @tree.command(name="status", description="Show whether PylaAi-XXZ is running or paused.")
         async def status_command(interaction: discord.Interaction) -> None:
@@ -218,7 +280,10 @@ class DiscordControlServer:
                 return
             await _ack(interaction)
             ok, message = await run_callback(self.restart_game_callback)
-            await _followup(interaction, "Brawl Stars restart finished." if ok else f"Brawl Stars restart failed: {message}")
+            await _followup(
+                interaction,
+                "Brawl Stars restart finished." if ok else f"Brawl Stars restart failed: {message}",
+            )
 
         @tree.command(name="restart_scrcpy", description="Restart only the scrcpy video feed.")
         async def restart_scrcpy_command(interaction: discord.Interaction) -> None:
@@ -226,7 +291,10 @@ class DiscordControlServer:
                 return
             await _ack(interaction)
             ok, message = await run_callback(self.restart_scrcpy_callback)
-            await _followup(interaction, "Scrcpy restart finished." if ok else f"Scrcpy restart failed: {message}")
+            await _followup(
+                interaction,
+                "Scrcpy restart finished." if ok else f"Scrcpy restart failed: {message}",
+            )
 
         @tree.command(name="restart_emulator", description="Restart the full saved emulator profile.")
         async def restart_emulator_command(interaction: discord.Interaction) -> None:
@@ -234,7 +302,10 @@ class DiscordControlServer:
                 return
             await _ack(interaction)
             ok, message = await run_callback(self.restart_emulator_callback)
-            await _followup(interaction, "Emulator restart finished." if ok else f"Emulator restart failed: {message}")
+            await _followup(
+                interaction,
+                "Emulator restart finished." if ok else f"Emulator restart failed: {message}",
+            )
 
         @tree.command(name="back", description="Press Android Back in the emulator.")
         async def back_command(interaction: discord.Interaction) -> None:
@@ -261,11 +332,59 @@ class DiscordControlServer:
                 ok, message = await run_callback(self.press_key_callback, normalized)
             await _followup(interaction, f"Pressed {normalized}." if ok else f"Press command failed: {message}")
 
+        async def brawler_autocomplete(
+                interaction: discord.Interaction,
+                current: str,
+        ) -> list[app_commands.Choice[str]]:
+            current_value = (current or "").strip().lower()
+            choices = []
+            for name in sorted(load_brawlers_info().keys()):
+                if not current_value or current_value in name.lower():
+                    choices.append(app_commands.Choice(name=name, value=name))
+                if len(choices) >= 25:
+                    break
+            return choices
+
+        @tree.command(name="push", description="Start pushing a specific brawler and reselect it in the lobby.")
+        @app_commands.describe(
+            brawler="Brawler to push",
+            target="Optional trophy target (push_until)",
+        )
+        @app_commands.autocomplete(brawler=brawler_autocomplete)
+        async def push_command(
+                interaction: discord.Interaction,
+                brawler: str,
+                target: int | None = None,
+        ) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            resolved = resolve_brawler_choice(brawler)
+            if not resolved:
+                await _followup(interaction, f"Unknown brawler '{brawler}'. Check the name and try again.")
+                return
+            ok, message = await run_callback(self.start_push_callback, resolved, target)
+            await _followup(interaction, message if ok else f"Push command failed: {message}")
+
+        @tree.command(name="pause_menu", description="Reopen the local pause control window.")
+        async def pause_menu_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            ok, message = await run_callback(self.pause_menu_callback)
+            await _followup(
+                interaction,
+                "Pause menu reopened." if ok else f"Could not reopen pause menu: {message}",
+            )
+
         @tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: Exception) -> None:
             message = f"Discord command failed: {error}"
             try:
-                await _followup(interaction, message)
+                if interaction.response.is_done():
+                    await interaction.followup.send(message, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message, ephemeral=True)
             except Exception:
                 print(message)
 
@@ -276,21 +395,19 @@ class DiscordControlServer:
                 return
             settings = self.settings_loader()
             guild_id = _clean_id(settings.get("discord_control_guild_id"))
+            command_list = (
+                "/start /stop /pause /stop_all /push /pause_menu /status /screenshot "
+                "/restart_game /restart_scrcpy /restart_emulator /back /press"
+            )
             try:
                 if guild_id:
                     guild = discord.Object(id=int(guild_id))
                     tree.copy_global_to(guild=guild)
                     await tree.sync(guild=guild)
-                    print(
-                        f"Discord control commands synced for guild {guild_id}: "
-                        "/start /stop /status /screenshot /restart_game /restart_scrcpy /restart_emulator /back /press"
-                    )
+                    print(f"Discord control commands synced for guild {guild_id}: {command_list}")
                 else:
                     await tree.sync()
-                    print(
-                        "Discord control commands synced globally: "
-                        "/start /stop /status /screenshot /restart_game /restart_scrcpy /restart_emulator /back /press"
-                    )
+                    print(f"Discord control commands synced globally: {command_list}")
                 synced = True
             except Exception as exc:
                 print(f"Discord control command sync failed: {exc}")

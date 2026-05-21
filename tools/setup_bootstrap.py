@@ -292,21 +292,37 @@ def main():
         return 1
 
     print(f"Using Python: {python_executable}")
+    progress_window = None
+    if os.environ.get("PYLAAI_SETUP_GUI", "").strip().lower() in {"1", "yes", "true", "on"}:
+        try:
+            from tools.setup_progress_window import SetupProgressWindow
+
+            progress_window = SetupProgressWindow()
+            progress_window.update("Checking Python and dependencies...")
+        except Exception:
+            progress_window = None
     if "--smoke-test" in sys.argv:
         print("Smoke test passed. Python and project files are available.")
         return 0
 
     install_vc_redist()
+    if progress_window:
+        progress_window.update("Upgrading pip and setuptools...")
     run(python_command + ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
 
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"
+    if progress_window:
+        progress_window.update("Installing PylaAi-XXZ dependencies...")
     run(python_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
     create_run_file(project_dir, python_command)
 
     print("")
     print("PylaAi-XXZ setup completed.")
     print("Start your emulator, open Brawl Stars, then run Run PylaAi-XXZ.bat or python main.py.")
+    if progress_window:
+        progress_window.update("Setup completed.")
+        progress_window.close()
     input("Press Enter to close...")
     return 0
 

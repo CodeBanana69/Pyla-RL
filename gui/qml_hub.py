@@ -182,6 +182,38 @@ class QmlHub:
                     self._store.bot_config.clear()
                     self._store.bot_config.update(result["bot_config"])
                     return f"Applied {result['profile']} profile. Restart the bot to use it."
+                if action == "preflight-check":
+                    from gui.preflight import run_preflight_checks
+
+                    result = run_preflight_checks()
+                    lines = []
+                    for check in result["checks"]:
+                        prefix = "OK" if check["ok"] else "WARN"
+                        lines.append(f"{prefix}: {check['label']} - {check['detail']}")
+                    summary = "Ready to start." if result["ready"] else "Fix the warnings above before START."
+                    return summary + "\n" + "\n".join(lines)
+                if action == "test-emulator":
+                    from gui.preflight import test_emulator_connection
+
+                    ok, message = test_emulator_connection()
+                    if ok:
+                        return f"Emulator connection OK: {message}"
+                    raise ValueError(f"Emulator connection failed: {message}")
+                if action == "export-history":
+                    path = self._store.export_match_history_csv()
+                    return f"Match history exported to {path}"
+                if action == "reset-history":
+                    self._store.reset_match_history()
+                    return "Match history reset."
+                if action == "open-config-folder":
+                    import os
+
+                    config_dir = Path("cfg").resolve()
+                    os.startfile(str(config_dir))
+                    return f"Opened {config_dir}"
+                if action == "complete-wizard":
+                    self._store.update_config("settings", "first_run_wizard", "no")
+                    return "First-run wizard dismissed."
                 raise ValueError(f"Unknown action: {action}")
 
             @Slot()

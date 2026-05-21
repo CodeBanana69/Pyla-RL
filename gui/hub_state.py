@@ -3,6 +3,8 @@ from pathlib import Path
 
 import toml
 
+from gui.hub_validators import validate_config_value
+
 
 def load_toml_as_dict(path):
     if not Path(path).exists():
@@ -67,6 +69,13 @@ class HubStateStore:
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
         "visual_debug": ("general", "yesno"),
+        "advanced_visuals": ("general", "yesno"),
+        "pause_menu_ips_graph": ("general", "yesno"),
+        "pause_menu_session_strip": ("general", "yesno"),
+        "pause_menu_auto_reopen": ("general", "yesno"),
+        "pause_menu_graph_samples": ("general", "int"),
+        "console_ips": ("general", "yesno"),
+        "first_run_wizard": ("general", "yesno"),
         "capture_bad_vision_frames": ("general", "yesno"),
         "trophies_multiplier": ("general", "int"),
         "ocr_scale_down_factor": ("general", "float"),
@@ -175,6 +184,13 @@ class HubStateStore:
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
         self.general_config.setdefault("visual_debug", "no")
+        self.general_config.setdefault("advanced_visuals", "no")
+        self.general_config.setdefault("pause_menu_ips_graph", "no")
+        self.general_config.setdefault("pause_menu_session_strip", "yes")
+        self.general_config.setdefault("pause_menu_auto_reopen", "yes")
+        self.general_config.setdefault("pause_menu_graph_samples", 45)
+        self.general_config.setdefault("console_ips", "yes")
+        self.general_config.setdefault("first_run_wizard", "yes")
         self.general_config.setdefault("capture_bad_vision_frames", "no")
         self.general_config.setdefault("trophies_multiplier", 1)
         self.general_config.setdefault("ocr_scale_down_factor", 0.5)
@@ -237,6 +253,8 @@ class HubStateStore:
         }
 
     def ui_state(self):
+        from performance_profile import PERFORMANCE_PROFILES
+
         state = self.initial_state()
         state.update({
             "settings": self._settings_state(),
@@ -245,6 +263,14 @@ class HubStateStore:
             "api": dict(self.brawl_stars_api_config),
             "timers": {key: self.time_tresholds.get(key) for key in self.TIMER_FIELDS},
             "history": self._history_state(),
+            "meta": {
+                "profileDescriptions": {
+                    key: profile.get("description", "")
+                    for key, profile in PERFORMANCE_PROFILES.items()
+                },
+                "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
+                "configDir": str(Path("cfg").resolve()),
+            },
         })
         return state
 
@@ -260,6 +286,12 @@ class HubStateStore:
                 "long_press_star_drop",
                 "terminal_logging",
                 "visual_debug",
+                "advanced_visuals",
+                "pause_menu_ips_graph",
+                "pause_menu_session_strip",
+                "pause_menu_auto_reopen",
+                "console_ips",
+                "first_run_wizard",
                 "capture_bad_vision_frames",
             }:
                 value = _to_bool(value)
@@ -293,6 +325,7 @@ class HubStateStore:
         return items
 
     def update_config(self, section, key, value):
+        validate_config_value(section, key, value)
         if section == "settings":
             config_name, kind = self.SETTINGS_FIELDS[key]
             target = self.general_config if config_name == "general" else self.bot_config
@@ -312,6 +345,23 @@ class HubStateStore:
             save_dict_as_toml(self.time_tresholds, self.time_tresholds_path)
         else:
             raise KeyError(section)
+        return self.ui_state()
+
+    def export_match_history_csv(self):
+        export_dir = Path("logs")
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_path = export_dir / "match_history_export.csv"
+        lines = ["brawler,victory,defeat,games,win_rate"]
+        for item in self._history_state():
+            lines.append(
+                f"{item['brawler']},{item['victory']},{item['defeat']},{item['games']},{item['winRate']}"
+            )
+        export_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(export_path.resolve())
+
+    def reset_match_history(self):
+        self.match_history = {"total": {"victory": 0, "defeat": 0, "draw": 0}}
+        save_dict_as_toml(self.match_history, self.match_history_path)
         return self.ui_state()
 
     def apply_state(self, patch):

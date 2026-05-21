@@ -5,6 +5,7 @@ cfg/match_history.toml
 cfg/telegram_config.local.toml
 cfg/telegram_chats.toml
 cfg/brawl_stars_api.local.toml
+cfg/discord_config.local.toml
 latest_brawler_data.json
 cfg/match_history.toml
 test.py
