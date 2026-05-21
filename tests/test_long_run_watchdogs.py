@@ -161,6 +161,43 @@ class LongRunWatchdogTests(unittest.TestCase):
 
         self.assertFalse(controller.restart_scrcpy_client())
 
+    def test_press_key_does_not_crash_when_scrcpy_control_is_missing(self):
+        controller = object.__new__(WindowController)
+        controller.scrcpy_client = object()
+        controller.connected_serial = "emulator-5554"
+        controller.width_ratio = 1.0
+        controller.height_ratio = 1.0
+        controller.PID_ATTACK = 1
+        controller.restart_calls = 0
+        controller.adb_taps = []
+
+        def restart_scrcpy_client():
+            controller.restart_calls += 1
+            return False
+
+        controller.restart_scrcpy_client = restart_scrcpy_client
+        controller._adb_tap = lambda x, y: controller.adb_taps.append((x, y)) or True
+
+        self.assertTrue(controller.press_key("Q"))
+        self.assertEqual(controller.restart_calls, 1)
+        self.assertEqual(len(controller.adb_taps), 1)
+
+    def test_movement_does_not_enter_moving_state_without_scrcpy_control(self):
+        controller = object.__new__(WindowController)
+        controller.scrcpy_client = object()
+        controller.connected_serial = "emulator-5554"
+        controller.joystick_x = 100
+        controller.joystick_y = 100
+        controller.PID_JOYSTICK = 0
+        controller.are_we_moving = False
+        controller.last_joystick_down_time = 0.0
+        controller.last_joystick_pos = (None, None)
+        controller.restart_scrcpy_client = lambda: False
+
+        controller.keys_down(["w"])
+
+        self.assertFalse(controller.are_we_moving)
+
 
 if __name__ == "__main__":
     unittest.main()

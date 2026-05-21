@@ -81,6 +81,15 @@ class DiscordControlTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("reported a problem", message)
 
+    def test_discord_commands_ack_then_send_followups(self):
+        source = Path("discord_control.py").read_text(encoding="utf-8")
+
+        self.assertIn("async def _ack", source)
+        self.assertIn("await interaction.response.defer(ephemeral=True)", source)
+        self.assertIn("async def _followup", source)
+        self.assertIn("await asyncio.to_thread(status_text", source)
+        self.assertIn("@tree.error", source)
+
 
 if __name__ == "__main__":
     unittest.main()

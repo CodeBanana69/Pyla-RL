@@ -1313,15 +1313,61 @@ class WindowController:
             self.scale_factor = min(self.width_ratio, self.height_ratio)
 
         return frame
+
+    def _scrcpy_control(self, retry=True):
+        client = getattr(self, "scrcpy_client", None)
+        control = getattr(client, "control", None) if client is not None else None
+        if control is not None:
+            return control
+        if retry:
+            print("Scrcpy control channel is unavailable; restarting scrcpy client before sending input.")
+            try:
+                self.restart_scrcpy_client()
+            except Exception as e:
+                print(f"Could not restart scrcpy before input: {e}")
+            client = getattr(self, "scrcpy_client", None)
+            control = getattr(client, "control", None) if client is not None else None
+        return control
+
+    def _send_scrcpy_touch(self, x, y, action, pointer_id=0, retry=True):
+        control = self._scrcpy_control(retry=retry)
+        if control is None:
+            return False
+        try:
+            control.touch(int(x), int(y), action, pointer_id)
+            return True
+        except Exception as e:
+            if retry:
+                print(f"Scrcpy touch failed; restarting scrcpy client before retry: {e}")
+                try:
+                    self.restart_scrcpy_client()
+                except Exception as restart_error:
+                    print(f"Could not restart scrcpy after touch failure: {restart_error}")
+                return self._send_scrcpy_touch(x, y, action, pointer_id=pointer_id, retry=False)
+            print(f"Scrcpy touch failed after retry: {e}")
+            return False
+
+    def _adb_tap(self, x, y):
+        try:
+            completed = _run_adb(
+                self.connected_serial,
+                ["shell", "input", "tap", str(int(x)), str(int(y))],
+                timeout=3,
+            )
+            return completed.returncode == 0
+        except Exception as e:
+            print(f"Could not send ADB tap fallback: {e}")
+            return False
+
     def touch_down(self, x, y, pointer_id=0):
         # We explicitly pass the pointer_id
-        self.scrcpy_client.control.touch(int(x), int(y), scrcpy.ACTION_DOWN, pointer_id)
+        return self._send_scrcpy_touch(x, y, scrcpy.ACTION_DOWN, pointer_id)
 
     def touch_move(self, x, y, pointer_id=0):
-        self.scrcpy_client.control.touch(int(x), int(y), scrcpy.ACTION_MOVE, pointer_id)
+        return self._send_scrcpy_touch(x, y, scrcpy.ACTION_MOVE, pointer_id)
 
     def touch_up(self, x, y, pointer_id=0):
-        self.scrcpy_client.control.touch(int(x), int(y), scrcpy.ACTION_UP, pointer_id)
+        return self._send_scrcpy_touch(x, y, scrcpy.ACTION_UP, pointer_id)
 
     def move_joystick_angle(self, angle_degrees: float, radius: float = 150.0):
         """Move the joystick in an exact direction given by angle_degrees.
@@ -1339,7 +1385,8 @@ class WindowController:
             self.stop_joystick()
 
         if not self.are_we_moving:
-            self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK)
+            if not self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK):
+                return
             self.are_we_moving = True
             self.last_joystick_down_time = time.time()
             self.last_joystick_pos = (target_x, target_y)
@@ -1377,7 +1424,8 @@ class WindowController:
             self.stop_joystick()
 
         if not self.are_we_moving:
-            self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK)
+            if not self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK):
+                return
             self.are_we_moving = True
             self.last_joystick_down_time = time.time()
             self.last_joystick_pos = (self.joystick_x + delta_x, self.joystick_y + delta_y)
@@ -1391,17 +1439,27 @@ class WindowController:
             x = x * self.width_ratio
             y = y * self.height_ratio
         # Use PID_ATTACK for clicks so we don't interrupt movement
-        if touch_down: self.touch_down(x, y, pointer_id=self.PID_ATTACK)
+        down_sent = True
+        if touch_down:
+            down_sent = self.touch_down(x, y, pointer_id=self.PID_ATTACK)
+            if not down_sent and touch_up:
+                return self._adb_tap(x, y)
         time.sleep(delay)
-        if touch_up: self.touch_up(x, y, pointer_id=self.PID_ATTACK)
+        if touch_up:
+            up_sent = self.touch_up(x, y, pointer_id=self.PID_ATTACK)
+            if not up_sent and not touch_down:
+                return self._adb_tap(x, y)
+            return bool(down_sent and up_sent)
+        return bool(down_sent)
 
     def long_press(self, x: int, y: int, duration=1.15, already_include_ratio=True):
         if not already_include_ratio:
             x = x * self.width_ratio
             y = y * self.height_ratio
-        self.touch_down(x, y, pointer_id=self.PID_ATTACK)
+        if not self.touch_down(x, y, pointer_id=self.PID_ATTACK):
+            return False
         time.sleep(duration)
-        self.touch_up(x, y, pointer_id=self.PID_ATTACK)
+        return self.touch_up(x, y, pointer_id=self.PID_ATTACK)
 
     def press_key(self, key, delay=0.005, touch_up=True, touch_down=True):
         if key not in key_coords_dict:
@@ -1409,7 +1467,7 @@ class WindowController:
         x, y = key_coords_dict[key]
         target_x = x * self.width_ratio
         target_y = y * self.height_ratio
-        self.click(target_x, target_y, delay, touch_up=touch_up, touch_down=touch_down)
+        return self.click(target_x, target_y, delay, touch_up=touch_up, touch_down=touch_down)
 
     def android_back(self):
         try:
@@ -1441,14 +1499,15 @@ class WindowController:
         steps = max(int(distance / step_len), 1)
         step_delay = duration / steps
 
-        self.touch_down(int(start_x), int(start_y), pointer_id=self.PID_ATTACK)
+        if not self.touch_down(int(start_x), int(start_y), pointer_id=self.PID_ATTACK):
+            return False
         for i in range(1, steps + 1):
             t = i / steps
             cx = start_x + dist_x * t
             cy = start_y + dist_y * t
             time.sleep(step_delay)
             self.touch_move(int(cx), int(cy), pointer_id=self.PID_ATTACK)
-        self.touch_up(int(end_x), int(end_y), pointer_id=self.PID_ATTACK)
+        return self.touch_up(int(end_x), int(end_y), pointer_id=self.PID_ATTACK)
 
     def close(self):
         if hasattr(self, 'scrcpy_client'):

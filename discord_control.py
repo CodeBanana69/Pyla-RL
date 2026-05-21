@@ -144,15 +144,18 @@ class DiscordControlServer:
         self.loop = asyncio.get_running_loop()
         synced = False
 
-        async def _reply(interaction: discord.Interaction, message: str, file: discord.File | None = None) -> None:
-            try:
-                await interaction.response.send_message(message, ephemeral=True, file=file)
-            except discord.InteractionResponded:
-                await interaction.followup.send(message, ephemeral=True, file=file)
-
-        async def _defer(interaction: discord.Interaction) -> None:
+        async def _ack(interaction: discord.Interaction) -> None:
             if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True, thinking=True)
+                await interaction.response.defer(ephemeral=True)
+
+        async def _followup(interaction: discord.Interaction, message: str, file: discord.File | None = None) -> None:
+            send_kwargs = {"ephemeral": True}
+            if file is not None:
+                send_kwargs["file"] = file
+            if interaction.response.is_done():
+                await interaction.followup.send(message, **send_kwargs)
+            else:
+                await interaction.response.send_message(message, **send_kwargs)
 
         async def _guard(interaction: discord.Interaction) -> bool:
             settings = self.settings_loader()
@@ -163,94 +166,108 @@ class DiscordControlServer:
                 getattr(interaction.guild, "id", None),
             ):
                 return True
-            await _reply(interaction, "You are not allowed to control this PylaAi-XXZ bot.")
+            await _followup(interaction, "You are not allowed to control this PylaAi-XXZ bot.")
             return False
 
         @tree.command(name="stop", description="Pause PylaAi-XXZ.")
         async def stop_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
+            await _ack(interaction)
             set_runtime_state(self.state_path, paused=True)
-            await _reply(interaction, "PylaAi-XXZ paused.")
+            await _followup(interaction, "PylaAi-XXZ paused. Use /start to resume.")
 
         @tree.command(name="start", description="Resume PylaAi-XXZ.")
         async def start_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
+            await _ack(interaction)
             set_runtime_state(self.state_path, paused=False)
-            await _reply(interaction, "PylaAi-XXZ resumed.")
+            await _followup(interaction, "PylaAi-XXZ resumed.")
 
         @tree.command(name="status", description="Show whether PylaAi-XXZ is running or paused.")
         async def status_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
-            await _reply(interaction, status_text(self.state_path, self.status_provider))
+            await _ack(interaction)
+            message = await asyncio.to_thread(status_text, self.state_path, self.status_provider)
+            await _followup(interaction, message)
 
         @tree.command(name="screenshot", description="Send the current emulator screenshot.")
         async def screenshot_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
-            await _defer(interaction)
+            await _ack(interaction)
             if self.screenshot_provider is None:
-                await _reply(interaction, "Screenshot is not available in this process.")
+                await _followup(interaction, "Screenshot is not available in this process.")
                 return
             try:
                 screenshot = await asyncio.to_thread(self.screenshot_provider)
                 file, _image_url = _image_to_file(screenshot)
             except Exception as exc:
-                await _reply(interaction, f"Could not capture screenshot: {exc}")
+                await _followup(interaction, f"Could not capture screenshot: {exc}")
                 return
             if file is None:
-                await _reply(interaction, "Could not send screenshot.")
+                await _followup(interaction, "Could not send screenshot.")
                 return
-            await _reply(interaction, "Current emulator screenshot.", file=file)
+            await _followup(interaction, "Current emulator screenshot.", file=file)
 
         @tree.command(name="restart_game", description="Restart Brawl Stars and the scrcpy feed.")
         async def restart_game_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
-            await _defer(interaction)
+            await _ack(interaction)
             ok, message = await run_callback(self.restart_game_callback)
-            await _reply(interaction, "Brawl Stars restart finished." if ok else f"Brawl Stars restart failed: {message}")
+            await _followup(interaction, "Brawl Stars restart finished." if ok else f"Brawl Stars restart failed: {message}")
 
         @tree.command(name="restart_scrcpy", description="Restart only the scrcpy video feed.")
         async def restart_scrcpy_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
-            await _defer(interaction)
+            await _ack(interaction)
             ok, message = await run_callback(self.restart_scrcpy_callback)
-            await _reply(interaction, "Scrcpy restart finished." if ok else f"Scrcpy restart failed: {message}")
+            await _followup(interaction, "Scrcpy restart finished." if ok else f"Scrcpy restart failed: {message}")
 
         @tree.command(name="restart_emulator", description="Restart the full saved emulator profile.")
         async def restart_emulator_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
-            await _defer(interaction)
+            await _ack(interaction)
             ok, message = await run_callback(self.restart_emulator_callback)
-            await _reply(interaction, "Emulator restart finished." if ok else f"Emulator restart failed: {message}")
+            await _followup(interaction, "Emulator restart finished." if ok else f"Emulator restart failed: {message}")
 
         @tree.command(name="back", description="Press Android Back in the emulator.")
         async def back_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
+            await _ack(interaction)
             ok, message = await run_callback(self.back_callback)
-            await _reply(interaction, "Pressed Back." if ok else f"Back command failed: {message}")
+            await _followup(interaction, "Pressed Back." if ok else f"Back command failed: {message}")
 
         @tree.command(name="press", description="Press a game button: q, e, f, g, h, m, or back.")
         @app_commands.describe(key="Button to press: q, e, f, g, h, m, or back")
         async def press_command(interaction: discord.Interaction, key: str) -> None:
             if not await _guard(interaction):
                 return
+            await _ack(interaction)
             normalized = str(key or "").strip().lower()
             allowed = {"q", "e", "f", "g", "h", "m", "back"}
             if normalized not in allowed:
-                await _reply(interaction, "Allowed buttons: q, e, f, g, h, m, back.")
+                await _followup(interaction, "Allowed buttons: q, e, f, g, h, m, back.")
                 return
             if normalized == "back":
                 ok, message = await run_callback(self.back_callback)
             else:
                 ok, message = await run_callback(self.press_key_callback, normalized)
-            await _reply(interaction, f"Pressed {normalized}." if ok else f"Press command failed: {message}")
+            await _followup(interaction, f"Pressed {normalized}." if ok else f"Press command failed: {message}")
+
+        @tree.error
+        async def on_app_command_error(interaction: discord.Interaction, error: Exception) -> None:
+            message = f"Discord command failed: {error}"
+            try:
+                await _followup(interaction, message)
+            except Exception:
+                print(message)
 
         @client.event
         async def on_ready() -> None:
