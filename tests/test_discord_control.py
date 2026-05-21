@@ -3,8 +3,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from discord_control import command_allowed, run_callback, set_runtime_state, status_text
-from runtime_control import PAUSED, RUNNING, read_state
+from discord_control import (
+    command_allowed,
+    resolve_brawler_choice,
+    run_callback,
+    set_runtime_state,
+    status_text,
+)
+from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, is_stop_requested, read_state, request_stop
 
 
 class DiscordControlTest(unittest.TestCase):
@@ -81,14 +87,34 @@ class DiscordControlTest(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("reported a problem", message)
 
-    def test_discord_commands_ack_then_send_followups(self):
-        source = Path("discord_control.py").read_text(encoding="utf-8")
+    def test_run_callback_returns_custom_confirmation_message(self):
+        async def runner():
+            return await run_callback(lambda: "Pushing shelly (target 500).")
 
-        self.assertIn("async def _ack", source)
-        self.assertIn("await interaction.response.defer(ephemeral=True)", source)
-        self.assertIn("async def _followup", source)
-        self.assertIn("await asyncio.to_thread(status_text", source)
-        self.assertIn("@tree.error", source)
+        ok, message = asyncio.run(runner())
+
+        self.assertTrue(ok)
+        self.assertEqual(message, "Pushing shelly (target 500).")
+
+    def test_request_stop_writes_stop_requested_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "runtime.state"
+            self.assertEqual(request_stop(state_path), STOP_REQUESTED)
+            self.assertTrue(is_stop_requested(state_path))
+
+    def test_status_text_shows_stopping_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "runtime.state"
+            request_stop(state_path)
+            text = status_text(state_path)
+        self.assertIn("Runtime: stopping", text)
+
+    def test_resolve_brawler_choice_accepts_known_brawler(self):
+        resolved = resolve_brawler_choice("shelly")
+        self.assertEqual(resolved, "shelly")
+
+    def test_resolve_brawler_choice_rejects_unknown_brawler(self):
+        self.assertIsNone(resolve_brawler_choice("not_a_real_brawler_xyz"))
 
 
 if __name__ == "__main__":

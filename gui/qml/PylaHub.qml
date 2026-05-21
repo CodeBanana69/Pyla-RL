@@ -909,6 +909,22 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: root.saveValue("settings", "visual_debug", value) } }
                         }
                         FieldRow {
+                            label: "Advanced Visuals"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "advanced_visuals"); onToggled: root.saveValue("settings", "advanced_visuals", value) } }
+                        }
+                        FieldRow {
+                            label: "Pause Menu IPS Graph"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_ips_graph"); onToggled: root.saveValue("settings", "pause_menu_ips_graph", value) } }
+                        }
+                        FieldRow {
+                            label: "Pause Session Strip"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_session_strip"); onToggled: root.saveValue("settings", "pause_menu_session_strip", value) } }
+                        }
+                        FieldRow {
+                            label: "Pause Graph Samples"
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "pause_menu_graph_samples")); from: 30; to: 120; integer: true; onSaved: root.saveValue("settings", "pause_menu_graph_samples", value) }
+                        }
+                        FieldRow {
                             label: "Capture Vision Frames"
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "capture_bad_vision_frames"); onToggled: root.saveValue("settings", "capture_bad_vision_frames", value) } }
                         }

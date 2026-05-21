@@ -67,6 +67,10 @@ class HubStateStore:
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
         "visual_debug": ("general", "yesno"),
+        "advanced_visuals": ("general", "yesno"),
+        "pause_menu_ips_graph": ("general", "yesno"),
+        "pause_menu_session_strip": ("general", "yesno"),
+        "pause_menu_graph_samples": ("general", "int"),
         "capture_bad_vision_frames": ("general", "yesno"),
         "trophies_multiplier": ("general", "int"),
         "ocr_scale_down_factor": ("general", "float"),
@@ -175,6 +179,10 @@ class HubStateStore:
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
         self.general_config.setdefault("visual_debug", "no")
+        self.general_config.setdefault("advanced_visuals", "no")
+        self.general_config.setdefault("pause_menu_ips_graph", "no")
+        self.general_config.setdefault("pause_menu_session_strip", "yes")
+        self.general_config.setdefault("pause_menu_graph_samples", 45)
         self.general_config.setdefault("capture_bad_vision_frames", "no")
         self.general_config.setdefault("trophies_multiplier", 1)
         self.general_config.setdefault("ocr_scale_down_factor", 0.5)
@@ -260,6 +268,9 @@ class HubStateStore:
                 "long_press_star_drop",
                 "terminal_logging",
                 "visual_debug",
+                "advanced_visuals",
+                "pause_menu_ips_graph",
+                "pause_menu_session_strip",
                 "capture_bad_vision_frames",
             }:
                 value = _to_bool(value)

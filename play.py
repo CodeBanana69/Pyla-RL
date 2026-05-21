@@ -1,6 +1,7 @@
-﻿import math
+import math
 import json
 import os
+import queue
 import random
 import threading
 import time
@@ -18,6 +19,103 @@ visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 
 def vlog(*args):
     if visual_debug:
         print("[DBG]", *args)
+
+
+_opencv_highgui_available = None
+_opencv_highgui_warned = False
+
+
+def opencv_highgui_available():
+    global _opencv_highgui_available
+    if _opencv_highgui_available is not None:
+        return _opencv_highgui_available
+    try:
+        cv2.namedWindow("__pyla_gui_check__", cv2.WINDOW_NORMAL)
+        cv2.destroyWindow("__pyla_gui_check__")
+        _opencv_highgui_available = True
+    except cv2.error:
+        _opencv_highgui_available = False
+    return _opencv_highgui_available
+
+
+def warn_missing_opencv_highgui_once():
+    global _opencv_highgui_warned
+    if _opencv_highgui_warned:
+        return
+    _opencv_highgui_warned = True
+    print(
+        "Visual debug: OpenCV GUI is unavailable (opencv-python-headless is installed). "
+        "Using fallback window. Fix: pip uninstall opencv-python-headless && "
+        "pip install opencv-python==4.8.0.76"
+    )
+
+
+class TkVisualDebugWindow:
+    """Fallback debug window when opencv-python-headless blocks cv2.imshow."""
+
+    _lock = threading.Lock()
+    _instance = None
+
+    def __init__(self):
+        self._frame_queue = queue.Queue(maxsize=1)
+        self._thread = threading.Thread(
+            target=self._run,
+            name="PylaTkVisualDebug",
+            daemon=True,
+        )
+        self._thread.start()
+
+    @classmethod
+    def instance(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+            return cls._instance
+
+    def show(self, rgb_image):
+        while True:
+            try:
+                self._frame_queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self._frame_queue.put_nowait(rgb_image)
+        except queue.Full:
+            pass
+
+    def _run(self):
+        import tkinter as tk
+        from PIL import Image, ImageTk
+
+        root = tk.Tk()
+        root.title("PylaAi-XXZ Visual Debug")
+        root.configure(bg="black")
+        label = tk.Label(root, bg="black")
+        label.pack()
+        photo_ref = {"photo": None}
+
+        def poll():
+            try:
+                img = self._frame_queue.get_nowait()
+                photo_ref["photo"] = ImageTk.PhotoImage(Image.fromarray(img))
+                label.configure(image=photo_ref["photo"])
+            except queue.Empty:
+                pass
+            root.after(33, poll)
+
+        poll()
+        root.mainloop()
+
+
+def show_visual_debug_frame(img):
+    if opencv_highgui_available():
+        cv2.imshow("PylaAi-XXZ Visual Debug", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.waitKey(1)
+        return
+    warn_missing_opencv_highgui_once()
+    TkVisualDebugWindow.instance().show(img)
+
+
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
@@ -539,9 +637,11 @@ class Play(Movement):
         global debug, visual_debug
         debug = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
+        self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
         self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
         self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
         self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
+        self._last_advanced_visual_context = None
         self._visual_debug_next_frame_at = 0.0
         self._visual_debug_next_enqueue_at = 0.0
         self._visual_debug_lock = threading.Lock()
@@ -2829,6 +2929,8 @@ class Play(Movement):
         movement = self.loop(brawler, data, current_time)
 
         if visual_debug:
+            if self.advanced_visuals and data:
+                data["advanced_visuals"] = self.build_advanced_visual_context(data, movement, brawler)
             self.queue_visual_debug(frame, data, brawler)
 
         # if data:
@@ -2841,6 +2943,204 @@ class Play(Movement):
         #         'movement': movement,
         #     })
 
+    def _movement_to_angle(self, movement):
+        if isinstance(movement, (int, float)):
+            return float(movement) % 360
+        if not isinstance(movement, str) or not movement.strip():
+            return None
+        move = movement.lower()
+        dx = dy = 0
+        if "d" in move:
+            dx += 1
+        if "a" in move:
+            dx -= 1
+        if "s" in move:
+            dy += 1
+        if "w" in move:
+            dy -= 1
+        if dx == 0 and dy == 0:
+            return None
+        return self.angle_from_direction(dx, dy)
+
+    def build_advanced_visual_context(self, data, movement, brawler=None):
+        if not data or not data.get("player"):
+            return {}
+
+        player_pos = self.get_player_pos(data["player"][0])
+        walls = data.get("wall") or []
+        line_of_sight_walls = data.get("line_of_sight_wall") or walls
+
+        direction_samples = []
+        for angle in range(0, 360, 15):
+            direction_samples.append({
+                "angle": float(angle),
+                "blocked": self.is_path_blocked_angle(player_pos, angle, walls),
+            })
+
+        follow_target = None
+        teammate_data = data.get("teammate") or []
+        if teammate_data:
+            closest_teammate, _distance = self.choose_locked_teammate(player_pos, teammate_data, walls)
+            if closest_teammate is not None:
+                follow_target = [int(closest_teammate[0]), int(closest_teammate[1])]
+
+        hittable_enemies = []
+        for enemy in data.get("enemy") or []:
+            enemy_pos = self.get_enemy_pos(enemy)
+            if self.is_enemy_hittable(player_pos, enemy_pos, line_of_sight_walls, "attack"):
+                hittable_enemies.append([int(enemy_pos[0]), int(enemy_pos[1])])
+
+        attack_target = None
+        blocked_attack_target = None
+        enemy_coords, _enemy_distance = self.find_closest_enemy(
+            data.get("enemy") or [],
+            player_pos,
+            line_of_sight_walls,
+            "attack",
+        )
+        if enemy_coords is not None:
+            target = [int(enemy_coords[0]), int(enemy_coords[1])]
+            if self.is_enemy_hittable(player_pos, enemy_coords, line_of_sight_walls, "attack"):
+                attack_target = target
+            else:
+                blocked_attack_target = target
+
+        joystick_x = getattr(self.window_controller, "joystick_x", None)
+        joystick_y = getattr(self.window_controller, "joystick_y", None)
+        if joystick_x is None or joystick_y is None:
+            joystick_x = 220 * getattr(self.window_controller, "width_ratio", 1.0)
+            joystick_y = 870 * getattr(self.window_controller, "height_ratio", 1.0)
+
+        context = {
+            "player_pos": [int(player_pos[0]), int(player_pos[1])],
+            "joystick_center": [int(joystick_x), int(joystick_y)],
+            "direction_samples": direction_samples,
+            "movement_angle": self._movement_to_angle(movement),
+            "follow_target": follow_target,
+            "hittable_enemies": hittable_enemies,
+            "attack_target": attack_target,
+            "blocked_attack_target": blocked_attack_target,
+        }
+        self._last_advanced_visual_context = context
+        return context
+
+    @staticmethod
+    def _draw_dashed_line(img, start, end, color, thickness=2, dash_length=10, gap_length=8):
+        x1, y1 = start
+        x2, y2 = end
+        length = math.hypot(x2 - x1, y2 - y1)
+        if length < 1:
+            return
+        dx = (x2 - x1) / length
+        dy = (y2 - y1) / length
+        traveled = 0.0
+        draw = True
+        while traveled < length:
+            segment = dash_length if draw else gap_length
+            segment = min(segment, length - traveled)
+            sx = int(x1 + dx * traveled)
+            sy = int(y1 + dy * traveled)
+            ex = int(x1 + dx * (traveled + segment))
+            ey = int(y1 + dy * (traveled + segment))
+            if draw:
+                cv2.line(img, (sx, sy), (ex, ey), color, thickness, cv2.LINE_AA)
+            traveled += segment
+            draw = not draw
+
+    def _draw_advanced_visuals(self, img, data, scale, sp, s):
+        context = data.get("advanced_visuals") or {}
+        if not context:
+            return
+
+        inner_radius = s(35)
+        outer_radius = s(70)
+        joystick_center = context.get("joystick_center") or [220, 870]
+        center = sp((joystick_center[0], joystick_center[1]))
+
+        for sample in context.get("direction_samples") or []:
+            angle_rad = math.radians(sample["angle"])
+            color = (255, 60, 60) if sample.get("blocked") else (60, 255, 100)
+            start = (
+                int(center[0] + math.cos(angle_rad) * inner_radius),
+                int(center[1] + math.sin(angle_rad) * inner_radius),
+            )
+            end = (
+                int(center[0] + math.cos(angle_rad) * outer_radius),
+                int(center[1] + math.sin(angle_rad) * outer_radius),
+            )
+            cv2.line(img, start, end, color, max(1, s(3)), cv2.LINE_AA)
+
+        movement_angle = context.get("movement_angle")
+        if movement_angle is not None:
+            angle_rad = math.radians(movement_angle)
+            arrow_end = (
+                int(center[0] + math.cos(angle_rad) * s(85)),
+                int(center[1] + math.sin(angle_rad) * s(85)),
+            )
+            cv2.arrowedLine(
+                img,
+                center,
+                arrow_end,
+                (255, 255, 120),
+                max(2, s(3)),
+                tipLength=0.25,
+                line_type=cv2.LINE_AA,
+            )
+
+        cv2.circle(img, center, outer_radius, (220, 220, 220), 1, cv2.LINE_AA)
+
+        player_pos = context.get("player_pos")
+        if not player_pos:
+            return
+        player_point = sp((player_pos[0], player_pos[1]))
+
+        follow_target = context.get("follow_target")
+        if follow_target:
+            follow_point = sp((follow_target[0], follow_target[1]))
+            self._draw_dashed_line(img, player_point, follow_point, (80, 220, 255), max(1, s(2)))
+            cv2.putText(
+                img,
+                "follow",
+                (follow_point[0] + s(6), follow_point[1] - s(6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.35, 0.5 * scale),
+                (80, 220, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        attack_target = context.get("attack_target")
+        for enemy_pos in context.get("hittable_enemies") or []:
+            enemy_point = sp((enemy_pos[0], enemy_pos[1]))
+            cv2.line(img, player_point, enemy_point, (255, 140, 40), max(1, s(2)), cv2.LINE_AA)
+            if attack_target and enemy_pos == attack_target:
+                cv2.putText(
+                    img,
+                    "hit",
+                    (enemy_point[0] + s(6), enemy_point[1] - s(6)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    max(0.35, 0.5 * scale),
+                    (255, 140, 40),
+                    1,
+                    cv2.LINE_AA,
+                )
+
+        blocked_attack_target = context.get("blocked_attack_target")
+        if blocked_attack_target and blocked_attack_target != attack_target:
+            blocked_point = sp((blocked_attack_target[0], blocked_attack_target[1]))
+            cv2.line(img, player_point, blocked_point, (140, 140, 140), 1, cv2.LINE_AA)
+
+        cv2.putText(
+            img,
+            "red=wall green=clear",
+            (s(8), img.shape[0] - s(10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            max(0.32, 0.45 * scale),
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+
     def _copy_visual_debug_data(self, data):
         copied = {}
         for key, value in (data or {}).items():
@@ -2850,13 +3150,41 @@ class Play(Movement):
                     for item in value
                 ]
             elif isinstance(value, dict):
-                copied[key] = {
-                    sub_key: [
-                        list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
-                        for item in (sub_value or [])
-                    ]
-                    for sub_key, sub_value in value.items()
-                }
+                if key == "advanced_visuals":
+                    copied[key] = {
+                        "player_pos": list(value.get("player_pos") or []),
+                        "joystick_center": list(value.get("joystick_center") or []),
+                        "direction_samples": [
+                            {
+                                "angle": float(sample.get("angle", 0.0)),
+                                "blocked": bool(sample.get("blocked")),
+                            }
+                            for sample in value.get("direction_samples") or []
+                        ],
+                        "movement_angle": value.get("movement_angle"),
+                        "follow_target": (
+                            list(value["follow_target"]) if value.get("follow_target") else None
+                        ),
+                        "hittable_enemies": [
+                            list(item) for item in value.get("hittable_enemies") or []
+                        ],
+                        "attack_target": (
+                            list(value["attack_target"]) if value.get("attack_target") else None
+                        ),
+                        "blocked_attack_target": (
+                            list(value["blocked_attack_target"])
+                            if value.get("blocked_attack_target")
+                            else None
+                        ),
+                    }
+                else:
+                    copied[key] = {
+                        sub_key: [
+                            list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
+                            for item in (sub_value or [])
+                        ]
+                        for sub_key, sub_value in value.items()
+                    }
             else:
                 copied[key] = value
         return copied
@@ -3059,8 +3387,10 @@ class Play(Movement):
                 if super_range > 0:
                     cv2.circle(img, center, super_range, (255, 255, 0), 2)  # yellow
 
-        cv2.imshow("PylaAi-XXZ Visual Debug", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-        cv2.waitKey(1)
+        if self.advanced_visuals and data.get("advanced_visuals"):
+            self._draw_advanced_visuals(img, data, scale, sp, s)
+
+        show_visual_debug_frame(img)
 
     @staticmethod
     def movement_to_direction(movement):
