@@ -2,6 +2,7 @@
 import platform
 import subprocess
 import os
+from pathlib import Path
 
 if platform.system() != "Windows" or "microsoft" in platform.uname()[3].lower():
     print("\n" + "!"*50)
@@ -34,6 +35,34 @@ def force_install(reqs, no_deps=False):
     if no_deps: cmd += ["--force-reinstall", "--no-deps"]
     subprocess.check_call(cmd + reqs)
 
+def save_gpu_runtime_config(variant, cards):
+    import toml
+
+    config_path = Path("cfg") / "general_config.toml"
+    config = toml.load(config_path) if config_path.exists() else {}
+    apply_gpu_config(config, variant, cards)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(toml.dumps(config), encoding="utf-8")
+    print(
+        f"Saved GPU runtime config: cpu_or_gpu={config.get('cpu_or_gpu')}, "
+        f"directml_device_id={config.get('directml_device_id', 'auto')}"
+    )
+
+def create_run_file():
+    run_bat = Path("Run PylaAi-XXZ.bat")
+    run_bat.write_text(
+        "@echo off\n"
+        "cd /d %~dp0\n"
+        "set OMP_NUM_THREADS=2\n"
+        "set OPENBLAS_NUM_THREADS=2\n"
+        "set MKL_NUM_THREADS=2\n"
+        "set NUMEXPR_NUM_THREADS=2\n"
+        f"\"{sys.executable}\" main.py\n"
+        "pause\n",
+        encoding="ascii",
+    )
+    print(f"Created {run_bat.name}")
+
 def remove_onnxruntime_variants():
     subprocess.run([
         sys.executable, "-m", "pip", "uninstall", "-y",
@@ -59,6 +88,10 @@ def setup_pyla():
     print("\n" + "="*50 + "\n   PylaAi-XXZ - Windows Setup   \n" + "="*50)
     cards = detect_graphics_cards()
     auto_setup = os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes")
+
+    # Repair NumPy before installing/importing packages that load cv2.
+    # OpenCV 4.8 wheels crash with NumPy 2.x (_ARRAY_API / multiarray errors).
+    force_install(["numpy<2.0.0"], no_deps=True)
     
     # installing must have Pytorch CPU
     force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
@@ -66,6 +99,7 @@ def setup_pyla():
     # installing some must have dependencies
     print("Installing Core Dependencies...")
     base_reqs = [
+        "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
         "opencv-python==4.8.0.76", "requests", "ultralytics", "aiohttp", "easyocr",
         "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0"
@@ -153,16 +187,7 @@ def setup_pyla():
         onnx_variant = "cpu"
 
     if onnx_variant:
-        from utils import load_toml_as_dict, save_dict_as_toml
-
-        config_path = "cfg/general_config.toml"
-        config = load_toml_as_dict(config_path)
-        apply_gpu_config(config, onnx_variant, cards)
-        save_dict_as_toml(config, config_path)
-        print(
-            f"Saved GPU runtime config: cpu_or_gpu={config.get('cpu_or_gpu')}, "
-            f"directml_device_id={config.get('directml_device_id', 'auto')}"
-        )
+        save_gpu_runtime_config(onnx_variant, cards)
 
     # some conflict fixes
     print("\n Finalizing and Repairing Conflicts...")
@@ -171,6 +196,7 @@ def setup_pyla():
     force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
     force_install(["opencv-python==4.8.0.76"], no_deps=True)
+    create_run_file()
 
     # the setup completes
     os.system('cls')
@@ -190,16 +216,20 @@ if "--pyla-install" in sys.argv:
         sys.exit(1)
     sys.exit(0)
 
+if any(cmd in sys.argv for cmd in ["install", "develop"]):
+    print(
+        "\nWARNING: 'setup.py install' is deprecated. "
+        "Redirecting to PylaAi setup mode."
+    )
+    try:
+        setup_pyla()
+    except Exception as e:
+        print(f"\n[ERROR] {e}")
+        sys.exit(1)
+    sys.exit(0)
+
 setup(
     name="PylaAi-XXZ", version="1.0.0",
     packages=find_packages(exclude=["api", "cfg", "models", "typization"]),
     install_requires=[]
 )
-
-if any(cmd in sys.argv for cmd in ["install", "develop"]):
-    print(
-        "\nWARNING: 'setup.py install' is deprecated. "
-        "Run 'python setup.py --pyla-install' or setup.exe instead."
-    )
-    try: setup_pyla()
-    except Exception as e: print(f"\n[ERROR] {e}"); sys.exit(1)

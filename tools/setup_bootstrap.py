@@ -26,7 +26,18 @@ def app_dir():
 
 def run(command, cwd=None, env=None):
     print("> " + " ".join(str(part) for part in command))
-    subprocess.check_call(command, cwd=str(cwd) if cwd else None, env=env)
+    try:
+        subprocess.check_call(command, cwd=str(cwd) if cwd else None, env=env)
+    except subprocess.CalledProcessError as exc:
+        print("")
+        print(f"Command failed with exit code {exc.returncode}:")
+        print("  " + " ".join(str(part) for part in command))
+        print("")
+        print("Setup could not finish. Most setup failures are fixed by running this inside the project folder:")
+        print('  py -3.11-64 setup.py --pyla-install')
+        print("")
+        input("Press Enter to close...")
+        raise SystemExit(exc.returncode) from exc
 
 
 def ensure_supported_windows():

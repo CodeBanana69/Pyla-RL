@@ -2,10 +2,49 @@
 import gc
 import os
 import platform
+import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
+
+
+def repair_numpy_before_cv2_import():
+    try:
+        import numpy
+    except Exception:
+        return
+
+    try:
+        major = int(str(numpy.__version__).split(".", 1)[0])
+    except (TypeError, ValueError):
+        return
+    if major < 2:
+        return
+
+    if os.environ.get("PYLAAI_NUMPY_REPAIR") == "1":
+        print(
+            "NumPy is still 2.x after repair. Run: "
+            f'"{sys.executable}" -m pip install --force-reinstall --no-deps "numpy<2.0.0"'
+        )
+        return
+
+    print(
+        f"Detected NumPy {numpy.__version__}; repairing to numpy<2.0.0 before loading OpenCV..."
+    )
+    os.environ["PYLAAI_NUMPY_REPAIR"] = "1"
+    subprocess.check_call([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--force-reinstall",
+        "--no-deps",
+        "numpy<2.0.0",
+    ])
+
+
+repair_numpy_before_cv2_import()
 
 import cv2
 
