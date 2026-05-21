@@ -21,6 +21,9 @@ ApplicationWindow {
     property string statusText: ""
     property bool statusOk: true
     property string performanceProfile: "balanced"
+    property string settingsFilter: ""
+    property var preflightChecks: []
+    property bool showWizard: false
 
     function reloadState() {
         if (hubBridge) {
@@ -43,7 +46,15 @@ ApplicationWindow {
     }
 
     function saveValue(section, key, value) {
-        applyBridgeResult(hubBridge.updateConfig(section, key, String(value)))
+        const result = applyBridgeResult(hubBridge.updateConfig(section, key, String(value)))
+        if (!result.ok && result.message) {
+            statusText = result.message
+            statusOk = false
+        } else if (result.ok) {
+            statusText = "Saved"
+            statusOk = true
+        }
+        return result
     }
 
     function value(section, key) {
@@ -64,7 +75,10 @@ ApplicationWindow {
         applyBridgeResult(hubBridge.runAction(action))
     }
 
-    Component.onCompleted: reloadState()
+    Component.onCompleted: {
+        reloadState()
+        showWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
+    }
 
     Connections {
         target: hubBridge
@@ -569,6 +583,15 @@ ApplicationWindow {
         property string hint: ""
         default property alias content: slot.data
 
+        readonly property bool filterMatch: {
+            var query = root.settingsFilter.trim().toLowerCase()
+            if (query === "")
+                return true
+            return row.label.toLowerCase().indexOf(query) >= 0
+                    || row.hint.toLowerCase().indexOf(query) >= 0
+        }
+        visible: filterMatch
+
         Layout.fillWidth: true
         implicitHeight: Math.max(52, slot.implicitHeight + 18)
         radius: 8
@@ -735,6 +758,36 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
+                Layout.preferredHeight: warningBanner.visible ? 34 : 0
+                visible: warningBanner.visible
+                color: "#2a220c"
+                border.width: 1
+                border.color: theme.accentBorder
+
+                Text {
+                    id: warningBanner
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    visible: (latestVersion && latestVersion !== "" && latestVersion !== hubVersion) || correctZoom === false
+                    text: {
+                        var parts = []
+                        if (latestVersion && latestVersion !== "" && latestVersion !== hubVersion) {
+                            parts.push("Update available: v" + latestVersion)
+                        }
+                        if (correctZoom === false) {
+                            parts.push("Display scaling is not 100% — bot may misclick")
+                        }
+                        return parts.join(" · ")
+                    }
+                    color: theme.accent
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
                 Layout.preferredHeight: 58
                 color: theme.chrome
                 border.width: 1
@@ -777,6 +830,64 @@ ApplicationWindow {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.topMargin: 34
                         spacing: 24
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            SectionTitle { title: "PRE-FLIGHT CHECKS" }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Verify emulator and ADB before START. Use 1920x1080 and 100% Windows scaling."
+                                color: theme.faint
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                            RowLayout {
+                                spacing: 10
+                                HubButton { label: "Run Checks"; secondary: true; onClicked: root.runAction("preflight-check") }
+                                HubButton { label: "Test Connection"; secondary: true; onClicked: root.runAction("test-emulator") }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                visible: root.statusText !== "" && root.activeTab === "Overview"
+                                text: root.statusText
+                                color: root.statusOk ? theme.muted : "#ff6b5f"
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            SectionTitle { title: "PERFORMANCE PROFILE" }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 12
+                                Repeater {
+                                    model: ["balanced", "low_end", "quality"]
+                                    delegate: ChoicePill {
+                                        label: modelData.replace("_", "-")
+                                        selected: root.performanceProfile === modelData
+                                        onClicked: {
+                                            root.performanceProfile = modelData
+                                            root.runAction("profile-" + modelData)
+                                        }
+                                    }
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: {
+                                    var desc = hubState.meta && hubState.meta.profileDescriptions
+                                        ? hubState.meta.profileDescriptions[root.performanceProfile] : ""
+                                    return desc ? desc + " Restart the bot after changing profiles." : ""
+                                }
+                                color: theme.faint
+                                font.pixelSize: 11
+                                wrapMode: Text.WordWrap
+                            }
+                        }
 
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -851,6 +962,21 @@ ApplicationWindow {
                     visible: root.activeTab === "Settings"
 
                     FormPanel {
+                        title: "HUB"
+                        FieldRow {
+                            label: "Search Settings"
+                            ConfigInput {
+                                anchors.fill: parent
+                                value: root.settingsFilter
+                                onSaved: root.settingsFilter = value
+                            }
+                        }
+                        ActionRow {
+                            HubButton { label: "Open cfg Folder"; secondary: true; onClicked: root.runAction("open-config-folder") }
+                        }
+                    }
+
+                    FormPanel {
                         title: "DETECTION"
                         FieldRow {
                             label: "Wall Confidence"
@@ -919,6 +1045,14 @@ ApplicationWindow {
                         FieldRow {
                             label: "Pause Session Strip"
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_session_strip"); onToggled: root.saveValue("settings", "pause_menu_session_strip", value) } }
+                        }
+                        FieldRow {
+                            label: "Auto-Reopen Pause Menu"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_auto_reopen"); onToggled: root.saveValue("settings", "pause_menu_auto_reopen", value) } }
+                        }
+                        FieldRow {
+                            label: "Console IPS Output"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "console_ips"); onToggled: root.saveValue("settings", "console_ips", value) } }
                         }
                         FieldRow {
                             label: "Pause Graph Samples"
@@ -1073,6 +1207,11 @@ ApplicationWindow {
 
                 TabPage {
                     visible: root.activeTab === "Match History"
+                    ActionRow {
+                        HubButton { label: "Export CSV"; secondary: true; onClicked: root.runAction("export-history") }
+                        HubButton { label: "Reset Stats"; secondary: true; onClicked: root.runAction("reset-history") }
+                    }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Flow {
                         Layout.fillWidth: true
                         spacing: 12
@@ -1168,6 +1307,45 @@ ApplicationWindow {
                     }
                     Text { text: "\u00b7"; color: theme.muted; font.pixelSize: 13; font.weight: Font.Bold }
                     Text { text: "XXZ"; color: theme.faint; font.pixelSize: 11 }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.showWizard
+        color: "#cc000000"
+        z: 99
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            radius: 12
+            color: theme.panel
+            border.width: 1
+            border.color: theme.borderSoft
+            implicitHeight: wizardColumn.implicitHeight + 32
+
+            ColumnLayout {
+                id: wizardColumn
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+                Text { text: "Welcome to PylaAi-XXZ"; color: theme.text; font.pixelSize: 16; font.weight: Font.Bold }
+                Text {
+                    Layout.fillWidth: true
+                    text: "1. Start your emulator and open Brawl Stars.\n2. Optional: set up Discord/Telegram/API tabs.\n3. Choose mode and emulator, run pre-flight checks, then START."
+                    color: theme.muted
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                HubButton {
+                    label: "Got it"
+                    onClicked: {
+                        root.runAction("complete-wizard")
+                        root.showWizard = false
+                    }
                 }
             }
         }

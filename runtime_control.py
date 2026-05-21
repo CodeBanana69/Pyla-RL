@@ -5,7 +5,13 @@ import time
 import ctypes
 from pathlib import Path
 
-from runtime_metrics import delete_metrics, format_session_summary, format_uptime, read_metrics
+from runtime_metrics import (
+    delete_metrics,
+    feed_fps_warning,
+    format_session_summary,
+    format_uptime,
+    read_metrics,
+)
 from utils import load_toml_as_dict
 
 
@@ -58,6 +64,40 @@ def pause_menu_session_strip_enabled():
     )
 
 
+def pause_menu_auto_reopen_enabled():
+    general = load_toml_as_dict("cfg/general_config.toml")
+    return str(general.get("pause_menu_auto_reopen", "yes")).strip().lower() in (
+        "yes",
+        "true",
+        "1",
+        "on",
+    )
+
+
+def control_command_path(state_path):
+    state = Path(state_path)
+    return state.with_name(f"{state.stem}.cmd")
+
+
+def write_control_command(state_path, command):
+    path = control_command_path(state_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(command or "").strip().lower(), encoding="utf-8")
+
+
+def read_and_clear_control_command(state_path):
+    path = control_command_path(state_path)
+    try:
+        command = path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return command
+
+
 def draw_ips_sparkline(canvas, samples, color, width=SPARKLINE_WIDTH, height=SPARKLINE_HEIGHT):
     canvas.delete("all")
     mid_y = height / 2
@@ -102,8 +142,11 @@ class RuntimeControlWindow:
         self.process = None
         write_state(self.state_path, RUNNING)
 
+    def is_running(self):
+        return self.process is not None and self.process.poll() is None
+
     def start(self):
-        if self.process and self.process.poll() is None:
+        if self.is_running():
             return
         script_path = Path(__file__).resolve()
         cmd = [sys.executable, str(script_path), "--window", str(self.state_path)]
@@ -117,6 +160,18 @@ class RuntimeControlWindow:
         time.sleep(0.2)
         if self.process.poll() is not None:
             print("Runtime pause control window failed to start.")
+
+    def reopen(self, mode="show"):
+        if not self.is_running():
+            self.start()
+            return
+        write_control_command(self.state_path, mode)
+
+    def show(self):
+        self.reopen("show")
+
+    def show_compact(self):
+        self.reopen("compact")
 
     def is_paused(self):
         return read_state(self.state_path) == PAUSED
@@ -165,11 +220,12 @@ def run_window(state_path, metrics_path=None):
 
     graph_enabled = pause_menu_graph_enabled() and metrics_path is not None
     strip_enabled = pause_menu_session_strip_enabled() and metrics_path is not None
-    window_height = 206
+    auto_reopen = pause_menu_auto_reopen_enabled()
+    window_height = 268
     if graph_enabled:
-        window_height += 42
+        window_height += 44
     if strip_enabled:
-        window_height += 56
+        window_height += 58
 
     root = ctk.CTk()
     root.title("PylaAi-XXZ Control")
@@ -178,6 +234,16 @@ def run_window(state_path, metrics_path=None):
     root.attributes("-topmost", True)
     root.overrideredirect(True)
     root.configure(fg_color="#121212")
+
+    compact_root = ctk.CTkToplevel(root)
+    compact_root.title("PylaAi-XXZ Control")
+    compact_root.geometry("286x54")
+    compact_root.resizable(False, False)
+    compact_root.attributes("-topmost", True)
+    compact_root.overrideredirect(True)
+    compact_root.configure(fg_color="#121212")
+    compact_root.withdraw()
+
     owner_pid = None
     try:
         owner_pid = int(Path(state_path).stem.rsplit("_", 1)[1])
@@ -187,13 +253,48 @@ def run_window(state_path, metrics_path=None):
     status_var = tk.StringVar(value="Running")
     button_var = tk.StringVar(value="Pause Bot")
     ips_var = tk.StringVar(value="IPS --")
+    compact_status_var = tk.StringVar(value="Running")
+    compact_button_var = tk.StringVar(value="Pause")
 
-    def start_move(event):
-        root._pyla_drag_offset = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+    def start_move(window, event):
+        window._pyla_drag_offset = (event.x_root - window.winfo_x(), event.y_root - window.winfo_y())
 
-    def drag_move(event):
-        drag_x, drag_y = getattr(root, "_pyla_drag_offset", (0, 0))
-        root.geometry(f"+{event.x_root - drag_x}+{event.y_root - drag_y}")
+    def drag_move(window, event):
+        drag_x, drag_y = getattr(window, "_pyla_drag_offset", (0, 0))
+        window.geometry(f"+{event.x_root - drag_x}+{event.y_root - drag_y}")
+
+    def show_full():
+        compact_root.withdraw()
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        root.focus_force()
+
+    def show_compact():
+        root.withdraw()
+        compact_root.deiconify()
+        compact_root.lift()
+        compact_root.attributes("-topmost", True)
+
+    def minimize_full():
+        root.iconify()
+
+    def minimize_compact():
+        compact_root.iconify()
+
+    def handle_control_command():
+        command = read_and_clear_control_command(state_path)
+        if command == "show":
+            show_full()
+        elif command == "compact":
+            show_compact()
+        elif command == "hide":
+            root.withdraw()
+            compact_root.withdraw()
+
+    def hide_menu():
+        root.withdraw()
+        compact_root.withdraw()
 
     chrome = ctk.CTkFrame(
         root,
@@ -205,24 +306,33 @@ def run_window(state_path, metrics_path=None):
     )
     chrome.pack(fill="x")
     chrome.pack_propagate(False)
-    chrome.bind("<ButtonPress-1>", start_move)
-    chrome.bind("<B1-Motion>", drag_move)
+    chrome.bind("<ButtonPress-1>", lambda event: start_move(root, event))
+    chrome.bind("<B1-Motion>", lambda event: drag_move(root, event))
 
     ctk.CTkLabel(
         chrome,
-        text="Pyla  ·  Running",
+        text="Pyla  ·  Control",
         text_color="#f4f4f4",
         font=("Segoe UI", 13, "bold"),
     ).place(relx=0.5, rely=0.5, anchor="center")
 
-    def on_close():
-        write_state(state_path, RUNNING)
-        root.destroy()
+    ctk.CTkButton(
+        chrome,
+        text="−",
+        command=minimize_full,
+        fg_color="transparent",
+        hover_color="#1f1f1f",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 13, "bold"),
+        width=34,
+        height=28,
+        corner_radius=6,
+    ).place(relx=0.86, rely=0.5, anchor="e")
 
     ctk.CTkButton(
         chrome,
         text="×",
-        command=on_close,
+        command=show_compact,
         fg_color="transparent",
         hover_color="#1f1f1f",
         text_color="#b8b8b8",
@@ -231,6 +341,29 @@ def run_window(state_path, metrics_path=None):
         height=28,
         corner_radius=6,
     ).place(relx=0.985, rely=0.5, anchor="e")
+
+    compact_chrome = ctk.CTkFrame(
+        compact_root,
+        fg_color="#181818",
+        border_color="#262626",
+        border_width=1,
+        corner_radius=10,
+        height=54,
+    )
+    compact_chrome.pack(fill="both", expand=True, padx=4, pady=4)
+    compact_chrome.pack_propagate(False)
+    compact_chrome.bind("<ButtonPress-1>", lambda event: start_move(compact_root, event))
+    compact_chrome.bind("<B1-Motion>", lambda event: drag_move(compact_root, event))
+
+    compact_status = ctk.CTkLabel(
+        compact_chrome,
+        textvariable=compact_status_var,
+        text_color="#30d158",
+        font=("Segoe UI", 12, "bold"),
+        width=78,
+        anchor="w",
+    )
+    compact_status.place(x=10, rely=0.5, anchor="w")
 
     card = ctk.CTkFrame(root, fg_color="#0c0c0c", corner_radius=0)
     card.pack(fill="both", expand=True)
@@ -291,13 +424,14 @@ def run_window(state_path, metrics_path=None):
         graph_row = ctk.CTkFrame(panel, fg_color="transparent")
         graph_row.pack(fill="x", padx=10, pady=(0, 8))
 
-        ctk.CTkLabel(
+        ips_label = ctk.CTkLabel(
             graph_row,
             textvariable=ips_var,
             text_color="#b8b8b8",
             font=("Segoe UI", 11, "bold"),
             anchor="w",
-        ).pack(side="left")
+        )
+        ips_label.pack(side="left")
 
         sparkline_canvas = tk.Canvas(
             graph_row,
@@ -323,10 +457,15 @@ def run_window(state_path, metrics_path=None):
             return
         color = graph_color(paused)
         if metrics is None:
-            ips_var.set("IPS --")
+            ips_var.set("IPS -- · Feed --")
             draw_ips_sparkline(sparkline_canvas, [], color)
             return
-        ips_var.set(f"IPS {metrics['ips']:.1f}")
+        feed_text = f"{metrics['feed_fps']:.1f}"
+        ips_var.set(f"IPS {metrics['ips']:.1f} · Feed {feed_text}")
+        if feed_fps_warning(metrics):
+            ips_label.configure(text_color="#ffb23a")
+        else:
+            ips_label.configure(text_color="#b8b8b8")
         history = metrics.get("history") or []
         draw_ips_sparkline(sparkline_canvas, history, color)
 
@@ -345,11 +484,14 @@ def run_window(state_path, metrics_path=None):
             progress = brawler
         session_line1_var.set(f"{format_uptime(session.get('uptime_s'))} · {progress}")
         ips_text = "--"
+        feed_text = "--"
         if metrics is not None and isinstance(metrics.get("ips"), (int, float)):
             ips_text = f"{metrics['ips']:.1f}"
+        if metrics is not None and isinstance(metrics.get("feed_fps"), (int, float)):
+            feed_text = f"{metrics['feed_fps']:.1f}"
         session_line2_var.set(
             f"W{session.get('session_wins', 0)} L{session.get('session_losses', 0)} · "
-            f"IPS {ips_text} · {session.get('state') or '--'}"
+            f"IPS {ips_text} · Feed {feed_text} · {session.get('state') or '--'}"
         )
         session_notice_var.set(session.get("notice") or "Running")
 
@@ -383,19 +525,74 @@ def run_window(state_path, metrics_path=None):
         for label in session_labels:
             label.bind("<Button-1>", copy_session_summary)
 
+    pause_button = ctk.CTkButton(
+        panel,
+        textvariable=button_var,
+        width=170,
+        height=38,
+        corner_radius=8,
+        fg_color="#1f1f1f",
+        hover_color="#2a2a2a",
+        border_color="#333333",
+        border_width=1,
+        text_color="#FFFFFF",
+        font=("Segoe UI", 15, "bold"),
+    )
+    pause_button.pack(pady=(0, 6))
+
+    button_row = ctk.CTkFrame(panel, fg_color="transparent")
+    button_row.pack(pady=(0, 12))
+
+    def request_stop_bot():
+        request_stop(state_path)
+        refresh()
+
+    stop_button = ctk.CTkButton(
+        button_row,
+        text="Stop Bot",
+        command=request_stop_bot,
+        width=170,
+        height=34,
+        corner_radius=8,
+        fg_color="#3a1212",
+        hover_color="#551818",
+        border_color="#7a2020",
+        border_width=1,
+        text_color="#ffb4b4",
+        font=("Segoe UI", 13, "bold"),
+    )
+    stop_button.pack()
+
     def refresh():
         if owner_pid and not process_is_alive(owner_pid):
+            compact_root.destroy()
             root.destroy()
             return
+        handle_control_command()
         paused = read_state(state_path) == PAUSED
         metrics = read_current_metrics()
-        status_var.set("Paused" if paused else "Running")
-        button_var.set("Resume Bot" if paused else "Pause Bot")
-        status_label.configure(text_color="#ff9f0a" if paused else "#30d158")
+        status_text = "Paused" if paused else "Running"
+        button_text = "Resume Bot" if paused else "Pause Bot"
+        compact_button_text = "Resume" if paused else "Pause"
+        status_color = "#ff9f0a" if paused else "#30d158"
+        status_var.set(status_text)
+        button_var.set(button_text)
+        compact_status_var.set(status_text)
+        compact_button_var.set(compact_button_text)
+        status_label.configure(text_color=status_color)
+        compact_status.configure(text_color=status_color)
+        pause_fg = "#ff9f0a" if paused else "#1f1f1f"
+        pause_hover = "#ffb23a" if paused else "#2a2a2a"
+        pause_border = "#8f610e" if paused else "#333333"
         pause_button.configure(
-            fg_color="#ff9f0a" if paused else "#1f1f1f",
-            hover_color="#ffb23a" if paused else "#2a2a2a",
-            border_color="#8f610e" if paused else "#333333",
+            fg_color=pause_fg,
+            hover_color=pause_hover,
+            border_color=pause_border,
+        )
+        compact_pause_button.configure(
+            fg_color=pause_fg,
+            hover_color=pause_hover,
+            border_color=pause_border,
         )
         update_graph(paused, metrics)
         update_session_strip(metrics)
@@ -417,23 +614,71 @@ def run_window(state_path, metrics_path=None):
         write_state(state_path, RUNNING if read_state(state_path) == PAUSED else PAUSED)
         refresh()
 
-    pause_button = ctk.CTkButton(
-        panel,
-        textvariable=button_var,
+    def on_pause_hotkey(_event=None):
+        toggle_pause()
+
+    root.bind("<F8>", on_pause_hotkey)
+    compact_root.bind("<F8>", on_pause_hotkey)
+
+    pause_button.configure(command=toggle_pause)
+
+    compact_pause_button = ctk.CTkButton(
+        compact_chrome,
+        textvariable=compact_button_var,
         command=toggle_pause,
-        width=170,
-        height=38,
+        width=92,
+        height=30,
         corner_radius=8,
         fg_color="#1f1f1f",
         hover_color="#2a2a2a",
         border_color="#333333",
         border_width=1,
         text_color="#FFFFFF",
-        font=("Segoe UI", 15, "bold"),
+        font=("Segoe UI", 12, "bold"),
     )
-    pause_button.pack(pady=(0, 12))
+    compact_pause_button.place(x=96, rely=0.5, anchor="w")
 
-    root.protocol("WM_DELETE_WINDOW", on_close)
+    ctk.CTkButton(
+        compact_chrome,
+        text="□",
+        command=show_full,
+        fg_color="transparent",
+        hover_color="#2a2a2a",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 12, "bold"),
+        width=28,
+        height=28,
+        corner_radius=6,
+    ).place(relx=0.78, rely=0.5, anchor="center")
+
+    ctk.CTkButton(
+        compact_chrome,
+        text="−",
+        command=minimize_compact,
+        fg_color="transparent",
+        hover_color="#2a2a2a",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 12, "bold"),
+        width=28,
+        height=28,
+        corner_radius=6,
+    ).place(relx=0.9, rely=0.5, anchor="center")
+
+    ctk.CTkButton(
+        compact_chrome,
+        text="×",
+        command=minimize_compact if auto_reopen else hide_menu,
+        fg_color="transparent",
+        hover_color="#2a2a2a",
+        text_color="#b8b8b8",
+        font=("Segoe UI", 12, "bold"),
+        width=28,
+        height=28,
+        corner_radius=6,
+    ).place(relx=0.985, rely=0.5, anchor="e")
+
+    root.protocol("WM_DELETE_WINDOW", show_compact)
+    compact_root.protocol("WM_DELETE_WINDOW", show_compact)
     refresh_loop()
     root.mainloop()
 

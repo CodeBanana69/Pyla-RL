@@ -98,6 +98,7 @@ class RuntimeMetricsTests(unittest.TestCase):
         summary = format_session_summary(
             {
                 "ips": 18.2,
+                "feed_fps": 12.0,
                 "session": {
                     "uptime_s": 720,
                     "brawler": "shelly",
@@ -114,6 +115,13 @@ class RuntimeMetricsTests(unittest.TestCase):
         self.assertIn("shelly -> 500 (437)", summary)
         self.assertIn("W3 L1", summary)
         self.assertIn("IPS 18.2", summary)
+        self.assertIn("Feed 12.0", summary)
+
+    def test_feed_fps_warning(self):
+        from runtime_metrics import feed_fps_warning
+
+        self.assertTrue(feed_fps_warning({"ips": 18.0, "feed_fps": 8.0}))
+        self.assertFalse(feed_fps_warning({"ips": 18.0, "feed_fps": 17.0}))
 
     def test_format_session_summary_handles_missing_data(self):
         summary = format_session_summary(None)

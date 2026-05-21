@@ -87,12 +87,26 @@ def format_session_summary(metrics):
     losses = session.get("session_losses", 0)
     ips = metrics.get("ips")
     ips_text = f"{ips:.1f}" if isinstance(ips, (int, float)) else "--"
+    feed_fps = metrics.get("feed_fps")
+    feed_text = f"{feed_fps:.1f}" if isinstance(feed_fps, (int, float)) else "--"
     state = session.get("state") or "--"
     notice = session.get("notice") or "Running"
     return (
         f"PylaAi-XXZ | {uptime} | {progress} | W{wins} L{losses} | "
-        f"IPS {ips_text} | {state} | {notice}"
+        f"IPS {ips_text} | Feed {feed_text} | {state} | {notice}"
     )
+
+
+def feed_fps_warning(metrics):
+    if not metrics:
+        return False
+    ips = metrics.get("ips")
+    feed_fps = metrics.get("feed_fps")
+    if not isinstance(ips, (int, float)) or not isinstance(feed_fps, (int, float)):
+        return False
+    if ips < 1 or feed_fps < 1:
+        return False
+    return feed_fps + 1.5 < ips
 
 
 def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None):

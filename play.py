@@ -3390,6 +3390,36 @@ class Play(Movement):
         if self.advanced_visuals and data.get("advanced_visuals"):
             self._draw_advanced_visuals(img, data, scale, sp, s)
 
+        try:
+            from runtime_metrics import metrics_path_for_pid, read_metrics
+            import os
+
+            metrics = read_metrics(metrics_path_for_pid(os.getppid()))
+            if metrics is None:
+                metrics = read_metrics(metrics_path_for_pid(os.getpid()))
+            if metrics:
+                session = metrics.get("session") or {}
+                hud_lines = [
+                    f"State: {session.get('state') or '--'}",
+                    f"IPS {metrics.get('ips', 0):.1f} · Feed {metrics.get('feed_fps', 0):.1f}",
+                    session.get("notice") or "Running",
+                ]
+                y = 18
+                for line in hud_lines:
+                    cv2.putText(
+                        img,
+                        line,
+                        (8, y),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.4, 0.55 * scale),
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+                    y += int(18 * max(scale, 0.5))
+        except Exception:
+            pass
+
         show_visual_debug_frame(img)
 
     @staticmethod

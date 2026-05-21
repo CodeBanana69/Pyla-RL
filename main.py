@@ -55,7 +55,6 @@ setup_logging_if_enabled()
 
 import window_controller
 from discord_control import DiscordControlServer
-from gui.hub import Hub
 from gui.qml_hub import QmlHub
 from gui.login import login
 from gui.main import App
@@ -99,11 +98,7 @@ pyla_version = load_toml_as_dict("./cfg/general_config.toml")['pyla_version']
 
 
 def HubMenu(*args, **kwargs):
-    try:
-        return QmlHub(*args, **kwargs)
-    except Exception as exc:
-        print(f"QML hub unavailable, falling back to legacy hub: {exc}")
-        return Hub(*args, **kwargs)
+    return QmlHub(*args, **kwargs)
 
 
 def parse_max_ips(value):
@@ -354,11 +349,21 @@ def pyla_main(data):
                 30,
                 min(120, int(general_config.get("pause_menu_graph_samples", 45))),
             )
+            self.console_ips = str(
+                general_config.get("console_ips", "yes")
+            ).strip().lower() in ("yes", "true", "1", "on")
+            self.pause_menu_auto_reopen = str(
+                general_config.get("pause_menu_auto_reopen", "yes")
+            ).strip().lower() in ("yes", "true", "1", "on")
             self.ips_history = deque(maxlen=self.pause_menu_graph_samples)
             self.metrics_path = metrics_path_for_pid(os.getpid())
             self.disconnect_ocr_interval = 6.0
             self.control_window = RuntimeControlWindow(metrics_path=self.metrics_path)
             self.control_window.start()
+            self.last_pause_menu_check = 0.0
+            print(
+                "Pause menu ready: F8 pause/resume, − minimize, × compact, □ expand full panel."
+            )
             self.discord_control = DiscordControlServer(
                 self.control_window.state_path,
                 screenshot_provider=self.window_controller.screenshot,
@@ -370,13 +375,21 @@ def pyla_main(data):
                 status_provider=self.telegram_status,
                 start_push_callback=self.discord_start_push,
                 stop_all_callback=self.discord_stop_all,
+                pause_menu_callback=self.control_window.show,
             )
             self.discord_control.start()
             self.telegram_control = TelegramControlServer(
                 self.control_window.state_path,
                 screenshot_provider=self.window_controller.screenshot,
                 restart_game_callback=self.restart_brawl_stars,
+                restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
+                restart_emulator_callback=self.window_controller.restart_emulator_profile,
+                press_key_callback=self.discord_press_key,
+                back_callback=self.window_controller.android_back,
                 status_provider=self.telegram_status,
+                start_push_callback=self.discord_start_push,
+                stop_all_callback=self.discord_stop_all,
+                pause_menu_callback=self.control_window.show,
             )
             self.telegram_control.start()
             self.was_paused = False
@@ -394,6 +407,41 @@ def pyla_main(data):
                 "defeat": int(total.get("defeat", 0) or 0),
                 "draw": int(total.get("draw", 0) or 0),
             }
+
+        def write_runtime_metrics(self):
+            if not (self.pause_menu_ips_graph or self.pause_menu_session_strip):
+                return
+            write_metrics(
+                self.metrics_path,
+                self.ips_ema or 0.0,
+                self.perf_feed_fps,
+                self.ips_history,
+                max_samples=self.pause_menu_graph_samples,
+                session=self.build_runtime_snapshot() if self.pause_menu_session_strip else None,
+            )
+
+        def graceful_shutdown(self, notice="Stopping", notify_reason=None):
+            self.runtime_notice = notice
+            try:
+                self.write_runtime_metrics()
+            except Exception:
+                pass
+            self.window_controller.keys_up(list("wasd"))
+            if notify_reason:
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(async_notify_user(
+                            notify_reason,
+                            self.window_controller.screenshot(),
+                            details={"state": self.state or "unknown", "notice": notice},
+                        ))
+                    finally:
+                        loop.close()
+                        asyncio.set_event_loop(None)
+                except Exception:
+                    pass
 
         def build_runtime_snapshot(self):
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
@@ -429,8 +477,7 @@ def pyla_main(data):
             return True
 
         def discord_stop_all(self):
-            self.window_controller.keys_up(list("wasd"))
-            self.Play.reset_match_control_state()
+            self.graceful_shutdown("Stopping")
             return "PylaAi-XXZ is stopping. The bot process will exit shortly."
 
         def discord_start_push(self, brawler: str, target: int | None = None):
@@ -501,27 +548,8 @@ def pyla_main(data):
             self.Play.time_since_detections["enemy"] = time.time()
             opened_package = self.window_controller.foreground_package(timeout=4)
             if opened_package and opened_package != window_controller.BRAWL_STARS_PACKAGE:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    screenshot = self.window_controller.screenshot()
-                    loop.run_until_complete(async_notify_user(
-                        "bot_is_stuck",
-                        screenshot,
-                        details={
-                            "reason": "Brawl Stars did not stay in the foreground after recovery.",
-                            "state": self.state or "unknown",
-                            "emulator": getattr(self.window_controller, "selected_emulator", "unknown"),
-                            "adb_device": getattr(getattr(self.window_controller, "device", None), "serial", ""),
-                        },
-                    ))
-                finally:
-                    loop.run_until_complete(asyncio.sleep(0.25))
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                    asyncio.set_event_loop(None)
-                    loop.close()
                 print("Bot got stuck. User notified. Shutting down.")
-                self.window_controller.keys_up(list("wasd"))
+                self.graceful_shutdown("Bot stuck", notify_reason="bot_is_stuck")
                 self.window_controller.close()
                 import sys
                 sys.exit(1)
@@ -618,6 +646,7 @@ def pyla_main(data):
 
             self.low_feed_last_recovery = now
             self.slow_feed_recovery_attempts += 1
+            self.runtime_notice = "Slow feed recovery"
             print(
                 f"Frame feed stayed under 3 FPS for {now - self.low_feed_since:.1f}s "
                 f"(feed_fps={self.perf_feed_fps:.2f}); recovery attempt {self.slow_feed_recovery_attempts}."
@@ -766,6 +795,7 @@ def pyla_main(data):
                 f"Match image did not change for {frozen_for:.1f}s "
                 f"(diff {diff:.3f}); restarting Brawl Stars and scrcpy."
             )
+            self.runtime_notice = "Visual freeze recovery"
             self.window_controller.keys_up(list("wasd"))
             self.restart_brawl_stars()
             return True
@@ -789,6 +819,7 @@ def pyla_main(data):
                 return False
 
             self.global_freeze_recovery_attempts += 1
+            self.runtime_notice = "Screen freeze recovery"
             print(
                 "Screen health check found no visible change for "
                 f"{self.global_freeze_health_interval:.0f}s (diff {diff:.3f}); "
@@ -894,6 +925,7 @@ def pyla_main(data):
                 return False
 
             print(f"Lobby did not enter a match for {lobby_age:.1f}s; restarting Brawl Stars.")
+            self.runtime_notice = "Lobby stuck recovery"
             self.restart_brawl_stars()
             return True
 
@@ -1083,6 +1115,7 @@ def pyla_main(data):
                 return False
 
             self.disconnect_reload_attempts += 1
+            self.runtime_notice = "Disconnect recovery"
             self.window_controller.keys_up(list("wasd"))
             print(f"Disconnect/login screen detected, recovery attempt {self.disconnect_reload_attempts}.")
             if self.disconnect_reload_attempts >= 3:
@@ -1096,6 +1129,7 @@ def pyla_main(data):
 
         def handle_offline_emulator(self):
             now = time.time()
+            self.runtime_notice = "Emulator offline"
             if now - self.last_offline_emulator_message > 10:
                 if self.window_controller.emulator_autorestart:
                     remaining = max(
@@ -1191,8 +1225,22 @@ def pyla_main(data):
                 self.pause_started_at = time.time()
                 self.runtime_notice = "Paused"
                 print("Bot paused.")
+            self.write_runtime_metrics()
             time.sleep(0.1)
             return True
+
+        def ensure_pause_menu_window(self):
+            if not self.pause_menu_auto_reopen:
+                return
+            now = time.time()
+            if now - self.last_pause_menu_check < 2.0:
+                return
+            self.last_pause_menu_check = now
+            if self.control_window.is_running():
+                return
+            print("Pause menu closed — reopening compact control bar.")
+            self.control_window.start()
+            self.control_window.show_compact()
 
         def main(self): #this is for timer to stop after time
             s_time = time.time()
@@ -1200,7 +1248,10 @@ def pyla_main(data):
             while True:
                 if is_stop_requested(self.control_window.state_path):
                     print("Remote stop requested; shutting down bot.")
+                    self.graceful_shutdown("Stopping")
                     break
+
+                self.ensure_pause_menu_window()
 
                 if self.handle_pause_control():
                     s_time = time.time()
@@ -1233,18 +1284,17 @@ def pyla_main(data):
                             if self.pause_menu_ips_graph:
                                 self.ips_history.append(self.ips_ema)
                             if self.pause_menu_ips_graph or self.pause_menu_session_strip:
-                                write_metrics(
-                                    self.metrics_path,
-                                    self.ips_ema,
-                                    self.perf_feed_fps,
-                                    self.ips_history,
-                                    max_samples=self.pause_menu_graph_samples,
-                                    session=self.build_runtime_snapshot()
-                                    if self.pause_menu_session_strip
-                                    else None,
-                                )
-                        if not self.visual_debug:
+                                self.write_runtime_metrics()
+                        if self.console_ips:
                             print(f"{self.ips_ema:.2f} IPS")
+                            if self.recover_low_ips(self.ips_ema):
+                                s_time = time.time()
+                                c = 0
+                                continue
+                            if self.ips_ema is not None and self.ips_ema < 3 and time.time() - self.low_frame_fps_warning_time > 20:
+                                self.print_low_ips_detail(self.ips_ema)
+                                self.low_frame_fps_warning_time = time.time()
+                        elif not self.visual_debug:
                             if self.recover_low_ips(self.ips_ema):
                                 s_time = time.time()
                                 c = 0

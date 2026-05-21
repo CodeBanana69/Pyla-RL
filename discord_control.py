@@ -117,6 +117,7 @@ class DiscordControlServer:
             status_provider: Callable[[], dict[str, Any]] | None = None,
             start_push_callback: Callable[[str, int | None], Any] | None = None,
             stop_all_callback: Callable[[], Any] | None = None,
+            pause_menu_callback: Callable[[], Any] | None = None,
     ):
         self.state_path = Path(state_path)
         self.settings_loader = settings_loader
@@ -129,6 +130,7 @@ class DiscordControlServer:
         self.status_provider = status_provider
         self.start_push_callback = start_push_callback
         self.stop_all_callback = stop_all_callback
+        self.pause_menu_callback = pause_menu_callback
         self.thread: threading.Thread | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client: discord.Client | None = None
@@ -206,15 +208,15 @@ class DiscordControlServer:
             set_runtime_state(self.state_path, paused=True)
             await _followup(interaction, "PylaAi-XXZ paused. Use /start to resume.")
 
-        @tree.command(name="stop", description="Pause PylaAi-XXZ.")
-        async def stop_command(interaction: discord.Interaction) -> None:
+        @tree.command(name="pause", description="Pause PylaAi-XXZ.")
+        async def pause_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
             await _pause_bot(interaction)
 
-        @tree.command(name="pause", description="Pause PylaAi-XXZ (alias for /stop).")
-        async def pause_command(interaction: discord.Interaction) -> None:
+        @tree.command(name="stop", description="Pause PylaAi-XXZ. Prefer /pause (/stop is deprecated).")
+        async def stop_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
@@ -364,6 +366,17 @@ class DiscordControlServer:
             ok, message = await run_callback(self.start_push_callback, resolved, target)
             await _followup(interaction, message if ok else f"Push command failed: {message}")
 
+        @tree.command(name="pause_menu", description="Reopen the local pause control window.")
+        async def pause_menu_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            ok, message = await run_callback(self.pause_menu_callback)
+            await _followup(
+                interaction,
+                "Pause menu reopened." if ok else f"Could not reopen pause menu: {message}",
+            )
+
         @tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: Exception) -> None:
             message = f"Discord command failed: {error}"
@@ -383,7 +396,7 @@ class DiscordControlServer:
             settings = self.settings_loader()
             guild_id = _clean_id(settings.get("discord_control_guild_id"))
             command_list = (
-                "/start /stop /pause /stop_all /push /status /screenshot "
+                "/start /stop /pause /stop_all /push /pause_menu /status /screenshot "
                 "/restart_game /restart_scrcpy /restart_emulator /back /press"
             )
             try:
