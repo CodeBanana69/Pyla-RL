@@ -17,19 +17,28 @@ ApplicationWindow {
     property string mode: hubBridge ? hubBridge.mode() : "showdown-trio"
     property string emulator: hubBridge ? hubBridge.emulator() : "ldplayer"
     property string activeTab: "Overview"
-    property var hubState: ({ settings: {}, discord: {}, telegram: {}, api: {}, timers: {}, history: [] })
+    property var hubState: ({ settings: {}, discord: {}, telegram: {}, api: {}, timers: {}, history: { items: [], summary: {}, recent: [] }, queue: [], preflight: { ready: false, checks: [] } })
     property string statusText: ""
     property bool statusOk: true
     property string performanceProfile: "balanced"
     property string settingsFilter: ""
     property var preflightChecks: []
-    property bool showWizard: false
+    property bool showWizard: true
+    property int wizardStep: 0
+    property string pushAllTarget: "1000"
+    property bool showBrawlerPicker: false
+    property string pickerBrawler: ""
+    property string pickerTarget: "1000"
+    property string pickerType: "trophies"
+    property bool pickerAutoPick: true
+    property string historySort: "games"
 
     function reloadState() {
         if (hubBridge) {
             hubState = JSON.parse(hubBridge.stateJson())
             mode = hubState.mode || mode
             emulator = hubState.emulator || emulator
+            preflightChecks = (hubState.preflight && hubState.preflight.checks) ? hubState.preflight.checks : []
         }
     }
 
@@ -37,6 +46,7 @@ ApplicationWindow {
         const result = JSON.parse(resultText)
         if (result.state) {
             hubState = result.state
+            preflightChecks = (result.state.preflight && result.state.preflight.checks) ? result.state.preflight.checks : []
         }
         if (result.message) {
             statusText = result.message
@@ -75,9 +85,36 @@ ApplicationWindow {
         applyBridgeResult(hubBridge.runAction(action))
     }
 
+    function runActionWithPayload(action, payload) {
+        statusText = "Working..."
+        statusOk = true
+        applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
+    }
+
+    function startBot() {
+        statusText = "Checking pre-flight..."
+        statusOk = true
+        applyBridgeResult(hubBridge.startPyla())
+    }
+
+    function sortedHistoryItems() {
+        const items = (hubState.history && hubState.history.items) ? hubState.history.items.slice() : []
+        if (historySort === "name") {
+            items.sort(function(a, b) { return String(a.brawler).localeCompare(String(b.brawler)) })
+        } else if (historySort === "winRate") {
+            items.sort(function(a, b) { return (b.winRate || 0) - (a.winRate || 0) })
+        } else {
+            items.sort(function(a, b) { return (b.games || 0) - (a.games || 0) })
+        }
+        return items
+    }
+
     Component.onCompleted: {
         reloadState()
         showWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
+        if (showWizard) {
+            runAction("preflight-check")
+        }
     }
 
     Connections {
@@ -806,7 +843,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         spacing: 2
                         Repeater {
-                            model: ["Overview", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
+                            model: ["Overview", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
                             delegate: NavButton {
                                 label: modelData
                                 onClicked: root.activeTab = modelData
@@ -846,6 +883,32 @@ ApplicationWindow {
                                 spacing: 10
                                 HubButton { label: "Run Checks"; secondary: true; onClicked: root.runAction("preflight-check") }
                                 HubButton { label: "Test Connection"; secondary: true; onClicked: root.runAction("test-emulator") }
+                                HubButton { label: "Recovery Log"; secondary: true; onClicked: root.runAction("read-recovery-log") }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                visible: root.preflightChecks.length > 0
+                                Repeater {
+                                    model: root.preflightChecks
+                                    delegate: RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Rectangle {
+                                            width: 8
+                                            height: 8
+                                            radius: 4
+                                            color: modelData.ok ? theme.ok : (modelData.severity === "required" ? "#ff6b5f" : theme.accent)
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.label + " — " + modelData.detail
+                                            color: theme.muted
+                                            font.pixelSize: 11
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+                                }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -937,7 +1000,10 @@ ApplicationWindow {
                             width: 136
                             height: 40
                             radius: 9
-                            color: startMouse.containsMouse ? theme.accentHover : theme.accent
+                            color: (hubState.preflight && hubState.preflight.ready)
+                                ? (startMouse.containsMouse ? theme.accentHover : theme.accent)
+                                : "#5a5a5a"
+                            opacity: (hubState.preflight && hubState.preflight.ready) ? 1.0 : 0.75
 
                             Text {
                                 anchors.centerIn: parent
@@ -952,7 +1018,96 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 hoverEnabled: true
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: hubBridge.startPyla()
+                                onClicked: root.startBot()
+                            }
+                        }
+                    }
+                }
+
+                TabPage {
+                    visible: root.activeTab === "Farm Plan"
+
+                    FormPanel {
+                        title: "PUSH ALL"
+                        Text {
+                            text: "Build a trophy farm queue from your API brawlers. Restart the bot after changing the plan."
+                            color: theme.faint
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        RowLayout {
+                            spacing: 10
+                            Repeater {
+                                model: ["250", "500", "750", "1000", "1250", "1500"]
+                                delegate: ChoicePill {
+                                    label: modelData
+                                    selected: root.pushAllTarget === modelData
+                                    onClicked: root.pushAllTarget = modelData
+                                }
+                            }
+                        }
+                        ActionRow {
+                            HubButton {
+                                label: "Build Queue"
+                                onClicked: root.runActionWithPayload("build-push-all", { target: parseInt(root.pushAllTarget) })
+                            }
+                            HubButton { label: "Import"; secondary: true; onClicked: root.runAction("import-queue") }
+                            HubButton { label: "Export"; secondary: true; onClicked: root.runAction("export-queue") }
+                            HubButton { label: "Clear"; secondary: true; onClicked: root.runAction("clear-queue") }
+                        }
+                    }
+
+                    FormPanel {
+                        title: "QUEUE"
+                        ActionRow {
+                            HubButton {
+                                label: "Add Brawler"
+                                onClicked: {
+                                    root.pickerBrawler = (hubState.meta && hubState.meta.brawlers && hubState.meta.brawlers.length) ? hubState.meta.brawlers[0] : ""
+                                    root.showBrawlerPicker = true
+                                }
+                            }
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Repeater {
+                                model: root.hubState.queue || []
+                                delegate: Rectangle {
+                                    width: 180
+                                    height: 120
+                                    radius: 10
+                                    color: theme.panel
+                                    border.width: 1
+                                    border.color: theme.borderSoft
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 6
+                                        Text { text: modelData.brawler; color: theme.text; font.pixelSize: 13; font.weight: Font.DemiBold }
+                                        Text { text: "Target: " + modelData.target; color: theme.muted; font.pixelSize: 11 }
+                                        Text { text: modelData.autoPick ? "Auto-pick" : "Manual pick"; color: theme.faint; font.pixelSize: 10 }
+                                        Row {
+                                            spacing: 8
+                                            HubButton {
+                                                label: "Up"
+                                                secondary: true
+                                                onClicked: root.runActionWithPayload("move-queue-item", { index: modelData.index, direction: -1 })
+                                            }
+                                            HubButton {
+                                                label: "Down"
+                                                secondary: true
+                                                onClicked: root.runActionWithPayload("move-queue-item", { index: modelData.index, direction: 1 })
+                                            }
+                                            HubButton {
+                                                label: "Remove"
+                                                secondary: true
+                                                onClicked: root.runActionWithPayload("remove-from-queue", { index: modelData.index })
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1019,6 +1174,24 @@ ApplicationWindow {
                             Row { spacing: 8; ChoicePill { label: "Return to lobby"; selected: root.value("settings", "post_match_action") === "lobby"; onClicked: root.saveValue("settings", "post_match_action", "lobby") } ChoicePill { label: "Play again"; selected: root.value("settings", "post_match_action") === "play_again"; onClicked: root.saveValue("settings", "post_match_action", "play_again") } }
                         }
                         FieldRow {
+                            label: "Play Again On Win"
+                            hint: "Press Play Again after wins when available."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "play_again_on_win"); onToggled: root.saveValue("settings", "play_again_on_win", value) } }
+                        }
+                        FieldRow {
+                            label: "Use Gadgets"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "bot_uses_gadgets"); onToggled: root.saveValue("settings", "bot_uses_gadgets", value) } }
+                        }
+                        FieldRow {
+                            label: "Run For Minutes"
+                            hint: "0 disables the session timer."
+                            ConfigInput { anchors.fill: parent; value: String(root.value("settings", "run_for_minutes")); onSaved: root.saveValue("settings", "run_for_minutes", value) }
+                        }
+                        FieldRow {
+                            label: "Emulator Auto Restart"
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "emulator_autorestart"); onToggled: root.saveValue("settings", "emulator_autorestart", value) } }
+                        }
+                        FieldRow {
                             label: "Trio Movement"
                             Row { spacing: 8; ChoicePill { label: "Follow"; selected: root.value("settings", "showdown_playstyle_mode") === "follow"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "follow") } ChoicePill { label: "Hide"; selected: root.value("settings", "showdown_playstyle_mode") === "hide"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "hide") } }
                         }
@@ -1062,6 +1235,17 @@ ApplicationWindow {
                             label: "Capture Vision Frames"
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "capture_bad_vision_frames"); onToggled: root.saveValue("settings", "capture_bad_vision_frames", value) } }
                         }
+                    }
+
+                    FormPanel {
+                        title: "CAPTURE / DEBUG"
+                        FieldRow { label: "Scrcpy Width"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_max_width")); onSaved: root.saveValue("settings", "scrcpy_max_width", value) } }
+                        FieldRow { label: "Scrcpy Bitrate"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_bitrate")); onSaved: root.saveValue("settings", "scrcpy_bitrate", value) } }
+                        FieldRow { label: "Debug Scale"; NumericSlider { anchors.fill: parent; value: String(root.value("settings", "visual_debug_scale")); from: 0.5; to: 2.0; onSaved: root.saveValue("settings", "visual_debug_scale", value) } }
+                        FieldRow { label: "Debug Max FPS"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_fps")); onSaved: root.saveValue("settings", "visual_debug_max_fps", value) } }
+                        FieldRow { label: "Debug Max Boxes"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_boxes")); onSaved: root.saveValue("settings", "visual_debug_max_boxes", value) } }
+                        FieldRow { label: "Super Debug"; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "super_debug"); onToggled: root.saveValue("settings", "super_debug", value) } } }
+                        FieldRow { label: "Wall Stuck Debug"; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "wall_stuck_debug"); onToggled: root.saveValue("settings", "wall_stuck_debug", value) } } }
                     }
 
                     FormPanel {
@@ -1127,6 +1311,8 @@ ApplicationWindow {
                         FieldRow { label: "Send Match Summary"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "send_match_summary"); onToggled: root.saveValue("discord", "send_match_summary", value) } } }
                         FieldRow { label: "Include Screenshots"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "include_screenshot"); onToggled: root.saveValue("discord", "include_screenshot", value) } } }
                         FieldRow { label: "Ping When Stuck"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_stuck"); onToggled: root.saveValue("discord", "ping_when_stuck", value) } } }
+                        FieldRow { label: "Notify On Recovery"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "notify_on_recovery"); onToggled: root.saveValue("discord", "notify_on_recovery", value) } } }
+                        FieldRow { label: "Recovery Alert Threshold"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "recovery_alert_threshold")); onSaved: root.saveValue("discord", "recovery_alert_threshold", value) } }
                         FieldRow { label: "Ping On Target"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_target_is_reached"); onToggled: root.saveValue("discord", "ping_when_target_is_reached", value) } } }
                         FieldRow { label: "Every X Matches"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_match")); onSaved: root.saveValue("discord", "ping_every_x_match", value) } }
                         FieldRow { label: "Every X Minutes"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_minutes")); onSaved: root.saveValue("discord", "ping_every_x_minutes", value) } }
@@ -1158,6 +1344,8 @@ ApplicationWindow {
                         FieldRow { label: "Include Screenshots"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "include_screenshot"); onToggled: root.saveValue("telegram", "include_screenshot", value) } } }
                         FieldRow { label: "Multiple Chats"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "allow_multiple_notification_chat_ids"); onToggled: root.saveValue("telegram", "allow_multiple_notification_chat_ids", value) } } }
                         FieldRow { label: "Remote Control"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "remote_control_enabled"); onToggled: root.saveValue("telegram", "remote_control_enabled", value) } } }
+                        FieldRow { label: "Notify On Recovery"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "notify_on_recovery"); onToggled: root.saveValue("telegram", "notify_on_recovery", value) } } }
+                        FieldRow { label: "Recovery Alert Threshold"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "recovery_alert_threshold")); onSaved: root.saveValue("telegram", "recovery_alert_threshold", value) } }
                         FieldRow { label: "Poll Timeout"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "poll_timeout_seconds")); onSaved: root.saveValue("telegram", "poll_timeout_seconds", value) } }
                     }
                     ActionRow {
@@ -1202,6 +1390,13 @@ ApplicationWindow {
                         FieldRow { label: "Low IPS Cooldown"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_cooldown")); from: 5; to: 90; integer: true; onSaved: root.saveValue("timers", "low_ips_recovery_cooldown", value) } }
                         FieldRow { label: "App Restart Attempt"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_app_restart_after")); from: 1; to: 6; integer: true; onSaved: root.saveValue("timers", "low_ips_app_restart_after", value) } }
                         FieldRow { label: "Emulator Restart Attempt"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_emulator_restart_after")); from: 1; to: 10; integer: true; onSaved: root.saveValue("timers", "low_ips_emulator_restart_after", value) } }
+                        FieldRow { label: "Lobby Stuck Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "lobby_stuck_restart")); from: 30; to: 300; onSaved: root.saveValue("timers", "lobby_stuck_restart", value) } }
+                        FieldRow { label: "Visual Freeze Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "visual_freeze_restart")); from: 10; to: 120; onSaved: root.saveValue("timers", "visual_freeze_restart", value) } }
+                        FieldRow { label: "Global Freeze Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "global_freeze_restart")); from: 10; to: 180; onSaved: root.saveValue("timers", "global_freeze_restart", value) } }
+                        FieldRow { label: "Emulator Restart Cooldown"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "emulator_restart_cooldown")); from: 30; to: 600; onSaved: root.saveValue("timers", "emulator_restart_cooldown", value) } }
+                        FieldRow { label: "State Check"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "state_check")); from: 0.1; to: 5; onSaved: root.saveValue("timers", "state_check", value) } }
+                        FieldRow { label: "Idle Timeout"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "idle")); from: 5; to: 120; onSaved: root.saveValue("timers", "idle", value) } }
+                        FieldRow { label: "Low IPS Threshold"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_threshold")); from: 1; to: 10; onSaved: root.saveValue("timers", "low_ips_recovery_threshold", value) } }
                     }
                 }
 
@@ -1210,13 +1405,66 @@ ApplicationWindow {
                     ActionRow {
                         HubButton { label: "Export CSV"; secondary: true; onClicked: root.runAction("export-history") }
                         HubButton { label: "Reset Stats"; secondary: true; onClicked: root.runAction("reset-history") }
+                        HubButton { label: "Refresh"; secondary: true; onClicked: root.runAction("refresh-history") }
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 72
+                        radius: 10
+                        color: theme.panel
+                        border.width: 1
+                        border.color: theme.borderSoft
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 4
+                            Text {
+                                text: "Lifetime: " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.games : 0) + " games"
+                                color: theme.text
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                text: "W " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.victory : 0)
+                                    + " / L " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.defeat : 0)
+                                    + " / D " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.draw : 0)
+                                    + " | " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.winRate : 0) + "% win"
+                                color: theme.muted
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
+                    RowLayout {
+                        spacing: 8
+                        Repeater {
+                            model: ["games", "winRate", "name"]
+                            delegate: ChoicePill {
+                                label: modelData
+                                selected: root.historySort === modelData
+                                onClicked: root.historySort = modelData
+                            }
+                        }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Text { text: "Recent Matches"; color: theme.faint; font.pixelSize: 11 }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Repeater {
+                            model: (hubState.history && hubState.history.recent) ? hubState.history.recent.slice(0, 8) : []
+                            delegate: Text {
+                                Layout.fillWidth: true
+                                text: modelData.brawler + " " + modelData.result + " (" + modelData.delta + ")"
+                                color: theme.muted
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
                     Flow {
                         Layout.fillWidth: true
                         spacing: 12
                         Repeater {
-                            model: root.hubState.history || []
+                            model: root.sortedHistoryItems()
                             delegate: Rectangle {
                                 width: 158
                                 height: 176
@@ -1276,7 +1524,7 @@ ApplicationWindow {
                         }
                     }
                     Text {
-                        visible: !root.hubState.history || root.hubState.history.length === 0
+                        visible: !root.hubState.history || !root.hubState.history.items || root.hubState.history.items.length === 0
                         text: "No match history yet."
                         color: theme.faint
                         font.pixelSize: 12
@@ -1332,19 +1580,109 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 16
                 spacing: 12
-                Text { text: "Welcome to PylaAi-XXZ"; color: theme.text; font.pixelSize: 16; font.weight: Font.Bold }
+                Text { text: root.wizardStep === 0 ? "Step 1: Environment" : (root.wizardStep === 1 ? "Step 2: Optional Setup" : "Step 3: Farm Plan"); color: theme.text; font.pixelSize: 16; font.weight: Font.Bold }
                 Text {
                     Layout.fillWidth: true
-                    text: "1. Start your emulator and open Brawl Stars.\n2. Optional: set up Discord/Telegram/API tabs.\n3. Choose mode and emulator, run pre-flight checks, then START."
+                    text: root.wizardStep === 0
+                        ? "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview."
+                        : (root.wizardStep === 1
+                            ? "Optional: configure Discord, Telegram, or API tabs for notifications and remote control."
+                            : "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty.")
                     color: theme.muted
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                 }
-                HubButton {
-                    label: "Got it"
-                    onClicked: {
-                        root.runAction("complete-wizard")
-                        root.showWizard = false
+                RowLayout {
+                    spacing: 8
+                    HubButton {
+                        label: root.wizardStep === 0 ? "Run Checks" : "Back"
+                        secondary: true
+                        onClicked: {
+                            if (root.wizardStep === 0) {
+                                root.runAction("preflight-check")
+                            } else {
+                                root.wizardStep = Math.max(0, root.wizardStep - 1)
+                            }
+                        }
+                    }
+                    HubButton {
+                        label: root.wizardStep < 2 ? "Next" : "Finish"
+                        onClicked: {
+                            if (root.wizardStep < 2) {
+                                root.wizardStep += 1
+                            } else {
+                                root.runAction("complete-wizard")
+                                root.showWizard = false
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.showBrawlerPicker
+        color: "#cc000000"
+        z: 100
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 360
+            radius: 12
+            color: theme.panel
+            border.width: 1
+            border.color: theme.borderSoft
+            implicitHeight: pickerColumn.implicitHeight + 32
+
+            ColumnLayout {
+                id: pickerColumn
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 10
+                Text { text: "Add Brawler"; color: theme.text; font.pixelSize: 15; font.weight: Font.Bold }
+                FieldRow {
+                    label: "Brawler"
+                    ConfigInput {
+                        anchors.fill: parent
+                        value: root.pickerBrawler
+                        onSaved: root.pickerBrawler = value
+                    }
+                }
+                FieldRow {
+                    label: "Target"
+                    ConfigInput {
+                        anchors.fill: parent
+                        value: root.pickerTarget
+                        onSaved: root.pickerTarget = value
+                    }
+                }
+                FieldRow {
+                    label: "Auto Pick"
+                    CenterRow { ToggleSwitch { checked: root.pickerAutoPick; onToggled: root.pickerAutoPick = checked } }
+                }
+                RowLayout {
+                    spacing: 8
+                    HubButton {
+                        label: "Cancel"
+                        secondary: true
+                        onClicked: root.showBrawlerPicker = false
+                    }
+                    HubButton {
+                        label: "Add"
+                        onClicked: {
+                            root.runActionWithPayload("add-to-queue", {
+                                brawler: root.pickerBrawler,
+                                push_until: parseInt(root.pickerTarget),
+                                wins: 0,
+                                type: root.pickerType,
+                                automatically_pick: root.pickerAutoPick,
+                                selection_method: "named_brawler",
+                                win_streak: 0
+                            })
+                            root.showBrawlerPicker = false
+                        }
                     }
                 }
             }

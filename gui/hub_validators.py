@@ -4,6 +4,11 @@ import re
 def validate_config_value(section, key, value):
     text = str(value or "").strip()
 
+    if section == "settings" and key in {"scrcpy_max_width", "scrcpy_bitrate", "visual_debug_max_fps", "visual_debug_max_boxes", "run_for_minutes", "max_ips", "scrcpy_max_fps", "pause_menu_graph_samples"}:
+        number = int(float(text or "0"))
+        if number < 0:
+            raise ValueError(f"{key.replace('_', ' ')} cannot be negative.")
+
     if section == "settings" and key == "pause_menu_graph_samples":
         sample_count = int(float(text or "0"))
         if sample_count < 30 or sample_count > 120:
@@ -32,6 +37,11 @@ def validate_config_value(section, key, value):
     if section == "telegram" and key == "bot_token" and text:
         if ":" not in text or len(text) < 20:
             raise ValueError("Telegram bot token format looks invalid.")
+
+    if section in {"discord", "telegram"} and key == "recovery_alert_threshold" and text:
+        threshold = int(float(text or "0"))
+        if threshold < 1 or threshold > 20:
+            raise ValueError("Recovery alert threshold must be between 1 and 20.")
 
     if section == "api" and key == "player_tag" and text:
         if not text.startswith("#"):

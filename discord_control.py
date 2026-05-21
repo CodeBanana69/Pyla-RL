@@ -75,7 +75,7 @@ def status_text(state_path: str | Path, status_provider: Callable[[], dict[str, 
         "PylaAi-XXZ status",
         f"Runtime: {runtime_label}",
     ]
-    for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target"):
+    for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target", "last_match", "queue_preview", "last_recovery"):
         value = details.get(key)
         if value is not None and value != "":
             lines.append(f"{key.replace('_', ' ').title()}: {value}")
@@ -254,6 +254,26 @@ class DiscordControlServer:
             await _ack(interaction)
             message = await asyncio.to_thread(status_text, self.state_path, self.status_provider)
             await _followup(interaction, message)
+
+        @tree.command(name="queue", description="Show the next brawlers in the farm plan.")
+        async def queue_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            from gui.brawler_queue import load_queue
+
+            queue = load_queue()
+            if not queue:
+                await _followup(interaction, "Farm plan is empty.")
+                return
+            lines = ["Farm plan:"]
+            for index, row in enumerate(queue[:10], start=1):
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"{index}. {row.get('brawler', '?')} -> {row.get('push_until', row.get('wins', '?'))}"
+                )
+            await _followup(interaction, "\n".join(lines))
 
         @tree.command(name="screenshot", description="Send the current emulator screenshot.")
         async def screenshot_command(interaction: discord.Interaction) -> None:

@@ -195,6 +195,22 @@ class TelegramControlServer:
         if command == "/status":
             await async_send_message(chat_id, self._status_text(), token=token)
             return
+        if command == "/queue":
+            from gui.brawler_queue import load_queue
+
+            queue = load_queue()
+            if not queue:
+                await async_send_message(chat_id, "Farm plan is empty.", token=token)
+                return
+            lines = ["<b>Farm plan</b>"]
+            for index, row in enumerate(queue[:10], start=1):
+                if not isinstance(row, dict):
+                    continue
+                lines.append(
+                    f"{index}. {row.get('brawler', '?')} -> {row.get('push_until', row.get('wins', '?'))}"
+                )
+            await async_send_message(chat_id, "\n".join(lines), token=token)
+            return
         if command == "/screenshot":
             await self._send_screenshot(chat_id, token)
             return
@@ -257,7 +273,7 @@ class TelegramControlServer:
             "/pause - pause movement",
             "/resume - resume movement",
             "/quit - stop the bot process",
-            "/push brawler [target] - start pushing a brawler",
+            "/queue - show next brawlers in farm plan",
             "/pause_menu - reopen local pause window",
             "/screenshot - send current emulator screenshot",
             "/restart_game - restart Brawl Stars and scrcpy",
@@ -283,7 +299,7 @@ class TelegramControlServer:
             "<b>PylaAi-XXZ status</b>",
             f"<b>Runtime:</b> {runtime_label}",
         ]
-        for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target"):
+        for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target", "last_match", "queue_preview", "last_recovery"):
             value = details.get(key)
             if value is not None and value != "":
                 lines.append(f"<b>{key.replace('_', ' ').title()}:</b> {value}")

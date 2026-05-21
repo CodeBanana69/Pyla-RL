@@ -82,6 +82,17 @@ class HubStateStore:
         "max_ips": ("general", "int"),
         "scrcpy_max_fps": ("general", "int"),
         "used_threads": ("general", "str"),
+        "play_again_on_win": ("bot", "yesno"),
+        "bot_uses_gadgets": ("bot", "yesno"),
+        "run_for_minutes": ("general", "int"),
+        "emulator_autorestart": ("general", "yesno"),
+        "scrcpy_max_width": ("general", "int"),
+        "scrcpy_bitrate": ("general", "int"),
+        "visual_debug_scale": ("general", "float"),
+        "visual_debug_max_fps": ("general", "int"),
+        "visual_debug_max_boxes": ("general", "int"),
+        "super_debug": ("general", "yesno"),
+        "wall_stuck_debug": ("general", "yesno"),
     }
     DISCORD_FIELDS = {
         "webhook_url": "str",
@@ -98,6 +109,8 @@ class HubStateStore:
         "discord_control_user_id": "str",
         "discord_control_channel_id": "str",
         "discord_control_guild_id": "str",
+        "notify_on_recovery": "bool",
+        "recovery_alert_threshold": "int",
     }
     TELEGRAM_FIELDS = {
         "enabled": "bool",
@@ -108,6 +121,8 @@ class HubStateStore:
         "allow_multiple_notification_chat_ids": "bool",
         "remote_control_enabled": "bool",
         "poll_timeout_seconds": "int",
+        "notify_on_recovery": "bool",
+        "recovery_alert_threshold": "int",
     }
     API_FIELDS = {
         "player_tag": "str",
@@ -130,6 +145,13 @@ class HubStateStore:
         "low_ips_recovery_cooldown": "int",
         "low_ips_app_restart_after": "int",
         "low_ips_emulator_restart_after": "int",
+        "lobby_stuck_restart": "float",
+        "visual_freeze_restart": "float",
+        "global_freeze_restart": "float",
+        "emulator_restart_cooldown": "float",
+        "state_check": "float",
+        "idle": "float",
+        "low_ips_recovery_threshold": "float",
     }
 
     def __init__(
@@ -162,7 +184,16 @@ class HubStateStore:
         self.telegram_config.update(load_toml_as_dict(telegram_config_path))
         self.brawl_stars_api_config = dict(load_toml_as_dict(brawl_stars_api_base_config_path))
         self.brawl_stars_api_config.update(load_toml_as_dict(brawl_stars_api_config_path))
+        self._migrate_legacy_webhook_config(discord_config_path)
         self._apply_defaults()
+
+    def _migrate_legacy_webhook_config(self, discord_config_path):
+        legacy_path = Path(discord_config_path).parent / "webhook_config.toml"
+        discord_path = Path(discord_config_path)
+        if not discord_path.exists() and legacy_path.exists():
+            legacy_config = load_toml_as_dict(str(legacy_path))
+            save_dict_as_toml(legacy_config, str(discord_path))
+            self.discord_config = dict(legacy_config)
 
     def _apply_defaults(self):
         self.bot_config.setdefault("gamemode_type", 3)
@@ -178,6 +209,8 @@ class HubStateStore:
         self.bot_config.setdefault("post_match_action", "lobby")
         self.bot_config.setdefault("current_playstyle", "default.pyla")
         self.bot_config.setdefault("showdown_playstyle_mode", "follow")
+        self.bot_config.setdefault("play_again_on_win", "no")
+        self.bot_config.setdefault("bot_uses_gadgets", "yes")
 
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
@@ -199,6 +232,15 @@ class HubStateStore:
         self.general_config.setdefault("used_threads", self.general_config.get("onnx_cpu_threads", "auto"))
         self.general_config.setdefault("current_emulator", "LDPlayer")
         self.general_config.setdefault("emulator_port", 5555)
+        self.general_config.setdefault("run_for_minutes", 0)
+        self.general_config.setdefault("emulator_autorestart", "no")
+        self.general_config.setdefault("scrcpy_max_width", 960)
+        self.general_config.setdefault("scrcpy_bitrate", 3000000)
+        self.general_config.setdefault("visual_debug_scale", 1.0)
+        self.general_config.setdefault("visual_debug_max_fps", 15)
+        self.general_config.setdefault("visual_debug_max_boxes", 40)
+        self.general_config.setdefault("super_debug", "no")
+        self.general_config.setdefault("wall_stuck_debug", "no")
 
         self.discord_config.setdefault("webhook_url", self.general_config.get("personal_webhook", ""))
         self.discord_config.setdefault("discord_id", self.general_config.get("discord_id", ""))
@@ -214,6 +256,8 @@ class HubStateStore:
         self.discord_config.setdefault("discord_control_user_id", "")
         self.discord_config.setdefault("discord_control_channel_id", "")
         self.discord_config.setdefault("discord_control_guild_id", "")
+        self.discord_config.setdefault("notify_on_recovery", False)
+        self.discord_config.setdefault("recovery_alert_threshold", 3)
 
         self.telegram_config.setdefault("enabled", False)
         self.telegram_config.setdefault("bot_token", "")
@@ -223,6 +267,8 @@ class HubStateStore:
         self.telegram_config.setdefault("allow_multiple_notification_chat_ids", False)
         self.telegram_config.setdefault("remote_control_enabled", True)
         self.telegram_config.setdefault("poll_timeout_seconds", 25)
+        self.telegram_config.setdefault("notify_on_recovery", False)
+        self.telegram_config.setdefault("recovery_alert_threshold", 3)
 
         self.brawl_stars_api_config.setdefault("player_tag", "#YOURTAG")
         self.brawl_stars_api_config.setdefault("timeout_seconds", 15)
@@ -243,6 +289,13 @@ class HubStateStore:
         self.time_tresholds.setdefault("low_ips_recovery_cooldown", 35)
         self.time_tresholds.setdefault("low_ips_app_restart_after", 1)
         self.time_tresholds.setdefault("low_ips_emulator_restart_after", 6)
+        self.time_tresholds.setdefault("lobby_stuck_restart", 120.0)
+        self.time_tresholds.setdefault("visual_freeze_restart", 45.0)
+        self.time_tresholds.setdefault("global_freeze_restart", 60.0)
+        self.time_tresholds.setdefault("emulator_restart_cooldown", 180.0)
+        self.time_tresholds.setdefault("state_check", 0.5)
+        self.time_tresholds.setdefault("idle", 30.0)
+        self.time_tresholds.setdefault("low_ips_recovery_threshold", 3.0)
 
     def initial_state(self):
         gamemode = str(self.bot_config.get("gamemode", "showdown")).strip().lower()
@@ -252,10 +305,14 @@ class HubStateStore:
             "emulator": "mumu" if emulator == "mumu" else "ldplayer",
         }
 
-    def ui_state(self):
+    def ui_state(self, preflight=None, correct_zoom=True):
         from performance_profile import PERFORMANCE_PROFILES
+        from gui.brawler_queue import load_push_order, load_queue, queue_state_items
+        from utils import get_brawler_list
 
         state = self.initial_state()
+        if preflight is None:
+            preflight = {"ready": False, "checks": []}
         state.update({
             "settings": self._settings_state(),
             "discord": dict(self.discord_config),
@@ -263,6 +320,8 @@ class HubStateStore:
             "api": dict(self.brawl_stars_api_config),
             "timers": {key: self.time_tresholds.get(key) for key in self.TIMER_FIELDS},
             "history": self._history_state(),
+            "preflight": preflight,
+            "queue": queue_state_items(load_queue()),
             "meta": {
                 "profileDescriptions": {
                     key: profile.get("description", "")
@@ -270,12 +329,14 @@ class HubStateStore:
                 },
                 "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
                 "configDir": str(Path("cfg").resolve()),
+                "pushOrder": load_push_order(),
+                "brawlers": get_brawler_list(),
             },
         })
         return state
 
-    def state_json(self):
-        return json.dumps(self.ui_state())
+    def state_json(self, preflight=None, correct_zoom=True):
+        return json.dumps(self.ui_state(preflight=preflight, correct_zoom=correct_zoom))
 
     def _settings_state(self):
         data = {}
@@ -293,6 +354,11 @@ class HubStateStore:
                 "console_ips",
                 "first_run_wizard",
                 "capture_bad_vision_frames",
+                "play_again_on_win",
+                "bot_uses_gadgets",
+                "emulator_autorestart",
+                "super_debug",
+                "wall_stuck_debug",
             }:
                 value = _to_bool(value)
             data[key] = value
@@ -304,25 +370,59 @@ class HubStateStore:
         return data
 
     def _history_state(self):
+        from match_journal import read_recent_matches
+
         items = []
+        total_wins = 0
+        total_losses = 0
+        total_draws = 0
         for brawler, stats in self.match_history.items():
             if brawler == "total" or not isinstance(stats, dict):
                 continue
             wins = int(stats.get("victory", 0) or 0)
             losses = int(stats.get("defeat", 0) or 0)
-            games = wins + losses
+            draws = int(stats.get("draw", 0) or 0)
+            games = wins + losses + draws
             win_rate = round((wins / games) * 100, 1) if games else 0
+            total_wins += wins
+            total_losses += losses
+            total_draws += draws
             icon_path = Path("api") / "assets" / "brawler_icons" / f"{brawler}.png"
             items.append({
                 "brawler": str(brawler),
                 "victory": wins,
                 "defeat": losses,
+                "draw": draws,
                 "games": games,
                 "winRate": win_rate,
                 "icon": icon_path.resolve().as_uri() if icon_path.exists() else "",
             })
         items.sort(key=lambda item: (-item["games"], item["brawler"]))
-        return items
+        total_games = total_wins + total_losses + total_draws
+        summary = {
+            "victory": total_wins,
+            "defeat": total_losses,
+            "draw": total_draws,
+            "games": total_games,
+            "winRate": round((total_wins / total_games) * 100, 1) if total_games else 0,
+        }
+        recent = []
+        for record in read_recent_matches(limit=50):
+            brawler = str(record.get("brawler", "") or "")
+            icon_path = Path("api") / "assets" / "brawler_icons" / f"{brawler}.png"
+            recent.append({
+                "ts": record.get("ts", ""),
+                "brawler": brawler,
+                "result": record.get("result", ""),
+                "delta": record.get("delta"),
+                "mode": record.get("mode", ""),
+                "icon": icon_path.resolve().as_uri() if icon_path.exists() else "",
+            })
+        return {
+            "items": items,
+            "summary": summary,
+            "recent": recent,
+        }
 
     def update_config(self, section, key, value):
         validate_config_value(section, key, value)
@@ -348,20 +448,60 @@ class HubStateStore:
         return self.ui_state()
 
     def export_match_history_csv(self):
+        from match_journal import read_all_matches
+
         export_dir = Path("logs")
         export_dir.mkdir(parents=True, exist_ok=True)
         export_path = export_dir / "match_history_export.csv"
-        lines = ["brawler,victory,defeat,games,win_rate"]
-        for item in self._history_state():
+        lines = ["brawler,victory,defeat,draw,games,win_rate"]
+        history = self._history_state()
+        for item in history["items"]:
             lines.append(
-                f"{item['brawler']},{item['victory']},{item['defeat']},{item['games']},{item['winRate']}"
+                f"{item['brawler']},{item['victory']},{item['defeat']},{item['draw']},"
+                f"{item['games']},{item['winRate']}"
+            )
+        lines.append("")
+        lines.append("timestamp,brawler,mode,result,delta")
+        for record in read_all_matches():
+            lines.append(
+                f"{record.get('ts', '')},{record.get('brawler', '')},{record.get('mode', '')},"
+                f"{record.get('result', '')},{record.get('delta', '')}"
             )
         export_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return str(export_path.resolve())
 
+    def refresh_match_history(self):
+        self.match_history = load_toml_as_dict(self.match_history_path)
+        return self.ui_state()
+
+    def load_queue(self):
+        from gui.brawler_queue import load_queue
+        return load_queue()
+
+    def save_queue(self, queue):
+        from gui.brawler_queue import save_queue
+        return save_queue(queue)
+
+    def build_push_all(self, target_trophies):
+        from gui.brawler_queue import build_push_all_queue, load_push_order, persist_queue
+        from utils import get_brawler_list
+
+        queue = build_push_all_queue(
+            target_trophies=target_trophies,
+            brawlers=get_brawler_list(),
+            priority_order=load_push_order(),
+        )
+        if not queue:
+            raise ValueError("No brawlers below the target trophy count.")
+        persist_queue(queue)
+        return queue
+
     def reset_match_history(self):
+        from match_journal import clear_journal
+
         self.match_history = {"total": {"victory": 0, "defeat": 0, "draw": 0}}
         save_dict_as_toml(self.match_history, self.match_history_path)
+        clear_journal()
         return self.ui_state()
 
     def apply_state(self, patch):
@@ -369,9 +509,15 @@ class HubStateStore:
         changed_general = False
 
         mode = patch.get("mode")
-        if mode == "showdown-trio":
-            self.bot_config["gamemode_type"] = 3
-            self.bot_config["gamemode"] = "showdown"
+        mode_map = {
+            "showdown-trio": (3, "showdown"),
+            "other-3": (3, "other"),
+            "basketbrawl": (5, "basketbrawl"),
+        }
+        if mode in mode_map:
+            gamemode_type, gamemode = mode_map[mode]
+            self.bot_config["gamemode_type"] = gamemode_type
+            self.bot_config["gamemode"] = gamemode
             changed_bot = True
 
         emulator = patch.get("emulator")

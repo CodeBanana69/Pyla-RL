@@ -80,12 +80,18 @@ class App:
             else:
                 self.hub_menu(pyla_version, get_latest_version())
             utils.clear_toml_cache()
-            selector = self.select_brawler(self.set_data, self.brawlers)
-            if hasattr(selector, "close_app"):
-                try:
-                    selector.close_app()
-                except Exception:
-                    pass
+            from gui.brawler_queue import load_queue
+
+            queue = load_queue()
+            if queue:
+                self.brawler_data = queue
+            else:
+                selector = self.select_brawler(self.set_data, self.brawlers)
+                if hasattr(selector, "close_app"):
+                    try:
+                        selector.close_app()
+                    except Exception:
+                        pass
             if self.brawler_data:
                 utils.save_brawler_data(self.brawler_data)
                 time.sleep(0.05)
