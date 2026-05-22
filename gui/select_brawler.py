@@ -47,7 +47,7 @@ class SelectBrawler:
         window_height = min(max(necessary_height, int(560 * scale_factor)), int(760 * scale_factor))
         self.content_width = int(720 * scale_factor)
         image_frame_height = max(int(250 * scale_factor), window_height - int(212 * scale_factor))
-        self.app.title("PylaAi-XXZ")
+        self.app.title("Pyla-RL")
         self.brawlers = brawlers
 
         self.app.geometry(f"{str(int(820 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")

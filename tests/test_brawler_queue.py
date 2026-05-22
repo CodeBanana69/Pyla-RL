@@ -6,6 +6,7 @@ from unittest.mock import patch
 from gui.brawler_queue import (
     apply_push_all_priority_order,
     load_queue,
+    normalize_queue_row,
     queue_state_items,
     save_queue,
 )
@@ -26,10 +27,26 @@ class BrawlerQueueTests(unittest.TestCase):
             path = Path(temp_dir) / "queue.json"
             payload = [{"brawler": "shelly", "push_until": 1000, "type": "trophies"}]
             save_queue(payload, path)
-            self.assertEqual(load_queue(path), payload)
-            items = queue_state_items(payload)
+            loaded = load_queue(path)
+            self.assertEqual(loaded[0]["brawler"], "shelly")
+            self.assertEqual(loaded[0]["trophies"], 0)
+            self.assertEqual(loaded[0]["win_streak"], 0)
+            items = queue_state_items(loaded)
             self.assertEqual(items[0]["brawler"], "shelly")
             self.assertEqual(items[0]["index"], 0)
+
+    def test_normalize_queue_row_fills_missing_trophies(self):
+        row = normalize_queue_row({
+            "brawler": "jacky",
+            "push_until": 1000,
+            "wins": 0,
+            "type": "trophies",
+            "automatically_pick": True,
+            "selection_method": "named_brawler",
+            "win_streak": 0,
+        })
+        self.assertEqual(row["trophies"], 0)
+        self.assertEqual(row["brawler"], "jacky")
 
     @patch("gui.brawler_queue.fetch_brawl_stars_player")
     @patch("gui.brawler_queue.load_brawl_stars_api_config")

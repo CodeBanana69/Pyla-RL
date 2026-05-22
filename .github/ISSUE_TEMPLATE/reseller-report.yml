@@ -1,0 +1,40 @@
+name: Reseller report
+description: Report someone selling or reselling Pyla-RL
+title: "Reseller report: "
+labels:
+  - reseller
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Pyla-RL is free and open source. Use this form to report paid copies, repacks, or scam listings.
+        See [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md) for the official policy.
+  - type: input
+    id: seller_url
+    attributes:
+      label: Seller URL or platform
+      description: Link to the listing, Discord server, marketplace page, etc.
+      placeholder: https://...
+    validations:
+      required: true
+  - type: input
+    id: price
+    attributes:
+      label: Price asked
+      placeholder: e.g. $15, 10 EUR, monthly subscription
+    validations:
+      required: true
+  - type: input
+    id: found_date
+    attributes:
+      label: Date found
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Additional details
+      description: Seller name, screenshots, how they describe the product, etc.
+    validations:
+      required: false

@@ -6,7 +6,7 @@ from pathlib import Path
 
 if platform.system() != "Windows" or "microsoft" in platform.uname()[3].lower():
     print("\n" + "!"*50)
-    print("  ERROR: This version of PylaAi-XXZ is for WINDOWS ONLY.")
+    print("  ERROR: This version of Pyla-RL is for WINDOWS ONLY.")
     print("  Mac or Linux detected. Please use the Universal branch.")
     print("!"*50 + "\n")
     sys.exit(1)
@@ -49,7 +49,7 @@ def save_gpu_runtime_config(variant, cards):
     )
 
 def create_run_file():
-    run_bat = Path("Run PylaAi-XXZ.bat")
+    run_bat = Path("Run Pyla-RL.bat")
     run_bat.write_text(
         "@echo off\n"
         "cd /d %~dp0\n"
@@ -85,7 +85,7 @@ def ask_user(prompt_text):
     return response in ['y', 'yes']
 
 def setup_pyla():
-    print("\n" + "="*50 + "\n   PylaAi-XXZ - Windows Setup   \n" + "="*50)
+    print("\n" + "="*50 + "\n   Pyla-RL - Windows Setup   \n" + "="*50)
     cards = detect_graphics_cards()
     auto_setup = os.environ.get("PYLAAI_SETUP_AUTO", "").strip().lower() in ("1", "true", "yes")
 

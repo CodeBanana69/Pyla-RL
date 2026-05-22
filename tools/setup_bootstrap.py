@@ -254,7 +254,7 @@ def install_vc_redist():
 
 def create_run_file(project_dir, python_command):
     python_invocation = " ".join(f'"{part}"' if " " in part else part for part in python_command)
-    run_bat = project_dir / "Run PylaAi-XXZ.bat"
+    run_bat = project_dir / "Run Pyla-RL.bat"
     run_bat.write_text(
         "@echo off\n"
         "cd /d %~dp0\n"
@@ -277,7 +277,7 @@ def main():
     setup_py = project_dir / "setup.py"
     main_py = project_dir / "main.py"
     if not setup_py.exists() or not main_py.exists():
-        print("setup.exe must be placed in the PylaAi-XXZ project folder next to setup.py and main.py.")
+        print("setup.exe must be placed in the Pyla-RL project folder next to setup.py and main.py.")
         input("Press Enter to close...")
         return 1
 
@@ -313,13 +313,13 @@ def main():
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"
     if progress_window:
-        progress_window.update("Installing PylaAi-XXZ dependencies...")
+        progress_window.update("Installing Pyla-RL dependencies...")
     run(python_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
     create_run_file(project_dir, python_command)
 
     print("")
-    print("PylaAi-XXZ setup completed.")
-    print("Start your emulator, open Brawl Stars, then run Run PylaAi-XXZ.bat or python main.py.")
+    print("Pyla-RL setup completed.")
+    print("Start your emulator, open Brawl Stars, then run Run Pyla-RL.bat or python main.py.")
     if progress_window:
         progress_window.update("Setup completed.")
         progress_window.close()

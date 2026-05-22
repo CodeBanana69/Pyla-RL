@@ -57,7 +57,7 @@ class SetupBootstrapTests(unittest.TestCase):
         source = Path("setup.py").read_text(encoding="utf-8")
 
         self.assertIn("def create_run_file", source)
-        self.assertIn('"Run PylaAi-XXZ.bat"', source)
+        self.assertIn('"Run Pyla-RL.bat"', source)
         self.assertIn("create_run_file()", source)
 
     def test_main_repairs_numpy_before_importing_cv2(self):

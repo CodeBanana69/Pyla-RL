@@ -72,7 +72,7 @@ def status_text(state_path: str | Path, status_provider: Callable[[], dict[str, 
     else:
         runtime_label = "running"
     lines = [
-        "PylaAi-XXZ status",
+        "Pyla-RL status",
         f"Runtime: {runtime_label}",
     ]
     for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target", "last_match", "queue_preview", "last_recovery"):
@@ -199,36 +199,36 @@ class DiscordControlServer:
                 return True
             if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    "You are not allowed to control this PylaAi-XXZ bot.",
+                    "You are not allowed to control this Pyla-RL bot.",
                     ephemeral=True,
                 )
             return False
 
         async def _pause_bot(interaction: discord.Interaction) -> None:
             set_runtime_state(self.state_path, paused=True)
-            await _followup(interaction, "PylaAi-XXZ paused. Use /start to resume.")
+            await _followup(interaction, "Pyla-RL paused. Use /start to resume.")
 
-        @tree.command(name="pause", description="Pause PylaAi-XXZ.")
+        @tree.command(name="pause", description="Pause Pyla-RL.")
         async def pause_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
             await _pause_bot(interaction)
 
-        @tree.command(name="stop", description="Pause PylaAi-XXZ. Prefer /pause (/stop is deprecated).")
+        @tree.command(name="stop", description="Pause Pyla-RL. Prefer /pause (/stop is deprecated).")
         async def stop_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
             await _pause_bot(interaction)
 
-        @tree.command(name="start", description="Resume PylaAi-XXZ.")
+        @tree.command(name="start", description="Resume Pyla-RL.")
         async def start_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return
             await _ack(interaction)
             set_runtime_state(self.state_path, paused=False)
-            await _followup(interaction, "PylaAi-XXZ resumed.")
+            await _followup(interaction, "Pyla-RL resumed.")
 
         @tree.command(name="stop_all", description="Stop the bot completely and exit the main loop.")
         async def stop_all_command(interaction: discord.Interaction) -> None:
@@ -241,13 +241,13 @@ class DiscordControlServer:
                 await _followup(
                     interaction,
                     message if message != "Command finished." else (
-                        "PylaAi-XXZ is stopping. The bot process will exit shortly."
+                        "Pyla-RL is stopping. The bot process will exit shortly."
                     ),
                 )
             else:
                 await _followup(interaction, f"Stop request failed: {message}")
 
-        @tree.command(name="status", description="Show whether PylaAi-XXZ is running or paused.")
+        @tree.command(name="status", description="Show whether Pyla-RL is running or paused.")
         async def status_command(interaction: discord.Interaction) -> None:
             if not await _guard(interaction):
                 return

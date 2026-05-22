@@ -7,11 +7,11 @@ import numpy as np
 from state_finder import get_state
 from utils import (
     extract_text_and_positions,
+    extract_all_text_boxes,
     extract_text_strings,
     count_hsv_pixels,
     load_toml_as_dict,
     load_brawlers_info,
-    find_template_center,
     resolve_brawler_name_alias,
 )
 
@@ -203,6 +203,242 @@ class LobbyAutomation:
         if gray_pixels > gray_pixels_threshold:
             self.window_controller.click(int(535 * wr), int(615 * hr))
 
+    @staticmethod
+    def _select_button_words():
+        return {"select", "selegt", "selec", "selct", "selert"}
+
+    def _grid_region_bounds(self, full_h, full_w):
+        # Brawler cards start around x=420 on a 1920-wide reference screen.
+        return (
+            int(full_w * 0.17),
+            int(full_h * 0.12),
+            int(full_w * 0.995),
+            int(full_h * 0.92),
+        )
+
+    def _map_ocr_box_to_full_screen(self, box, ocr_scale, x0, y0):
+        mapped = {}
+        for corner in ("top_left", "top_right", "bottom_left", "bottom_right"):
+            if corner in box:
+                px, py = box[corner]
+                mapped[corner] = (px / ocr_scale + x0, py / ocr_scale + y0)
+        cx, cy = box["center"]
+        mapped["center"] = (cx / ocr_scale + x0, cy / ocr_scale + y0)
+        return mapped
+
+    def _run_easyocr_on_brawler_grid(self, screenshot_full, ocr_scale):
+        full_h, full_w = screenshot_full.shape[:2]
+        x0, y0, x1, y1 = self._grid_region_bounds(full_h, full_w)
+        crop = screenshot_full[y0:y1, x0:x1]
+        scaled = cv2.resize(
+            crop,
+            (max(1, int(crop.shape[1] * ocr_scale)), max(1, int(crop.shape[0] * ocr_scale))),
+            interpolation=cv2.INTER_CUBIC if ocr_scale > 1.0 else cv2.INTER_AREA,
+        )
+        entries = []
+        for item in extract_all_text_boxes(scaled):
+            entries.append({
+                "text": item["text"],
+                "confidence": item["confidence"],
+                "box": self._map_ocr_box_to_full_screen(item["box"], ocr_scale, x0, y0),
+            })
+        return entries
+
+    def _is_probable_grid_label(self, text_box, full_h, full_w):
+        cx, cy = text_box["center"]
+        gx0, gy0, gx1, gy1 = self._grid_region_bounds(full_h, full_w)
+        return gx0 <= cx <= gx1 and gy0 <= cy <= gy1
+
+    @classmethod
+    def _is_confident_grid_name_match(cls, detected_name, target_name):
+        if detected_name == target_name:
+            return True
+        if len(target_name) <= 3:
+            return False
+        return cls.names_match(detected_name, target_name)
+
+    def _collect_easyocr_grid_matches(self, screenshot_full, target_key, ocr_scale, debug_enabled=False):
+        entries = self._run_easyocr_on_brawler_grid(screenshot_full, ocr_scale)
+        if debug_enabled:
+            print(
+                "EasyOCR grid texts:",
+                [f"{entry['text']} ({entry['confidence']:.2f})" for entry in entries],
+            )
+        full_h, full_w = screenshot_full.shape[:2]
+        matches = []
+        for entry in entries:
+            detected_name = self.resolve_ocr_typos(self.normalize_ocr_name(entry["text"]))
+            if not self._is_confident_grid_name_match(detected_name, target_key):
+                continue
+            if not self._is_probable_grid_label(entry["box"], full_h, full_w):
+                continue
+            score = self.name_match_score(detected_name, target_key) + min(entry["confidence"], 0.99) * 0.05
+            matches.append((score, detected_name, entry["box"], entry["text"]))
+        matches.sort(key=lambda item: (-item[0], item[2]["center"][1], item[2]["center"][0]))
+        return matches
+
+    def _text_box_click_position(self, text_box, full_h, full_w, lift_factor=2.8):
+        cx, cy = text_box["center"]
+        click_x = int(cx)
+
+        top_left = text_box.get("top_left")
+        bottom_left = text_box.get("bottom_left")
+        if top_left is not None and bottom_left is not None:
+            top_right = text_box.get("top_right", top_left)
+            bottom_right = text_box.get("bottom_right", bottom_left)
+            tl_y = min(top_left[1], top_right[1])
+            bl_y = max(bottom_left[1], bottom_right[1])
+            label_h = max(bl_y - tl_y, full_h * 0.018)
+            click_y = int(tl_y - label_h * lift_factor)
+            click_y = max(int(full_h * 0.08), min(full_h - 1, click_y))
+            return click_x, click_y
+
+        click_y = int(cy - full_h * 0.09)
+        click_y = max(0, min(full_h - 1, click_y))
+        return click_x, click_y
+
+    def _press_select_button(self):
+        select_x, select_y = self.coords_cfg["lobby"]["select_btn"][0], self.coords_cfg["lobby"]["select_btn"][1]
+        self.window_controller.click(select_x, select_y, already_include_ratio=False)
+
+    def _attempt_easyocr_pick(self, brawler, target_key, screenshot_full, matches, debug_enabled=False):
+        full_h, full_w = screenshot_full.shape[:2]
+        lift_factors = (2.8, 3.5, 2.2, 4.0)
+        opened_detail = False
+
+        for _, detected_name, text_box, raw_text in matches[:3]:
+            for lift_factor in lift_factors:
+                if opened_detail:
+                    self.press_back()
+                    time.sleep(0.5)
+
+                click_x, click_y = self._text_box_click_position(
+                    text_box,
+                    full_h,
+                    full_w,
+                    lift_factor=lift_factor,
+                )
+                self.window_controller.click(click_x, click_y)
+                print(
+                    f"EasyOCR found {raw_text!r} for {brawler}; "
+                    f"clicking ({click_x}, {click_y}), lift={lift_factor}"
+                )
+                time.sleep(1.0)
+
+                verify_screenshot = self.window_controller.screenshot()
+                verify_state = get_state(verify_screenshot)
+                card_is_open = verify_state in ("brawler_selection", "shop")
+                if not card_is_open:
+                    card_is_open = self._select_button_visible(verify_screenshot)
+                    if card_is_open and debug_enabled:
+                        print(f"Brawler card detected by EasyOCR SELECT text (state was {verify_state}).")
+
+                if not card_is_open:
+                    if debug_enabled:
+                        print(f"Brawler card did not open after tap (state={verify_state}).")
+                    continue
+
+                opened_detail = True
+                if self._verify_brawler_detail_card(verify_screenshot, target_key):
+                    self._press_select_button()
+                    time.sleep(0.5)
+                    print(f"Selected brawler {brawler}")
+                    return True
+
+                card_texts = self._detail_card_texts(verify_screenshot)
+                print(
+                    f"EasyOCR detail texts {card_texts} did not confirm '{brawler}' "
+                    f"(matched label {detected_name!r})."
+                )
+
+        if opened_detail:
+            self.press_back()
+            time.sleep(0.5)
+        return False
+
+    def _select_button_visible(self, screenshot):
+        full_h = screenshot.shape[0]
+        bottom = screenshot[int(full_h * 0.82):, :]
+        try:
+            texts = extract_text_strings(bottom)
+        except Exception:
+            return False
+        select_words = self._select_button_words()
+        return any(self.normalize_ocr_name(text) in select_words for text in texts)
+
+    def _detail_card_texts(self, screenshot):
+        full_h, full_w = screenshot.shape[:2]
+        detail_regions = (
+            (0.04, 0.38, 0.0, 0.72),
+            (0.10, 0.62, 0.0, 0.52),
+            (0.0, 0.25, 0.0, 1.0),
+        )
+        texts = []
+        for y0, y1, x0, x1 in detail_regions:
+            crop = screenshot[
+                int(full_h * y0):int(full_h * y1),
+                int(full_w * x0):int(full_w * x1),
+            ]
+            try:
+                texts.extend(extract_text_strings(crop))
+            except Exception:
+                continue
+        return texts
+
+    def _verify_brawler_detail_card(self, screenshot, target_key):
+        texts = self._detail_card_texts(screenshot)
+        for text in texts:
+            normalized = self.resolve_ocr_typos(self.normalize_ocr_name(text))
+            if self.names_match(normalized, target_key):
+                return True
+
+        if not self._select_button_visible(screenshot):
+            return False
+
+        for text in texts:
+            normalized = self.resolve_ocr_typos(self.normalize_ocr_name(text))
+            if normalized in self.known_brawler_names and not self.names_match(normalized, target_key):
+                return False
+
+        return True
+
+    def _dismiss_open_detail_card(self):
+        screenshot = self.window_controller.screenshot()
+        if screenshot is None:
+            return False
+        if self._select_button_visible(screenshot):
+            self.press_back()
+            time.sleep(0.55)
+            return True
+        return False
+
+    def _wait_for_grid_settle(self, stable_frames=1, delay=0.1, diff_threshold=6.5, timeout=0.9):
+        previous = None
+        stable = 0
+        deadline = time.time() + timeout
+        while time.time() < deadline and stable < stable_frames:
+            frame = self.window_controller.screenshot()
+            if frame is None:
+                time.sleep(delay)
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            crop = gray[int(frame.shape[0] * 0.16):int(frame.shape[0] * 0.92), :]
+            if previous is not None:
+                diff = float(np.mean(cv2.absdiff(previous, crop)))
+                if diff <= diff_threshold:
+                    stable += 1
+                else:
+                    stable = 0
+            previous = crop
+            time.sleep(delay)
+
+    def _scroll_brawler_grid(self, wr, hr):
+        scroll_x = int(320 * wr)
+        start_y = int(790 * hr)
+        end_y = int(570 * hr)
+        self.window_controller.swipe(scroll_x, start_y, scroll_x, end_y, duration=0.28)
+        self._wait_for_grid_settle()
+
     def select_brawler(self, brawler):
         self.window_controller.screenshot()
         wr = self.window_controller.width_ratio
@@ -214,116 +450,64 @@ class LobbyAutomation:
         except (TypeError, ValueError):
             ocr_scale = 0.65
         ocr_scale = max(0.35, min(1.0, ocr_scale))
+        grid_ocr_scale = max(ocr_scale, 0.75)
         target_key = self.normalize_ocr_name(brawler)
+        target_key = self.resolve_ocr_typos(target_key)
 
         if not self.open_brawler_selection():
             print(f"WARNING: Could not open brawler selection menu for '{brawler}'. "
                   "Continuing with the currently selected brawler instead of crashing.")
             self.press_back()
             return False
-        c = 0
-        found_brawler = False
-        for i in range(50):
+
+        same_screen_attempts = 0
+        max_same_screen_attempts = 3
+        for _scroll in range(50):
+            self._dismiss_open_detail_card()
+
             screenshot_full = self.window_controller.screenshot()
-            full_h = screenshot_full.shape[0]
-            screenshot = cv2.resize(
+            matches = self._collect_easyocr_grid_matches(
                 screenshot_full,
-                (int(screenshot_full.shape[1] * ocr_scale), int(screenshot_full.shape[0] * ocr_scale)),
-                interpolation=cv2.INTER_AREA,
+                target_key,
+                grid_ocr_scale,
+                debug_enabled=debug_enabled,
             )
 
-            if debug_enabled: print("extracting text on current screen...")
-            results = extract_text_and_positions(screenshot)
-            reworked_results = {}
-            for key in results.keys():
-                orig_key = key
-                key = self.normalize_ocr_name(key)
-                key = self.resolve_ocr_typos(key)
-                reworked_results[key] = results[orig_key]
-            if debug_enabled:
-                print("All detected text while looking for brawler name:", reworked_results.keys())
-                print()
-            matches = []
-            for detected_name, text_box in reworked_results.items():
-                if self.names_match(detected_name, target_key):
-                    score = self.name_match_score(detected_name, target_key)
-                    matches.append((score, detected_name, text_box))
             if matches:
-                matches.sort(key=lambda item: item[0], reverse=True)
-                _, detected_name, text_box = matches[0]
-                x, y = text_box['center']
-                click_x = int(x / ocr_scale)
-                # EasyOCR returns the text label center, not the card/icon center.
-                # Tapping above the label avoids selecting the brawler in the row below.
-                y_offset = int(full_h * 0.088)
-                click_y = int((y / ocr_scale) - y_offset)
-                click_y = max(0, min(full_h - 1, click_y))
-                self.window_controller.click(click_x, click_y)
-                print(f"Found brawler {brawler} (OCR: {detected_name}) clicking icon at ({click_x}, {click_y}), y_offset={y_offset}")
-                time.sleep(1.0)
+                if self._attempt_easyocr_pick(
+                    brawler,
+                    target_key,
+                    screenshot_full,
+                    matches,
+                    debug_enabled=debug_enabled,
+                ):
+                    return True
 
-                verify_screenshot = self.window_controller.screenshot()
-                verify_state = get_state(verify_screenshot)
-                card_is_open = verify_state in ("brawler_selection", "shop")
-                if not card_is_open:
-                    try:
-                        select_words = {"select", "selegt", "selec", "selct", "selert"}
-                        card_is_open = any(
-                            self.normalize_ocr_name(text) in select_words
-                            for text in extract_text_strings(verify_screenshot)
-                        )
-                        if card_is_open:
-                            print(f"Brawler card detected by SELECT text (state was {verify_state}).")
-                    except Exception:
-                        pass
-
-                if not card_is_open:
-                    print(f"Brawler card did not open after tap (state={verify_state}); retrying without scrolling.")
-                    time.sleep(0.5)
+                same_screen_attempts += 1
+                if same_screen_attempts < max_same_screen_attempts:
+                    print(
+                        f"EasyOCR found {brawler} on screen; retrying pick "
+                        f"({same_screen_attempts}/{max_same_screen_attempts}) before scrolling."
+                    )
+                    time.sleep(0.2)
                     continue
 
-                card_crop = verify_screenshot[
-                    int(full_h * 0.05):int(full_h * 0.22),
-                    0:verify_screenshot.shape[1],
-                ]
-                try:
-                    card_texts = extract_text_strings(card_crop)
-                except Exception:
-                    card_texts = []
-                card_name_match = any(
-                    self.names_match(self.normalize_ocr_name(text), target_key)
-                    for text in card_texts
-                ) if card_texts else True
+                print(
+                    f"Could not pick {brawler} after {max_same_screen_attempts} EasyOCR attempts; scrolling."
+                )
+                same_screen_attempts = 0
+            else:
+                same_screen_attempts = 0
+                if debug_enabled:
+                    print(f"EasyOCR did not find '{brawler}' on the current brawler grid page.")
 
-                if not card_name_match:
-                    print(f"Card OCR shows {card_texts} but expected '{brawler}'; re-tapping with adjusted offset.")
-                    self.press_back()
-                    time.sleep(0.5)
-                    click_y = int((y / ocr_scale) - int(full_h * 0.04))
-                    click_y = max(0, min(full_h - 1, click_y))
-                    self.window_controller.click(click_x, click_y)
-                    time.sleep(1.0)
+            wr = self.window_controller.width_ratio
+            hr = self.window_controller.height_ratio
+            self._scroll_brawler_grid(wr, hr)
 
-                select_x, select_y = self.coords_cfg['lobby']['select_btn'][0], self.coords_cfg['lobby']['select_btn'][1]
-                self.window_controller.click(select_x, select_y, already_include_ratio=False)
-                time.sleep(0.5)
-                print(f"Selected brawler {brawler}")
-                found_brawler = True
-                break
-            if c == 0:
-                wr = self.window_controller.width_ratio
-                hr = self.window_controller.height_ratio
-                self.window_controller.swipe(int(1700 * wr), int(900 * hr), int(1700 * wr), int(850 * hr), duration=0.8)
-                c += 1
-                continue
-
-            self.window_controller.swipe(int(1700 * wr), int(900 * hr), int(1700 * wr), int(650 * hr), duration=0.8)
-            time.sleep(1)
-        if not found_brawler:
-            print(f"WARNING: Brawler '{brawler}' was not found after 50 scroll attempts. "
-                  f"The bot will continue with the currently selected brawler.")
-            return False
-        return True
+        print(f"WARNING: Brawler '{brawler}' was not found after 50 scroll attempts. "
+              f"The bot will continue with the currently selected brawler.")
+        return False
 
     def select_lowest_trophy_brawler(self):
         wr = self.window_controller.width_ratio

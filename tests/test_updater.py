@@ -29,7 +29,7 @@ class UpdaterTest(unittest.TestCase):
     def test_downgrade_ref_download_url_uses_requested_version(self):
         url, label = download_url_for_ref("abc123")
 
-        self.assertEqual(url, "https://github.com/xxz-888/PylaAi-XXZ/archive/abc123.zip")
+        self.assertEqual(url, "https://github.com/CodeBanana69/Pyla-RL/archive/abc123.zip")
         self.assertEqual(label, "GitHub ref abc123")
 
     def test_previous_ref_chooses_commit_before_latest(self):

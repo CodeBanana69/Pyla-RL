@@ -71,7 +71,7 @@ def format_uptime(seconds):
 
 def format_session_summary(metrics):
     if not metrics:
-        return "PylaAi-XXZ | status unavailable"
+        return "Pyla-RL | status unavailable"
     session = metrics.get("session") or {}
     uptime = format_uptime(session.get("uptime_s"))
     brawler = session.get("brawler") or "--"
@@ -94,7 +94,7 @@ def format_session_summary(metrics):
     last_recovery = session.get("last_recovery") or ""
     recovery_suffix = f" | Recovery {last_recovery}" if last_recovery else ""
     return (
-        f"PylaAi-XXZ | {uptime} | {progress} | W{wins} L{losses} | "
+        f"Pyla-RL | {uptime} | {progress} | W{wins} L{losses} | "
         f"IPS {ips_text} | Feed {feed_text} | {state} | {notice}{recovery_suffix}"
     )
 

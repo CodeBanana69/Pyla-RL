@@ -228,7 +228,7 @@ def run_window(state_path, metrics_path=None):
         window_height += 58
 
     root = ctk.CTk()
-    root.title("PylaAi-XXZ Control")
+    root.title("Pyla-RL Control")
     root.geometry(f"310x{window_height}")
     root.resizable(False, False)
     root.attributes("-topmost", True)
@@ -236,7 +236,7 @@ def run_window(state_path, metrics_path=None):
     root.configure(fg_color="#121212")
 
     compact_root = ctk.CTkToplevel(root)
-    compact_root.title("PylaAi-XXZ Control")
+    compact_root.title("Pyla-RL Control")
     compact_root.geometry("286x54")
     compact_root.resizable(False, False)
     compact_root.attributes("-topmost", True)

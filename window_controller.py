@@ -1379,6 +1379,7 @@ class WindowController:
         scaled_radius = radius * self.scale_factor
         target_x = self.joystick_x + math.cos(angle_rad) * scaled_radius
         target_y = self.joystick_y + math.sin(angle_rad) * scaled_radius
+        send_x, send_y = int(target_x), int(target_y)
 
         joystick_needs_refresh = time.time() - self.last_joystick_down_time > 2.0
         if self.are_we_moving and joystick_needs_refresh:
@@ -1389,11 +1390,12 @@ class WindowController:
                 return
             self.are_we_moving = True
             self.last_joystick_down_time = time.time()
-            self.last_joystick_pos = (target_x, target_y)
-            self.touch_move(target_x, target_y, pointer_id=self.PID_JOYSTICK)
-        elif self.last_joystick_pos != (target_x, target_y):
-            self.touch_move(target_x, target_y, pointer_id=self.PID_JOYSTICK)
-            self.last_joystick_pos = (target_x, target_y)
+            self.last_joystick_pos = (send_x, send_y)
+            self.touch_move(send_x, send_y, pointer_id=self.PID_JOYSTICK)
+        elif self.last_joystick_pos != (send_x, send_y):
+            self.touch_move(send_x, send_y, pointer_id=self.PID_JOYSTICK)
+            self.last_joystick_pos = (send_x, send_y)
+            self.last_joystick_down_time = time.time()
 
     def stop_joystick(self):
         """Release the joystick touch."""

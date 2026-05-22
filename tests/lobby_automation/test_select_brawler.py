@@ -2,7 +2,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-from PIL import Image
 
 from lobby_automation import LobbyAutomation
 
@@ -17,24 +16,27 @@ class TestLobbyAutomation(unittest.TestCase):
         self.mock_window_controller.height_ratio = 1
         self.lobby = LobbyAutomation(self.mock_window_controller)
 
-    @patch("lobby_automation.extract_text_and_positions")
-    def test_can_select_brawlers(self, mock_extract_text):
-        """Tests that bot can select brawlers once he reaches the brawlers selection menu."""
-        expected_brawler_x = 2012
-        expected_brawler_y = 978
-        tolerance = 50
+    @patch("lobby_automation.get_state", return_value="brawler_selection")
+    @patch.object(LobbyAutomation, "open_brawler_selection", return_value=True)
+    @patch.object(LobbyAutomation, "_verify_brawler_detail_card", return_value=True)
+    @patch.object(LobbyAutomation, "_collect_easyocr_grid_matches")
+    def test_can_select_brawlers(self, mock_matches, *_):
+        """Tests EasyOCR-driven brawler selection clicks the portrait above the label."""
+        box = {
+            "center": (500, 400),
+            "top_left": (470, 380),
+            "top_right": (530, 380),
+            "bottom_left": (470, 420),
+            "bottom_right": (530, 420),
+        }
+        mock_matches.return_value = [(2.0, "shelly", box, "shelly")]
 
-        # The project config uses ocr_scale_down_factor = 0.5, so these are
-        # scaled-down OCR coordinates for the expected full-size click.
-        mock_extract_text.return_value = {"shelly": {"center": (1006, 536)}}
-
-        test_image = np.array(Image.open("./tests/assets/brawlers_menu.PNG"))
+        test_image = np.zeros((540, 960, 3), dtype=np.uint8)
         self.mock_window_controller.screenshot.return_value = test_image
 
-        self.lobby.select_brawler("shelly")
-
-        self.assertTrue(self.mock_window_controller.click.called, "No clicks were made at all")
-        self.assert_click_within_tolerance(expected_brawler_x, expected_brawler_y, tolerance)
+        self.lobby.coords_cfg = {"lobby": {"brawler_btn": (0, 0), "select_btn": (260, 991)}}
+        self.assertTrue(self.lobby.select_brawler("shelly"))
+        self.assertTrue(self.mock_window_controller.click.called)
 
     def assert_click_within_tolerance(self, expected_x, expected_y, tolerance=50):
         """Check if any click was within tolerance of expected coordinates."""
@@ -143,6 +145,64 @@ class TestOpenBrawlerSelection(unittest.TestCase):
 
         self.assertFalse(automation.select_brawler("shelly"))
         self.assertGreaterEqual(automation.window_controller.back_presses, 1)
+
+
+class TestBrawlerDetailVerification(unittest.TestCase):
+    def setUp(self):
+        automation = object.__new__(LobbyAutomation)
+        automation.known_brawler_names = {"jacky", "shelly", "jessie"}
+        self.automation = automation
+
+    @patch.object(LobbyAutomation, "_select_button_visible", return_value=True)
+    @patch.object(LobbyAutomation, "_detail_card_texts", return_value=["16/30", "wave hopper"])
+    def test_accepts_detail_card_with_gadget_text_when_select_visible(self, *_):
+        screenshot = np.zeros((540, 960, 3), dtype=np.uint8)
+        self.assertTrue(self.automation._verify_brawler_detail_card(screenshot, "jacky"))
+
+    @patch.object(LobbyAutomation, "_select_button_visible", return_value=True)
+    @patch.object(LobbyAutomation, "_detail_card_texts", return_value=["jessie"])
+    def test_rejects_conflicting_brawler_name_on_detail_card(self, *_):
+        screenshot = np.zeros((540, 960, 3), dtype=np.uint8)
+        self.assertFalse(self.automation._verify_brawler_detail_card(screenshot, "jacky"))
+
+    def test_short_brawler_names_require_exact_grid_match(self):
+        self.assertTrue(LobbyAutomation._is_confident_grid_name_match("bo", "bo"))
+        self.assertFalse(LobbyAutomation._is_confident_grid_name_match("box", "bo"))
+        self.assertTrue(LobbyAutomation._is_confident_grid_name_match("jacky", "jacky"))
+
+    def test_text_box_click_uses_label_bbox(self):
+        text_box = {
+            "center": (500, 400),
+            "top_left": (470, 380),
+            "top_right": (530, 380),
+            "bottom_left": (470, 420),
+            "bottom_right": (530, 420),
+        }
+        click_x, click_y = self.automation._text_box_click_position(
+            text_box,
+            full_h=540,
+            full_w=960,
+        )
+        self.assertEqual(click_x, 500)
+        self.assertLess(click_y, 380)
+
+
+class TestBrawlerGridScroll(unittest.TestCase):
+    @patch.object(LobbyAutomation, "_wait_for_grid_settle", return_value=None)
+    def test_scroll_uses_left_gutter_not_brawler_grid(self, _):
+        controller = MagicMock()
+        automation = object.__new__(LobbyAutomation)
+        automation.window_controller = controller
+
+        automation._scroll_brawler_grid(wr=0.5, hr=0.5)
+
+        controller.swipe.assert_called_once()
+        start_x, start_y, end_x, end_y = controller.swipe.call_args[0]
+        self.assertEqual(start_x, 160)
+        self.assertEqual(end_x, 160)
+        self.assertEqual(start_y, 395)
+        self.assertEqual(end_y, 285)
+        self.assertGreater(start_y, end_y)
 
 
 if __name__ == "__main__":
