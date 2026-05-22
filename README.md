@@ -1,4 +1,11 @@
-﻿# Pyla-RL
+[![Python](https://shields.io)](https://github.com)
+[![Reinforcement Learning](https://shields.io)](https://github.com)
+[![Git](https://shields.io)](https://github.com)
+[![Bash](https://shields.io)](https://github.com)
+[![Linux](https://shields.io)](https://github.com)
+[![Markdown](https://shields.io)](https://github.com)
+ 
+ # Pyla-RL
 
 This fork focuses on **Showdown** (trio). Other game modes still run off the upstream logic, but development effort and tuning here go into making Showdown play well end-to-end.
 
