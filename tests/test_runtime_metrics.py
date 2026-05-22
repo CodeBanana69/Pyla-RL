@@ -111,7 +111,7 @@ class RuntimeMetricsTests(unittest.TestCase):
                 },
             }
         )
-        self.assertIn("PylaAi-XXZ", summary)
+        self.assertIn("Pyla-RL", summary)
         self.assertIn("shelly -> 500 (437)", summary)
         self.assertIn("W3 L1", summary)
         self.assertIn("IPS 18.2", summary)

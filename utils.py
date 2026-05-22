@@ -307,6 +307,28 @@ def extract_text_and_positions(image_path):
     return text_details
 
 
+def extract_all_text_boxes(image_input):
+    results = get_ocr_reader().readtext(image_input)
+    entries = []
+    for (bbox, text, prob) in results:
+        top_left, top_right, bottom_right, bottom_left = bbox
+        cx = (top_left[0] + top_right[0] + bottom_right[0] + bottom_left[0]) / 4
+        cy = (top_left[1] + top_right[1] + bottom_right[1] + bottom_left[1]) / 4
+        entries.append({
+            "text": str(text),
+            "text_lower": str(text).lower(),
+            "confidence": float(prob),
+            "box": {
+                "top_left": top_left,
+                "top_right": top_right,
+                "bottom_right": bottom_right,
+                "bottom_left": bottom_left,
+                "center": (cx, cy),
+            },
+        })
+    return entries
+
+
 def extract_text_strings(image_input):
     return [str(result[1]).lower() for result in get_ocr_reader().readtext(image_input)]
 

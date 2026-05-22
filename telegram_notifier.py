@@ -158,7 +158,7 @@ async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
 
 
 def _format_title(event_type: str, details: dict[str, Any]) -> str:
-    title = EVENT_TITLES.get(event_type, "PylaAi-XXZ update")
+    title = EVENT_TITLES.get(event_type, "Pyla-RL update")
     if event_type == "match":
         result = str(details.get("result") or "finished")
         brawler = str(details.get("brawler") or "").title()

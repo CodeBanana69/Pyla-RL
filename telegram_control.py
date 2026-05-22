@@ -167,7 +167,7 @@ class TelegramControlServer:
         if allowed and chat_id_text not in allowed:
             await async_send_message(
                 chat_id,
-                "This chat is not allowed for this PylaAi-XXZ instance. Add this chat ID in the Telegram tab first.",
+                "This chat is not allowed for this Pyla-RL instance. Add this chat ID in the Telegram tab first.",
                 token=token,
             )
             return
@@ -181,11 +181,11 @@ class TelegramControlServer:
 
         if command in {"/pause", "/stop"}:
             set_runtime_state(self.state_path, paused=True)
-            await async_send_message(chat_id, "PylaAi-XXZ paused.", token=token)
+            await async_send_message(chat_id, "Pyla-RL paused.", token=token)
             return
         if command == "/resume":
             set_runtime_state(self.state_path, paused=False)
-            await async_send_message(chat_id, "PylaAi-XXZ resumed.", token=token)
+            await async_send_message(chat_id, "Pyla-RL resumed.", token=token)
             return
         if command in {"/quit", "/stop_all"}:
             request_stop(self.state_path)
@@ -265,7 +265,7 @@ class TelegramControlServer:
         await async_send_message(chat_id, message if ok else f"{label} failed: {message}", token=token)
 
     def _help_text(self, chat_id: str | None = None) -> str:
-        lines = ["<b>PylaAi-XXZ Telegram commands</b>"]
+        lines = ["<b>Pyla-RL Telegram commands</b>"]
         if chat_id:
             lines.append(f"<b>This chat ID:</b> {chat_id}")
         lines.extend([
@@ -296,7 +296,7 @@ class TelegramControlServer:
             runtime_label = "running"
         details = self.status_provider() if self.status_provider else {}
         lines = [
-            "<b>PylaAi-XXZ status</b>",
+            "<b>Pyla-RL status</b>",
             f"<b>Runtime:</b> {runtime_label}",
         ]
         for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target", "last_match", "queue_preview", "last_recovery"):

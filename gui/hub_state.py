@@ -76,6 +76,7 @@ class HubStateStore:
         "pause_menu_graph_samples": ("general", "int"),
         "console_ips": ("general", "yesno"),
         "first_run_wizard": ("general", "yesno"),
+        "license_accepted": ("general", "yesno"),
         "capture_bad_vision_frames": ("general", "yesno"),
         "trophies_multiplier": ("general", "int"),
         "ocr_scale_down_factor": ("general", "float"),
@@ -224,6 +225,7 @@ class HubStateStore:
         self.general_config.setdefault("pause_menu_graph_samples", 45)
         self.general_config.setdefault("console_ips", "yes")
         self.general_config.setdefault("first_run_wizard", "yes")
+        self.general_config.setdefault("license_accepted", "no")
         self.general_config.setdefault("capture_bad_vision_frames", "no")
         self.general_config.setdefault("trophies_multiplier", 1)
         self.general_config.setdefault("ocr_scale_down_factor", 0.5)
@@ -244,7 +246,7 @@ class HubStateStore:
 
         self.discord_config.setdefault("webhook_url", self.general_config.get("personal_webhook", ""))
         self.discord_config.setdefault("discord_id", self.general_config.get("discord_id", ""))
-        self.discord_config.setdefault("username", "PylaAi-XXZ")
+        self.discord_config.setdefault("username", "Pyla-RL")
         self.discord_config.setdefault("send_match_summary", False)
         self.discord_config.setdefault("include_screenshot", True)
         self.discord_config.setdefault("ping_when_stuck", False)
@@ -276,7 +278,7 @@ class HubStateStore:
         self.brawl_stars_api_config.setdefault("developer_email", "")
         self.brawl_stars_api_config.setdefault("developer_password", "")
         self.brawl_stars_api_config.setdefault("public_ip_service", "https://api.ipify.org")
-        self.brawl_stars_api_config.setdefault("key_name_prefix", "PylaAi-XXZ Auto")
+        self.brawl_stars_api_config.setdefault("key_name_prefix", "Pyla-RL Auto")
         self.brawl_stars_api_config.setdefault("delete_old_auto_tokens", True)
         self.brawl_stars_api_config.setdefault("api_token", "")
 
@@ -307,9 +309,13 @@ class HubStateStore:
 
     def ui_state(self, preflight=None, correct_zoom=True):
         from performance_profile import PERFORMANCE_PROFILES
-        from gui.brawler_queue import load_push_order, load_queue, queue_state_items
+        from gui.brawler_queue import brawler_icon_uri, load_push_order, load_queue, queue_state_items
+        from gui.official_source import read_build_info, verify_official_source
         from utils import get_brawler_list
 
+        brawler_names = get_brawler_list()
+        source_status = verify_official_source()
+        build_info = read_build_info()
         state = self.initial_state()
         if preflight is None:
             preflight = {"ready": False, "checks": []}
@@ -328,9 +334,16 @@ class HubStateStore:
                     for key, profile in PERFORMANCE_PROFILES.items()
                 },
                 "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
+                "licenseAccepted": _to_bool(self.general_config.get("license_accepted", "no")),
+                "sourceStatus": source_status,
+                "buildInfo": build_info,
                 "configDir": str(Path("cfg").resolve()),
                 "pushOrder": load_push_order(),
-                "brawlers": get_brawler_list(),
+                "brawlers": brawler_names,
+                "brawlerOptions": [
+                    {"name": name, "icon": brawler_icon_uri(name)}
+                    for name in brawler_names
+                ],
             },
         })
         return state
@@ -353,6 +366,7 @@ class HubStateStore:
                 "pause_menu_auto_reopen",
                 "console_ips",
                 "first_run_wizard",
+                "license_accepted",
                 "capture_bad_vision_frames",
                 "play_again_on_win",
                 "bot_uses_gadgets",
@@ -370,6 +384,7 @@ class HubStateStore:
         return data
 
     def _history_state(self):
+        from gui.brawler_queue import brawler_icon_uri
         from match_journal import read_recent_matches
 
         items = []
@@ -387,7 +402,6 @@ class HubStateStore:
             total_wins += wins
             total_losses += losses
             total_draws += draws
-            icon_path = Path("api") / "assets" / "brawler_icons" / f"{brawler}.png"
             items.append({
                 "brawler": str(brawler),
                 "victory": wins,
@@ -395,7 +409,7 @@ class HubStateStore:
                 "draw": draws,
                 "games": games,
                 "winRate": win_rate,
-                "icon": icon_path.resolve().as_uri() if icon_path.exists() else "",
+                "icon": brawler_icon_uri(brawler),
             })
         items.sort(key=lambda item: (-item["games"], item["brawler"]))
         total_games = total_wins + total_losses + total_draws
@@ -409,14 +423,13 @@ class HubStateStore:
         recent = []
         for record in read_recent_matches(limit=50):
             brawler = str(record.get("brawler", "") or "")
-            icon_path = Path("api") / "assets" / "brawler_icons" / f"{brawler}.png"
             recent.append({
                 "ts": record.get("ts", ""),
                 "brawler": brawler,
                 "result": record.get("result", ""),
                 "delta": record.get("delta"),
                 "mode": record.get("mode", ""),
-                "icon": icon_path.resolve().as_uri() if icon_path.exists() else "",
+                "icon": brawler_icon_uri(brawler),
             })
         return {
             "items": items,

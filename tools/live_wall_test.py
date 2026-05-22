@@ -130,7 +130,6 @@ def main():
                     play.line_of_sight_map_object_classes(),
                 )
                 data["map_objects"] = map_objects
-                data["jump_pad"] = map_objects.get("jump_pad", [])
                 data = play.validate_game_data(data)
                 if data:
                     play.time_since_player_last_found = time.time()

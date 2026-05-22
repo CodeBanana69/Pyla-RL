@@ -226,7 +226,7 @@ def pyla_main(data):
                 True,
             )
             self.duplicate_frame_replay_max_ips = parse_max_ips(
-                general_config.get("duplicate_frame_replay_max_ips", 15)
+                general_config.get("duplicate_frame_replay_max_ips", 25)
             ) or 15
             if self.max_ips:
                 self.duplicate_frame_replay_max_ips = min(self.duplicate_frame_replay_max_ips, self.max_ips)
@@ -234,7 +234,7 @@ def pyla_main(data):
                 general_config.get("duplicate_frame_replay_max_age_seconds", 0.35)
             )
             self.duplicate_frame_replay_play_avg_limit = float(
-                general_config.get("duplicate_frame_replay_play_avg_limit", 0.18)
+                general_config.get("duplicate_frame_replay_play_avg_limit", 0.22)
             )
             self.last_duplicate_frame_replay = 0.0
             self.perf_duplicate_frame_replays = 0
@@ -441,9 +441,11 @@ def pyla_main(data):
             return record
 
         def initialize_stage_manager(self):
-            self.Stage_manager.Trophy_observer.win_streak = data[0]['win_streak']
-            self.Stage_manager.Trophy_observer.current_trophies = data[0]['trophies']
-            self.Stage_manager.Trophy_observer.current_wins = data[0]['wins'] if data[0]['wins'] != "" else 0
+            row = data[0] if data else {}
+            self.Stage_manager.Trophy_observer.win_streak = int(row.get("win_streak", 0) or 0)
+            self.Stage_manager.Trophy_observer.current_trophies = int(row.get("trophies", 0) or 0)
+            wins = row.get("wins", 0)
+            self.Stage_manager.Trophy_observer.current_wins = int(wins) if wins not in ("", None) else 0
             total = self.Stage_manager.Trophy_observer.match_history.get("total", {})
             self.session_totals_start = {
                 "victory": int(total.get("victory", 0) or 0),
@@ -1419,7 +1421,7 @@ def pyla_main(data):
                         self.recover_slow_feed()
                         continue
                     self.recover_slow_feed()
-                    time.sleep(0.01)
+                    time.sleep(0.005)
                     continue
                 self.last_processed_frame_id = frame_id
 
@@ -1480,6 +1482,9 @@ def pyla_main(data):
 
 
 def run_app():
+    from gui.brand import FREE_NOTICE, OFFICIAL_GITHUB
+
+    print(f"{FREE_NOTICE} Official source: {OFFICIAL_GITHUB}")
     all_brawlers = get_brawler_list()
     if api_base_url != "localhost":
         update_missing_brawlers_info(all_brawlers)

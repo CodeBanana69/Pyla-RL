@@ -56,6 +56,18 @@ def main():
     elapsed = time.perf_counter() - started
     ips = runs / elapsed if elapsed > 0 else 0
     print(f"Detector-only speed: {ips:.2f} IPS")
+    if ips >= 18:
+        recommended_profile = "balanced"
+        bottleneck = "none (vision compute is healthy)"
+    elif ips >= 10:
+        recommended_profile = "high_ips"
+        bottleneck = "onnx (try high_ips profile: fewer fog/wall passes, debug off)"
+    else:
+        recommended_profile = "high_ips"
+        bottleneck = "onnx (GPU provider may be slow or missing)"
+    print(f"Recommended profile: {recommended_profile}")
+    print(f"Likely bottleneck: {bottleneck}")
+    print("Tip: if bot_ips is low but detector-only speed is fine, the emulator feed is the bottleneck (check scrcpy frame FPS below).")
 
     if platform.architecture()[0] != "64bit":
         print("WARNING: Python is not 64-bit. Re-run setup.exe to install Python 3.11 64-bit.")
@@ -96,6 +108,12 @@ def main():
         print(f"ADB device: {controller.device.serial}")
         print(f"Captured resolution: {controller.width}x{controller.height}")
         print(f"scrcpy frame FPS: {frame_fps:.2f}")
+        if frame_fps < 8:
+            print("Likely bottleneck: emulator feed (fix scrcpy/emulator FPS before tuning ONNX)")
+        elif ips < 10:
+            print("Likely bottleneck: onnx vision (apply high_ips profile and restart)")
+        else:
+            print("Likely bottleneck: none detected in quick check; use in-match bot_ips vs feed_fps if still slow")
         if frame_fps < 8:
             print("WARNING: Emulator/scrcpy is only delivering a few frames per second.")
             emulator = cfg.get("current_emulator", "LDPlayer")

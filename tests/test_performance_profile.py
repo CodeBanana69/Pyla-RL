@@ -49,6 +49,28 @@ class PerformanceProfileTest(unittest.TestCase):
             self.assertEqual(general["scrcpy_max_width"], 854)
             self.assertEqual(general["used_threads"], 2)
 
+    def test_high_ips_profile_disables_debug_overlays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            general_path = Path(tmp) / "general_config.toml"
+            bot_path = Path(tmp) / "bot_config.toml"
+            time_path = Path(tmp) / "time_tresholds.toml"
+            general_path.write_text('visual_debug = "yes"\n', encoding="utf-8")
+            bot_path.write_text("fog_check_every_n_frames = 3\n", encoding="utf-8")
+            time_path.write_text("wall_detection = 0.75\n", encoding="utf-8")
+
+            clear_toml_cache(str(general_path))
+            clear_toml_cache(str(bot_path))
+            clear_toml_cache(str(time_path))
+            apply_performance_profile("high_ips", str(general_path), str(bot_path), str(time_path))
+
+            general = toml.load(general_path)
+            bot = toml.load(bot_path)
+            time_cfg = toml.load(time_path)
+            self.assertEqual(general["visual_debug"], "no")
+            self.assertEqual(general["advanced_visuals"], "no")
+            self.assertEqual(bot["fog_check_every_n_frames"], 4)
+            self.assertEqual(time_cfg["wall_detection_interval_seconds"], 1.0)
+
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(ValueError):
             apply_performance_profile("not-real", save=False)

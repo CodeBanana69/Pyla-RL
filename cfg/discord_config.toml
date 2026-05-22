@@ -12,13 +12,5 @@ discord_bot_token = ""
 discord_control_user_id = ""
 discord_control_channel_id = ""
 discord_control_guild_id = ""
-
-# Setup help:
-# - webhook_url: Server Settings -> Integrations -> Webhooks -> New Webhook -> Copy Webhook URL.
-# - discord_bot_token: https://discord.com/developers/applications -> your app -> Bot -> Reset/View Token.
-# - discord_control_user_id: enable Discord Developer Mode, right-click your profile, Copy User ID.
-# - discord_control_channel_id: right-click the command channel, Copy Channel ID.
-# - discord_control_guild_id: right-click the server icon, Copy Server ID.
-# Invite the bot with OAuth2 scopes: bot and applications.commands.
-# Remote commands: /start, /stop, /status, /screenshot, /restart_game, /restart_scrcpy,
-# /restart_emulator, /back, /press.
+notify_on_recovery = false
+recovery_alert_threshold = 3

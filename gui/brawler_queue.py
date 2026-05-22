@@ -13,6 +13,35 @@ QUEUE_PATH = Path("latest_brawler_data.json")
 PUSH_ORDER_PATH = Path("cfg/push_order.json")
 
 
+def normalize_queue_row(row):
+    if not isinstance(row, dict):
+        return {}
+    normalized = dict(row)
+    normalized["brawler"] = str(normalized.get("brawler", "") or "")
+    normalized["push_until"] = int(normalized.get("push_until", 1000) or 1000)
+    normalized["trophies"] = int(normalized.get("trophies", 0) or 0)
+    wins = normalized.get("wins", 0)
+    normalized["wins"] = int(wins) if wins not in ("", None) else 0
+    normalized["type"] = str(normalized.get("type", "trophies") or "trophies")
+    normalized["automatically_pick"] = bool(normalized.get("automatically_pick", False))
+    normalized["selection_method"] = str(normalized.get("selection_method", "named_brawler") or "named_brawler")
+    normalized["win_streak"] = int(normalized.get("win_streak", 0) or 0)
+    return normalized
+
+
+def normalize_queue(queue):
+    if not isinstance(queue, list):
+        return []
+    normalized = []
+    for row in queue:
+        if not isinstance(row, dict):
+            continue
+        item = normalize_queue_row(row)
+        if item.get("brawler"):
+            normalized.append(item)
+    return normalized
+
+
 def load_queue(path=None):
     queue_path = Path(path or QUEUE_PATH)
     if not queue_path.exists():
@@ -21,13 +50,14 @@ def load_queue(path=None):
         data = json.loads(queue_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
-    return data if isinstance(data, list) else []
+    return normalize_queue(data if isinstance(data, list) else [])
 
 
 def save_queue(data, path=None):
     queue_path = Path(path or QUEUE_PATH)
     queue_path.parent.mkdir(parents=True, exist_ok=True)
-    queue_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    normalized = normalize_queue(data if isinstance(data, list) else [])
+    queue_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")
     return str(queue_path.resolve())
 
 
@@ -49,9 +79,29 @@ def save_push_order(order, path=None):
     return str(order_path.resolve())
 
 
-def queue_item_icon_uri(brawler):
-    icon_path = Path("api") / "assets" / "brawler_icons" / f"{brawler}.png"
+def normalize_brawler_icon_name(brawler_name):
+    return (
+        str(brawler_name or "")
+        .lower()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace(".", "")
+        .replace("&", "")
+    )
+
+
+def brawler_icon_path(brawler_name):
+    safe_name = normalize_brawler_icon_name(brawler_name)
+    return Path("api") / "assets" / "brawler_icons" / f"{safe_name}.png"
+
+
+def brawler_icon_uri(brawler_name):
+    icon_path = brawler_icon_path(brawler_name)
     return icon_path.resolve().as_uri() if icon_path.exists() else ""
+
+
+def queue_item_icon_uri(brawler):
+    return brawler_icon_uri(brawler)
 
 
 def queue_state_items(queue):

@@ -5,7 +5,10 @@ import unittest
 import cv2
 import numpy as np
 
+import play as play_module
 from play import Play
+
+play_module.visual_debug = False
 
 
 class CombatAdaptationTests(unittest.TestCase):
@@ -187,6 +190,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.find_teammate_alive_marker = Play.find_teammate_alive_marker.__get__(play, Play)
         play.teammate_marker_follow_angle = Play.teammate_marker_follow_angle.__get__(play, Play)
         play._count_mask_pixels = Play._count_mask_pixels
+        play.find_best_angle = lambda _player, angle, _walls: angle
 
         frame = np.zeros((300, 300, 3), dtype=np.uint8)
         frame[:, :] = (35, 35, 45)
@@ -237,8 +241,8 @@ class CombatAdaptationTests(unittest.TestCase):
         play.get_player_pos = lambda _player: (50, 50)
         play._fog_check_counter = 0
         play.fog_check_every_n_frames = 999
-        play._fog_direction_escape_cached = None
-        play._fog_threat_cached = None
+        play._fog_direction_escape_cached = 270.0
+        play._fog_threat_cached = 180.0
         play.detect_fog_threat = lambda *_args, **_kwargs: 180.0
         play.detect_fog_direction_escape = lambda *_args, **_kwargs: 270.0
         play.current_frame = object()
@@ -247,11 +251,53 @@ class CombatAdaptationTests(unittest.TestCase):
         play.showdown_roam = lambda *_args, **_kwargs: 90.0
         play.find_best_angle = lambda _player, angle, _walls: angle
         play.showdown_playstyle_mode = "follow"
-        play.jump_pad_detection_enabled = False
 
         movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
 
         self.assertEqual(movement, 270.0)
+
+    def test_showdown_follow_mode_keeps_following_when_distant_fog_and_teammate_nearby(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (50, 50)
+        play._fog_check_counter = 0
+        play.fog_check_every_n_frames = 1
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play._refresh_fog_cache = Play._refresh_fog_cache.__get__(play, Play)
+        play.detect_fog_threat = lambda *_args, **_kwargs: 180.0
+        play.detect_fog_direction_escape = lambda *_args, **_kwargs: None
+        play.current_frame = object()
+        play.is_there_enemy = lambda _enemy: False
+        play.showdown_follow_teammate = lambda *_args, **_kwargs: 45.0
+        play.showdown_roam = lambda *_args, **_kwargs: 270.0
+        play.angle_points_into_fog = lambda *_args, **_kwargs: False
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.showdown_playstyle_mode = "follow"
+        play.teammate_combat_regroup_distance = 650
+        play.choose_locked_teammate = Play.choose_locked_teammate.__get__(play, Play)
+        play.find_closest_teammate = Play.find_closest_teammate.__get__(play, Play)
+        play.get_enemy_pos = lambda entity: ((entity[0] + entity[2]) / 2, (entity[1] + entity[3]) / 2)
+        play.get_distance = Play.get_distance
+        play.locked_teammate = None
+        play.locked_teammate_distance = float("inf")
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+
+        movement = play.get_showdown_movement(
+            [0, 0, 100, 100],
+            [],
+            [[190, 40, 210, 60]],
+            [],
+            "shelly",
+        )
+
+        self.assertEqual(movement, 45.0)
 
     def test_showdown_hide_mode_keeps_throttled_smoke_check(self):
         play = object.__new__(Play)
@@ -273,7 +319,6 @@ class CombatAdaptationTests(unittest.TestCase):
         play.angle_points_into_fog = lambda *_args, **_kwargs: False
         play.find_best_angle = lambda _player, angle, _walls: angle
         play.showdown_playstyle_mode = "hide"
-        play.jump_pad_detection_enabled = False
 
         movement = play.get_showdown_movement([0, 0, 100, 100], [], [[100, 100, 120, 120]], [], "shelly")
 
@@ -294,6 +339,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.get_distance = Play.get_distance
         play.angle_from_direction = Play.angle_from_direction
         play.is_path_blocked_angle = lambda *_args, **_kwargs: False
+        play.find_best_angle = lambda _player, angle, _walls: (angle + 15) % 360
 
         movement = play.showdown_follow_teammate(
             [90, 90, 110, 110],
@@ -301,7 +347,7 @@ class CombatAdaptationTests(unittest.TestCase):
             [],
         )
 
-        self.assertEqual(movement, 0.0)
+        self.assertAlmostEqual(movement, 15.0)
 
     def test_showdown_follow_teammate_uses_axis_option_when_diagonal_blocked(self):
         play = object.__new__(Play)
@@ -319,6 +365,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.angle_from_direction = Play.angle_from_direction
         blocked = {45.0}
         play.is_path_blocked_angle = lambda _player, angle, _walls: round(angle, 1) in blocked
+        play.find_best_angle = lambda _player, angle, _walls: angle
 
         movement = play.showdown_follow_teammate(
             [90, 90, 110, 110],
@@ -366,6 +413,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.find_closest_teammate = lambda *_args, **_kwargs: (None, float("inf"))
         play.teammate_marker_follow_angle = lambda _player: 0.0
         play.showdown_roam = lambda *_args, **_kwargs: 180.0
+        play.find_best_angle = lambda _player, angle, _walls: angle
 
         movement = play.showdown_follow_teammate([90, 90, 110, 110], [], [])
 
@@ -384,6 +432,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.find_closest_teammate = lambda *_args, **_kwargs: (None, float("inf"))
         play.teammate_marker_follow_angle = lambda _player: 0.0
         play.showdown_roam = lambda *_args, **_kwargs: 180.0
+        play.find_best_angle = lambda _player, angle, _walls: angle
 
         movement = play.showdown_follow_teammate([90, 90, 110, 110], [], [])
 
@@ -413,6 +462,69 @@ class CombatAdaptationTests(unittest.TestCase):
 
         self.assertEqual(movement, 0.0)
         self.assertEqual(play.locked_teammate, (305, 100))
+
+    def test_showdown_combat_regroup_uses_locked_teammate(self):
+        play = object.__new__(Play)
+        play.brawlers_info = {"shelly": {"hold_attack": 0, "super_type": "damage"}}
+        play.must_brawler_hold_attack = lambda *_args, **_kwargs: False
+        play.time_since_holding_attack = None
+        play.seconds_to_hold_attack_after_reaching_max = 1.5
+        play.get_brawler_range = lambda _brawler: (100, 200, 300)
+        play.get_player_pos = lambda _player: (100, 100)
+        play.get_enemy_pos = lambda entity: ((entity[0] + entity[2]) / 2, (entity[1] + entity[3]) / 2)
+        play.get_distance = Play.get_distance
+        play.angle_from_direction = Play.angle_from_direction
+        play.angle_opposite = Play.angle_opposite
+        play.blend_angles = Play.blend_angles.__get__(play, Play)
+        play._fog_check_counter = 999
+        play.fog_check_every_n_frames = 999
+        play._fog_threat_cached = None
+        play._fog_direction_escape_cached = None
+        play.current_frame = None
+        play.is_there_enemy = lambda _enemy: True
+        play.find_closest_enemy = lambda *_args, **_kwargs: ((500, 100), 400.0)
+        play.lead_shots_enabled = False
+        play.enemy_velocity = (0.0, 0.0)
+        play.strafe_enabled = False
+        play.approach_flank_blend = 0.0
+        play.multi_enemy_flee_weight = 0.0
+        play.showdown_playstyle_mode = "follow"
+        play.teammate_follow_step_distance = 8
+        play.teammate_combat_bias = 0.82
+        play.teammate_combat_regroup_distance = 650
+        play.locked_teammate = (300, 100)
+        play.locked_teammate_distance = 200
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+        play.choose_locked_teammate = Play.choose_locked_teammate.__get__(play, Play)
+        play.find_closest_teammate = Play.find_closest_teammate.__get__(play, Play)
+        play.angle_points_into_fog = lambda *_args, **_kwargs: False
+        play.find_best_angle = lambda _player, angle, _walls: angle
+        play.try_use_super_on_enemy = lambda *_args, **_kwargs: None
+        play.should_use_gadget_on_enemy = lambda *_args, **_kwargs: False
+        play.is_enemy_hittable = lambda *_args, **_kwargs: False
+        play.attack = lambda *_args, **_kwargs: None
+        play.use_gadget = lambda: True
+        play.clear_ability_ready = lambda *_ability: None
+        play.time_since_gadget_checked = 0.0
+        captured = {}
+
+        def capture_blend(primary, secondary, weight):
+            captured["team_angle"] = secondary
+            return primary
+
+        play.blend_angles = capture_blend
+
+        play.get_showdown_movement(
+            [90, 90, 110, 110],
+            [[480, 90, 520, 110]],
+            [[305, 90, 315, 110], [160, 90, 170, 110]],
+            [],
+            "shelly",
+        )
+
+        self.assertAlmostEqual(captured.get("team_angle"), 0.0, delta=0.1)
 
 
 if __name__ == "__main__":

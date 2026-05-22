@@ -6,6 +6,17 @@ from pathlib import Path
 from gui.hub_state import HubStateStore
 
 
+def _normalize_dialog_path(raw_path):
+    path = str(raw_path or "").strip()
+    if not path:
+        return ""
+    if path.startswith("file:"):
+        from PySide6.QtCore import QUrl
+
+        return QUrl(path).toLocalFile()
+    return path
+
+
 def ensure_pyside6_available():
     try:
         import PySide6  # noqa: F401
@@ -44,6 +55,7 @@ class QmlHub:
 
         class HubBridge(QObject):
             stateChanged = Signal(str, str)
+            iconsUpdated = Signal(str)
             closeRequested = Signal()
 
             def __init__(self, store, correct_zoom=True):
@@ -51,6 +63,7 @@ class QmlHub:
                 self._store = store
                 self._correct_zoom = correct_zoom
                 self._preflight_cache = {"ready": False, "checks": []}
+                self._icon_download_started = False
                 state = store.initial_state()
                 self._mode = state["mode"]
                 self._emulator = state["emulator"]
@@ -240,9 +253,7 @@ class QmlHub:
                         )
                     return "Recent recovery events:\n" + "\n".join(lines)
                 if action == "import-queue":
-                    from PySide6.QtWidgets import QFileDialog
-
-                    path, _ = QFileDialog.getOpenFileName(None, "Import Farm Plan", "", "JSON (*.json)")
+                    path = _normalize_dialog_path(payload.get("path", ""))
                     if not path:
                         return "Import cancelled."
                     from gui.brawler_queue import load_queue, save_queue
@@ -251,20 +262,20 @@ class QmlHub:
                     if not queue:
                         raise ValueError("Selected file did not contain a brawler queue.")
                     save_queue(queue)
-                    return f"Imported {len(queue)} brawler(s)."
+                    return f"Imported {len(queue)} brawler(s) from {Path(path).name}."
                 if action == "export-queue":
-                    from PySide6.QtWidgets import QFileDialog
-
+                    path = _normalize_dialog_path(payload.get("path", ""))
                     queue = self._store.load_queue()
                     if not queue:
                         raise ValueError("Farm plan is empty.")
-                    path, _ = QFileDialog.getSaveFileName(None, "Export Farm Plan", "farm_plan.json", "JSON (*.json)")
                     if not path:
                         return "Export cancelled."
+                    if not path.lower().endswith(".json"):
+                        path = f"{path}.json"
                     from gui.brawler_queue import save_queue
 
                     save_queue(queue, path)
-                    return f"Exported {len(queue)} brawler(s) to {path}"
+                    return f"Exported {len(queue)} brawler(s) to {Path(path).name}."
                 if action == "clear-queue":
                     self._store.save_queue([])
                     return "Farm plan cleared."
@@ -273,10 +284,10 @@ class QmlHub:
                     queue = self._store.build_push_all(target)
                     return f"Built Push All queue with {len(queue)} brawler(s) to {target} trophies."
                 if action == "add-to-queue":
-                    from gui.brawler_queue import load_queue, persist_queue
+                    from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 
                     queue = load_queue()
-                    queue.append(payload)
+                    queue.append(normalize_queue_row(payload))
                     persist_queue(queue)
                     return f"Added {payload.get('brawler', 'brawler')} to farm plan."
                 if action == "remove-from-queue":
@@ -313,12 +324,66 @@ class QmlHub:
                 if action == "complete-wizard":
                     self._store.update_config("settings", "first_run_wizard", "no")
                     return "First-run wizard dismissed."
+                if action == "accept-license":
+                    self._store.update_config("settings", "license_accepted", "yes")
+                    return "License accepted. Pyla-RL is free and must not be sold."
+                if action == "check-updates":
+                    import webbrowser
+
+                    from gui.brand import OFFICIAL_GITHUB
+
+                    webbrowser.open(f"{OFFICIAL_GITHUB}/releases")
+                    updater_exe = Path("updater.exe")
+                    if updater_exe.exists():
+                        return "Opened official GitHub releases. Run updater.exe in this folder to install updates."
+                    return "Opened official GitHub releases."
+                if action == "report-reseller":
+                    import webbrowser
+
+                    from gui.brand import RESELLER_REPORT_URL
+
+                    webbrowser.open(RESELLER_REPORT_URL)
+                    return "Opened the official reseller report form."
+                if action == "ensure-brawler-icons":
+                    if self._icon_download_started:
+                        return "Downloading brawler icons..."
+                    self._icon_download_started = True
+
+                    def download_icons():
+                        message = "Brawler icons ready."
+                        try:
+                            icon_dir = Path("api") / "assets" / "brawler_icons"
+                            icon_dir.mkdir(parents=True, exist_ok=True)
+                            from utils import get_brawler_list, update_missing_brawlers_info
+
+                            brawlers = get_brawler_list()
+                            if brawlers:
+                                update_missing_brawlers_info(brawlers)
+                            else:
+                                message = "Could not fetch brawler list for icon download."
+                        except Exception as exc:
+                            message = f"Brawler icon download failed: {exc}"
+                        finally:
+                            self._icon_download_started = False
+                            self.iconsUpdated.emit(message)
+
+                    import threading
+
+                    threading.Thread(target=download_icons, daemon=True).start()
+                    return "Downloading brawler icons..."
                 raise ValueError(f"Unknown action: {action}")
 
             @Slot(result=str)
             def startPyla(self):
+                from gui.hub_state import _to_bool
                 from gui.preflight import run_preflight_checks
 
+                if not _to_bool(self._store.general_config.get("license_accepted", "no")):
+                    return json.dumps({
+                        "ok": False,
+                        "message": "Accept the free-use license in the hub wizard or Settings → About before START.",
+                        "state": self._ui_state(),
+                    })
                 self._preflight_cache = run_preflight_checks(correct_zoom=self._correct_zoom)
                 if not self._preflight_cache.get("ready"):
                     return json.dumps({
@@ -335,7 +400,15 @@ class QmlHub:
                     from gui.brawler_queue import persist_queue
                     persist_queue(queue)
                 self.closeRequested.emit()
-                return json.dumps({"ok": True, "message": "Starting PylaAi-XXZ...", "state": self._ui_state()})
+                return json.dumps({"ok": True, "message": "Starting Pyla-RL...", "state": self._ui_state()})
+
+            @Slot()
+            def openOfficialRepo(self):
+                import webbrowser
+
+                from gui.brand import OFFICIAL_GITHUB
+
+                webbrowser.open(OFFICIAL_GITHUB)
 
             @Slot()
             def openDiscord(self):
@@ -362,10 +435,12 @@ class QmlHub:
         if app is None:
             app = QGuiApplication(sys.argv[:1])
 
-        app.setApplicationName("PylaAi-XXZ Hub")
+        app.setApplicationName("Pyla-RL Hub")
         icon_path = Path(__file__).resolve().parent.parent / "images" / "icon.ico"
         if icon_path.exists():
             app.setWindowIcon(QIcon(str(icon_path)))
+
+        from gui import brand
 
         self._store = HubStateStore()
         self._bridge = HubBridge(self._store, correct_zoom=correct_zoom)
@@ -377,6 +452,13 @@ class QmlHub:
         context.setContextProperty("hubVersion", self.version_str)
         context.setContextProperty("latestVersion", self.latest_version_str or "")
         context.setContextProperty("correctZoom", self.correct_zoom)
+        context.setContextProperty("hubBrand", {
+            "productName": brand.PRODUCT_NAME,
+            "freeNotice": brand.FREE_NOTICE,
+            "footerNotice": brand.FOOTER_NOTICE,
+            "officialGithub": brand.OFFICIAL_GITHUB,
+            "licenseName": brand.LICENSE_NAME,
+        })
 
         qml_path = Path(__file__).resolve().parent / "qml" / "PylaHub.qml"
         engine.load(QUrl.fromLocalFile(str(qml_path)))

@@ -117,7 +117,7 @@ def load_webhook_settings() -> dict[str, Any]:
     webhook_config["discord_id"] = str(
         webhook_config.get("discord_id") or general_config.get("discord_id", "")
     ).strip().strip("<@!>")
-    webhook_config.setdefault("username", "PylaAi-XXZ")
+    webhook_config.setdefault("username", "Pyla-RL")
     webhook_config.setdefault("send_match_summary", False)
     webhook_config.setdefault("include_screenshot", True)
     webhook_config.setdefault("ping_when_stuck", False)
@@ -203,7 +203,7 @@ def _title_and_description(event_type: str, details: dict[str, Any]) -> tuple[st
             return "Queue Complete", f"All queued targets completed. Player trophies: **{total}**."
         return "Queue Complete", "All queued targets completed."
     if event_type == "bot_is_stuck":
-        reason = str(details.get("reason") or "PylaAi-XXZ could not recover automatically.")
+        reason = str(details.get("reason") or "Pyla-RL could not recover automatically.")
         return "Attention Required", reason
     if event_type == "test":
         return "Webhook Test", "Connection verified."
@@ -332,7 +332,7 @@ async def async_notify_user(
 
     send_kwargs = {
         "embed": embed,
-        "username": str(settings.get("username") or "PylaAi-XXZ"),
+        "username": str(settings.get("username") or "Pyla-RL"),
         "allowed_mentions": discord.AllowedMentions(users=True, roles=False, everyone=False),
     }
     if ping:
@@ -357,6 +357,6 @@ async def async_send_test_notification() -> bool:
         "test",
         details={
             "state": "connected",
-            "message": "This is a manual test from the PylaAi-XXZ Hub.",
+            "message": "This is a manual test from the Pyla-RL Hub.",
         },
     )

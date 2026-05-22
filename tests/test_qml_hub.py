@@ -138,7 +138,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("component NumericSlider", qml)
         self.assertIn("Slider {", qml)
         self.assertIn('label: "Super Delay"', qml)
-        self.assertIn('onSaved: root.saveValue("timers", "super", value)', qml)
+        self.assertIn('onSaved: function(value) { root.saveValue("timers", "super", value) }', qml)
 
     def test_qml_settings_tab_has_complete_old_settings_blocks(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
@@ -182,7 +182,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("Layout.alignment: Qt.AlignHCenter", qml)
         self.assertIn("width: parent ? parent.width : actionRowInner.implicitWidth", qml)
         self.assertIn("implicitHeight: actionRowInner.implicitHeight + 20", qml)
-        self.assertIn("contentHeight: pageBody.y + pageBody.implicitHeight + 72", qml)
+        self.assertIn("contentHeight: pageBody.implicitHeight + pageBody.y + 32", qml)
 
     def test_qml_switch_rows_align_to_control_column_start(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
@@ -196,13 +196,47 @@ class QmlHubStateTests(unittest.TestCase):
 
         self.assertNotIn('label: "LDPlayer"\n                                    iconKind:', qml)
         self.assertNotIn('label: "MuMu"\n                                    iconKind:', qml)
-        self.assertIn('font.weight: Font.Bold\n                    }\n                    Text {\n                        text: "XXZ Hub', qml)
+        self.assertIn('font.weight: Font.Bold\n                    }\n                    Text {\n                        text: "Pyla-RL Hub', qml)
         self.assertIn("id: startButton", qml)
+        self.assertIn("id: startBar", qml)
         self.assertIn('text: "START"', qml)
         self.assertIn("hubState.preflight", qml)
         self.assertIn("function startBot()", qml)
         self.assertNotIn("gradient: Gradient", qml)
         self.assertNotIn("scale: startMouse.pressed", qml)
+
+    def test_normalize_dialog_path_handles_file_urls(self):
+        from gui.qml_hub import _normalize_dialog_path
+
+        self.assertEqual(
+            _normalize_dialog_path("file:///C:/Users/test/farm_plan.json").replace("\\", "/"),
+            "C:/Users/test/farm_plan.json",
+        )
+        self.assertEqual(_normalize_dialog_path("C:\\Users\\test\\farm_plan.json"), "C:\\Users\\test\\farm_plan.json")
+
+    def test_qml_farm_plan_has_tutorial_and_picker_grid(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+
+        self.assertIn("showFarmPlanTutorial", qml)
+        self.assertIn("Farm Plan Tutorial", qml)
+        self.assertIn("component BrawlerPickTile", qml)
+        self.assertIn("filteredBrawlerOptions", qml)
+        self.assertIn('label: "Tutorial"', qml)
+        self.assertIn("compact: true", qml)
+
+        self.assertIn("import QtQuick.Dialogs", qml)
+        self.assertIn("id: importQueueDialog", qml)
+        self.assertIn("id: exportQueueDialog", qml)
+
+    def test_qml_anti_reseller_ui_contract(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+
+        self.assertIn("UNOFFICIAL COPY", qml)
+        self.assertIn("accept-license", qml)
+        self.assertIn("report-reseller", qml)
+        self.assertIn("check-updates", qml)
+        self.assertIn("licenseTermsAccepted", qml)
+        self.assertIn("title: \"ABOUT\"", qml)
 
     def test_qml_config_controls_use_known_store_keys(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")

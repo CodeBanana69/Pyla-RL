@@ -117,13 +117,9 @@ class Hub:
         self.bot_config.setdefault("map_object_wall_color_detection", "yes")
         self.bot_config.setdefault("map_object_water_detection", "no")
         self.bot_config.setdefault("map_object_min_area", 900)
-        self.bot_config.setdefault("jump_pad_detection_enabled", "yes")
-        self.bot_config.setdefault("jump_pad_escape_distance", 620)
-        self.bot_config.setdefault("jump_pad_escape_min_distance", 55)
-        self.bot_config.setdefault("jump_pad_escape_requires_edge", "yes")
-        self.bot_config.setdefault("jump_pad_escape_edge_margin", 0.22)
-        self.bot_config.setdefault("jump_pad_escape_teammate_safe_distance", 360)
-        self.bot_config.setdefault("jump_pad_smoke_early_distance", 230)
+        self.bot_config.setdefault("fog_check_every_n_frames", 3)
+        self.bot_config.setdefault("teammate_combat_bias", 0.82)
+        self.bot_config.setdefault("teammate_marker_fallback_delay", 0.6)
 
 
         # Time thresholds defaults
