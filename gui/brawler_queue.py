@@ -23,7 +23,7 @@ def normalize_queue_row(row):
     wins = normalized.get("wins", 0)
     normalized["wins"] = int(wins) if wins not in ("", None) else 0
     normalized["type"] = str(normalized.get("type", "trophies") or "trophies")
-    normalized["automatically_pick"] = bool(normalized.get("automatically_pick", False))
+    normalized["automatically_pick"] = True
     normalized["selection_method"] = str(normalized.get("selection_method", "named_brawler") or "named_brawler")
     normalized["win_streak"] = int(normalized.get("win_streak", 0) or 0)
     return normalized
@@ -153,7 +153,7 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
             "trophies": trophies,
             "wins": 0,
             "type": "trophies",
-            "automatically_pick": idx != 0,
+            "automatically_pick": True,
             "selection_method": "lowest_trophies",
             "win_streak": 0,
         })
@@ -181,7 +181,7 @@ def apply_push_all_priority_order(data, priority_order):
     priority_rows.sort(key=lambda row: priority_index[row.get("brawler")])
     ordered = priority_rows + remaining_rows
     for index, row in enumerate(ordered):
-        row["automatically_pick"] = True if priority_rows else index != 0
+        row["automatically_pick"] = True
         if row.get("brawler") in priority_index:
             row["selection_method"] = "named_brawler"
     return ordered

@@ -721,7 +721,7 @@ class SelectBrawler:
         selected_row = reordered.pop(selected_index)
         reordered.insert(0, selected_row)
         for index, row in enumerate(reordered):
-            row["automatically_pick"] = index != 0
+            row["automatically_pick"] = True
         return reordered
 
     def detect_first_sorted_brawler(self, device):

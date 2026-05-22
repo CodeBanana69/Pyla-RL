@@ -143,6 +143,9 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("DragHandler {", qml)
         self.assertIn("DropArea {", qml)
         self.assertIn('"text/plain": String(queueRow.rowIndex)', qml)
+        self.assertIn("filteredPickerOptions", qml)
+        self.assertIn('runActionWithPayload("update-queue-item"', qml)
+        self.assertIn('action == "update-queue-item"', bridge)
 
     def test_farm_plan_page_uses_fill_height_queue(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
@@ -255,7 +258,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("showFarmPlanTutorial", qml)
         self.assertIn("Farm Plan Tutorial", qml)
         self.assertIn("component BrawlerPickTile", qml)
-        self.assertIn("filteredBrawlerOptions", qml)
+        self.assertIn("filteredPickerOptions", qml)
         self.assertIn("label: \"Refresh\"", qml)
         self.assertIn("compact: true", qml)
 

@@ -36,8 +36,18 @@ ApplicationWindow {
     property string pickerBrawler: ""
     property string pickerTarget: "1000"
     property string pickerType: "trophies"
-    property bool pickerAutoPick: true
     property string historySort: "games"
+    readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
+    readonly property var filteredPickerOptions: {
+        const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
+        const needle = pickerFilter.trim().toLowerCase()
+        if (!needle) {
+            return options
+        }
+        return options.filter(function(item) {
+            return String(item.name || "").toLowerCase().indexOf(needle) >= 0
+        })
+    }
     property int queueDragSource: -1
     property int queueDropTarget: -1
 
@@ -139,17 +149,6 @@ ApplicationWindow {
         statusText = "Checking pre-flight..."
         statusOk = true
         applyBridgeResult(hubBridge.startPyla())
-    }
-
-    function filteredBrawlerOptions() {
-        const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
-        const needle = pickerFilter.trim().toLowerCase()
-        if (!needle) {
-            return options
-        }
-        return options.filter(function(item) {
-            return String(item.name || "").toLowerCase().indexOf(needle) >= 0
-        })
     }
 
     function sortedHistoryItems() {
@@ -515,16 +514,18 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.rightMargin: inputBox.secret ? 54 : 12
             verticalAlignment: TextInput.AlignVCenter
-            text: inputBox.value
             color: theme.text
             selectionColor: theme.accent
             selectedTextColor: "#ffffff"
             font.pixelSize: 12
             echoMode: inputBox.secret && !inputBox.revealed ? TextInput.Password : TextInput.Normal
+            selectByMouse: true
             clip: true
             onTextChanged: if (inputBox.live) inputBox.saved(text)
             onEditingFinished: if (!inputBox.live) inputBox.saved(text)
         }
+
+        Component.onCompleted: field.text = inputBox.value
 
         onValueChanged: {
             if (field.text !== inputBox.value) {
@@ -771,14 +772,29 @@ ApplicationWindow {
         id: row
         property string label: ""
         property string hint: ""
+        property bool pinnedInSettingsSearch: false
         default property alias content: slot.data
 
+        readonly property string panelTitle: {
+            var item = row.parent
+            if (item && item.parent && item.parent.title !== undefined) {
+                return String(item.parent.title)
+            }
+            return ""
+        }
+
         readonly property bool filterMatch: {
-            var query = root.settingsFilter.trim().toLowerCase()
-            if (query === "")
+            if (root.activeTab !== "Settings" || row.pinnedInSettingsSearch) {
                 return true
+            }
+            var query = root.settingsFilter.trim().toLowerCase()
+            if (query === "") {
+                return true
+            }
+            var panel = row.panelTitle.toLowerCase()
             return row.label.toLowerCase().indexOf(query) >= 0
                     || row.hint.toLowerCase().indexOf(query) >= 0
+                    || (panel !== "" && panel.indexOf(query) >= 0)
         }
         visible: filterMatch
 
@@ -880,10 +896,17 @@ ApplicationWindow {
         color: theme.panel
         border.width: 1
         border.color: theme.borderSoft
-        visible: root.activeTab !== "Settings"
-            || !root.settingsFilter.trim()
-            || panel.title.toLowerCase().indexOf(root.settingsFilter.trim().toLowerCase()) >= 0
-            || body.implicitHeight > 38
+        readonly property bool settingsPanelVisible: {
+            if (root.activeTab !== "Settings" || !root.settingsFilter.trim()) {
+                return true
+            }
+            var query = root.settingsFilter.trim().toLowerCase()
+            if (panel.title.toLowerCase().indexOf(query) >= 0) {
+                return true
+            }
+            return body.implicitHeight > 52
+        }
+        visible: settingsPanelVisible
 
         ColumnLayout {
             id: body
@@ -1181,23 +1204,74 @@ ApplicationWindow {
             }
 
             Text {
-                text: String(queueRow.rowData.trophies || 0) + " \u2192 " + String(queueRow.rowData.target || "")
+                text: String(queueRow.rowData.trophies || 0) + " \u2192"
                 color: theme.muted
                 font.pixelSize: 11
             }
 
             Rectangle {
-                Layout.preferredHeight: 20
-                Layout.preferredWidth: pickChip.implicitWidth + 10
-                radius: 10
-                color: theme.panel3
+                id: targetButton
+                Layout.preferredHeight: 22
+                Layout.preferredWidth: targetLabel.implicitWidth + 12
+                radius: 6
+                color: targetMouse.containsMouse ? theme.panel3 : theme.panel2
+                border.width: 1
+                border.color: targetMouse.containsMouse ? theme.accentBorder : theme.borderSoft
+
                 Text {
-                    id: pickChip
+                    id: targetLabel
                     anchors.centerIn: parent
-                    text: queueRow.rowData.autoPick ? "Auto" : "Manual"
-                    color: theme.faint
-                    font.pixelSize: 9
+                    text: String(queueRow.rowData.target || "")
+                    color: theme.accent
+                    font.pixelSize: 11
                     font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    id: targetMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: queueTargetPopup.open()
+                }
+
+                Popup {
+                    id: queueTargetPopup
+                    parent: Overlay.overlay
+                    x: targetButton.mapToItem(null, 0, targetButton.height).x
+                    y: targetButton.mapToItem(null, 0, targetButton.height).y + 4
+                    width: targetPopupRow.implicitWidth + 16
+                    height: targetPopupRow.implicitHeight + 16
+                    padding: 8
+                    modal: true
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                    background: Rectangle {
+                        radius: 8
+                        color: theme.panel2
+                        border.width: 1
+                        border.color: theme.borderSoft
+                    }
+
+                    Row {
+                        id: targetPopupRow
+                        spacing: 6
+                        Repeater {
+                            model: root.queueTargetOptions
+                            delegate: ChoicePill {
+                                label: modelData
+                                selected: String(queueRow.rowData.target || "") === modelData
+                                onClicked: {
+                                    root.runActionWithPayload("update-queue-item", {
+                                        index: queueRow.rowIndex,
+                                        push_until: parseInt(modelData)
+                                    })
+                                    queueTargetPopup.close()
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1675,6 +1749,7 @@ ApplicationWindow {
                         title: "HUB"
                         FieldRow {
                             label: "Search Settings"
+                            pinnedInSettingsSearch: true
                             ConfigInput {
                                 anchors.fill: parent
                                 live: true
@@ -2480,10 +2555,11 @@ ApplicationWindow {
                     text: "Quick start:\n"
                         + "1. Fill the API tab (player tag + token) for Push All.\n"
                         + "2. Pick a trophy target and click Build Queue.\n"
-                        + "3. Reorder brawlers with Up/Down. The first brawler is picked manually unless Auto Pick is on.\n"
+                        + "3. Drag the grip to reorder brawlers. The first brawler is active.\n"
                         + "4. Press START on Overview. Restart the bot after changing the plan.\n\n"
                         + "Manual add:\n"
-                        + "• Click Add Brawler, search the grid, set target trophies, and toggle Auto Pick.\n\n"
+                        + "• Click Add Brawler, search the grid, set target trophies, then add.\n"
+                        + "• Click a queue row target to change push-until after adding.\n\n"
                         + "Tips:\n"
                         + "• Push All only includes brawlers below your target from the API.\n"
                         + "• Export/Import saves farm_plan.json for backup.\n"
@@ -2544,7 +2620,7 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Search and click a brawler. Set the trophy target and whether the bot should auto-pick them in-game."
+                    text: "Search and click a brawler, then set the trophy target before adding."
                     color: theme.faint
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
@@ -2572,7 +2648,7 @@ ApplicationWindow {
                         width: parent.width
                         spacing: 8
                         Repeater {
-                            model: root.filteredBrawlerOptions()
+                            model: root.filteredPickerOptions
                             delegate: BrawlerPickTile {
                                 name: modelData.name
                                 iconSource: modelData.icon
@@ -2583,7 +2659,7 @@ ApplicationWindow {
                     }
                 }
                 Text {
-                    visible: root.filteredBrawlerOptions().length === 0
+                    visible: root.filteredPickerOptions.length === 0
                     Layout.fillWidth: true
                     text: "No brawlers match your search."
                     color: theme.faint
@@ -2605,10 +2681,6 @@ ApplicationWindow {
                         }
                     }
                 }
-                FieldRow {
-                    label: "Auto Pick"
-                    CenterRow { ToggleSwitch { checked: root.pickerAutoPick; onToggled: function(checked) { root.pickerAutoPick = checked } } }
-                }
                 RowLayout {
                     spacing: 8
                     HubButton {
@@ -2627,7 +2699,7 @@ ApplicationWindow {
                                 trophies: 0,
                                 wins: 0,
                                 type: root.pickerType,
-                                automatically_pick: root.pickerAutoPick,
+                                automatically_pick: true,
                                 selection_method: "named_brawler",
                                 win_streak: 0
                             })

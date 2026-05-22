@@ -624,9 +624,7 @@ class StageManager:
             self.push_all_needs_selection = bool(refreshed_rows)
 
         if refreshed_rows:
-            refreshed_rows[0]["automatically_pick"] = bool(self.push_all_needs_selection)
-            refreshed_rows[0]["selection_method"] = "lowest_trophies"
-            for row in refreshed_rows[1:]:
+            for row in refreshed_rows:
                 if row.get("automatically_pick") is not True:
                     changed = True
                 row["automatically_pick"] = True
@@ -698,7 +696,8 @@ class StageManager:
         if not os.path.exists(QUEUE_PATH):
             return False
         mtime = os.path.getmtime(QUEUE_PATH)
-        if self._queue_file_mtime is not None and mtime == self._queue_file_mtime:
+        last_mtime = getattr(self, "_queue_file_mtime", None)
+        if last_mtime is not None and mtime == last_mtime:
             return False
         self._queue_file_mtime = mtime
         queue = load_queue()

@@ -361,6 +361,22 @@ class QmlHub:
                     queue.insert(to_index, item)
                     persist_queue(queue)
                     return "Queue order updated."
+                if action == "update-queue-item":
+                    from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
+
+                    index = int(payload.get("index", -1))
+                    queue = load_queue()
+                    if index < 0 or index >= len(queue):
+                        raise ValueError("Invalid queue index.")
+                    row = dict(queue[index])
+                    if "push_until" in payload:
+                        row["push_until"] = int(payload.get("push_until", row.get("push_until", 1000)) or 1000)
+                    if "automatically_pick" in payload:
+                        row["automatically_pick"] = bool(payload.get("automatically_pick"))
+                    queue[index] = normalize_queue_row(row)
+                    persist_queue(queue)
+                    brawler = queue[index].get("brawler", "brawler")
+                    return f"Updated {brawler} target to {queue[index]['push_until']} trophies."
                 if action == "open-brawler-picker":
                     return "Use Add Brawler in the farm plan tab."
                 if action == "open-config-folder":
