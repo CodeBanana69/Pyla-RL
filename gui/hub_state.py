@@ -135,6 +135,7 @@ class HubStateStore:
         "public_ip_service": "str",
         "key_name_prefix": "str",
         "delete_old_auto_tokens": "bool",
+        "sync_trophies_after_match": "bool",
     }
     TIMER_FIELDS = {
         "super": "float",
@@ -280,6 +281,7 @@ class HubStateStore:
         self.brawl_stars_api_config.setdefault("public_ip_service", "https://api.ipify.org")
         self.brawl_stars_api_config.setdefault("key_name_prefix", "Pyla-RL Auto")
         self.brawl_stars_api_config.setdefault("delete_old_auto_tokens", True)
+        self.brawl_stars_api_config.setdefault("sync_trophies_after_match", True)
         self.brawl_stars_api_config.setdefault("api_token", "")
 
         self.time_tresholds.setdefault("super", 0.1)
