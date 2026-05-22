@@ -19,3 +19,6 @@ delete_old_auto_tokens = true
 delete_all_tokens = false
 last_public_ip = ""
 api_token = ""
+
+# Sync brawler trophies from the official API after every match to prevent local estimate drift.
+sync_trophies_after_match = true

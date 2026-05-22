@@ -123,6 +123,7 @@ class QmlHubStateTests(unittest.TestCase):
         store.update_config("discord", "ping_every_x_match", "5")
         store.update_config("telegram", "notification_chat_ids", "123; 456")
         store.update_config("api", "auto_refresh_token", "false")
+        store.update_config("api", "sync_trophies_after_match", "false")
         store.update_config("timers", "low_ips_app_restart_after", "3")
 
         self.assertEqual(toml.load(paths["bot"])["wall_detection_confidence"], 0.55)
@@ -130,6 +131,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertEqual(toml.load(paths["discord"])["ping_every_x_match"], 5)
         self.assertEqual(toml.load(paths["telegram"])["notification_chat_ids"], ["123", "456"])
         self.assertFalse(toml.load(paths["api"])["auto_refresh_token"])
+        self.assertFalse(toml.load(paths["api"])["sync_trophies_after_match"])
         self.assertEqual(toml.load(paths["timers"])["low_ips_app_restart_after"], 3)
 
     def test_qml_uses_styled_sliders_for_timer_values(self):

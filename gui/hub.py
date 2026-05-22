@@ -187,6 +187,7 @@ class Hub:
         )
         self.brawl_stars_api_config.setdefault("delete_old_auto_tokens", True)
         self.brawl_stars_api_config.setdefault("delete_all_tokens", False)
+        self.brawl_stars_api_config.setdefault("sync_trophies_after_match", True)
         self.brawl_stars_api_config.setdefault("last_public_ip", "")
         self.brawl_stars_api_config.setdefault("api_token", "")
 
@@ -1736,6 +1737,7 @@ class Hub:
         create_api_entry("Public IP Service:", "public_ip_service", str, width=360)
         create_api_entry("Key Name Prefix:", "key_name_prefix", str, width=260)
         create_api_toggle("Delete Old Auto Tokens:", "delete_old_auto_tokens")
+        create_api_toggle("Sync Trophies After Match:", "sync_trophies_after_match")
 
         status = ctk.CTkLabel(container, text="", font=("Arial", S(14)), text_color=THEME["muted"])
         status.grid(row=row_idx, column=0, columnspan=2, sticky="n", padx=S(20), pady=(S(6), 0))

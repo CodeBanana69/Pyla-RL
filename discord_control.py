@@ -84,6 +84,43 @@ def status_text(state_path: str | Path, status_provider: Callable[[], dict[str, 
     return "\n".join(lines)
 
 
+DISCORD_COMMAND_HELP = (
+    "/help - list remote commands\n"
+    "/start - resume Pyla-RL\n"
+    "/pause - pause Pyla-RL\n"
+    "/stop - pause Pyla-RL (deprecated alias of /pause)\n"
+    "/stop_all - stop the bot process\n"
+    "/status - show runtime status\n"
+    "/queue - show the farm plan\n"
+    "/screenshot - send the current emulator screenshot\n"
+    "/push <brawler> [target] - start pushing a brawler\n"
+    "/pause_menu - reopen the local pause window\n"
+    "/restart_game - restart Brawl Stars and scrcpy\n"
+    "/restart_scrcpy - restart only the scrcpy feed\n"
+    "/restart_emulator - restart the saved emulator profile\n"
+    "/back - press Android Back\n"
+    "/press <key> - press q/e/f/g/h/m/back"
+)
+
+
+async def sync_discord_command_tree(tree: app_commands.CommandTree, guild_id: str | None) -> str:
+    """Sync slash commands without leaving duplicate global + guild entries.
+
+    When a guild ID is configured we publish commands to that guild only and
+    clear stale global commands (old typo variants like /screeshot, etc.).
+    """
+    cleaned_guild = _clean_id(guild_id)
+    if cleaned_guild:
+        guild = discord.Object(id=int(cleaned_guild))
+        tree.copy_global_to(guild=guild)
+        await tree.sync(guild=guild)
+        tree.clear_commands(guild=None)
+        await tree.sync()
+        return f"guild {cleaned_guild} (cleared stale global commands)"
+    await tree.sync()
+    return "global"
+
+
 async def run_callback(callback: Callable[..., Any] | None, *args: Any) -> tuple[bool, str]:
     if callback is None:
         return False, "This command is not available in this process."
@@ -397,6 +434,13 @@ class DiscordControlServer:
                 "Pause menu reopened." if ok else f"Could not reopen pause menu: {message}",
             )
 
+        @tree.command(name="help", description="List available Pyla-RL remote commands.")
+        async def help_command(interaction: discord.Interaction) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            await _followup(interaction, DISCORD_COMMAND_HELP)
+
         @tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: Exception) -> None:
             message = f"Discord command failed: {error}"
@@ -415,19 +459,9 @@ class DiscordControlServer:
                 return
             settings = self.settings_loader()
             guild_id = _clean_id(settings.get("discord_control_guild_id"))
-            command_list = (
-                "/start /stop /pause /stop_all /push /pause_menu /status /screenshot "
-                "/restart_game /restart_scrcpy /restart_emulator /back /press"
-            )
             try:
-                if guild_id:
-                    guild = discord.Object(id=int(guild_id))
-                    tree.copy_global_to(guild=guild)
-                    await tree.sync(guild=guild)
-                    print(f"Discord control commands synced for guild {guild_id}: {command_list}")
-                else:
-                    await tree.sync()
-                    print(f"Discord control commands synced globally: {command_list}")
+                scope = await sync_discord_command_tree(tree, guild_id)
+                print(f"Discord control commands synced for {scope}.")
                 synced = True
             except Exception as exc:
                 print(f"Discord control command sync failed: {exc}")

@@ -520,10 +520,13 @@ def load_brawl_stars_api_config(file_path="cfg/brawl_stars_api.toml", force_refr
         if value is not None:
             config[key] = value
 
-    for key in ("delete_old_auto_tokens", "delete_all_tokens"):
+    for key in ("delete_old_auto_tokens", "delete_all_tokens", "sync_trophies_after_match"):
         match = re.search(rf"{key}\s*=\s*(true|false)", text, re.IGNORECASE)
         if match:
             config[key] = match.group(1).lower() == "true"
+
+    if "sync_trophies_after_match" not in config:
+        config["sync_trophies_after_match"] = True
 
     try:
         if force_refresh:
