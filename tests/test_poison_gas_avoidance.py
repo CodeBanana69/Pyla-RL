@@ -21,7 +21,8 @@ class PoisonGasAvoidanceTests(unittest.TestCase):
         play.wall_box_merge_center_distance = 35
         play._fog_mask_cache_frame_id = None
         play._fog_mask_cache_value = None
-        play.get_player_pos = lambda player: ((player[0] + player[2]) / 2, (player[1] + player[3]) / 2)
+        play.get_player_pos = Play.get_player_pos
+        play.get_player_foot_circle = Play.get_player_foot_circle
         play.get_distance = Play.get_distance
         play.angle_from_direction = Play.angle_from_direction
         play.is_path_blocked_angle = lambda *_args, **_kwargs: False

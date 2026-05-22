@@ -21,6 +21,18 @@ STOP_REQUESTED = "stop_requested"
 
 SPARKLINE_WIDTH = 200
 SPARKLINE_HEIGHT = 32
+_settings_hub_process = None
+
+
+def open_settings_hub():
+    global _settings_hub_process
+    if _settings_hub_process is not None and _settings_hub_process.poll() is None:
+        return
+    project_root = Path(__file__).resolve().parent
+    _settings_hub_process = subprocess.Popen(
+        [sys.executable, "-m", "gui.qml_hub", "--settings-only"],
+        cwd=str(project_root),
+    )
 
 
 def write_state(path, state):
@@ -561,7 +573,23 @@ def run_window(state_path, metrics_path=None):
         text_color="#ffb4b4",
         font=("Segoe UI", 13, "bold"),
     )
-    stop_button.pack()
+    stop_button.pack(side="left", padx=(0, 8))
+
+    hub_button = ctk.CTkButton(
+        button_row,
+        text="Open Hub",
+        command=open_settings_hub,
+        width=170,
+        height=34,
+        corner_radius=8,
+        fg_color="#1f1f1f",
+        hover_color="#2a2a2a",
+        border_color="#333333",
+        border_width=1,
+        text_color="#FFFFFF",
+        font=("Segoe UI", 13, "bold"),
+    )
+    hub_button.pack(side="left")
 
     def refresh():
         if owner_pid and not process_is_alive(owner_pid):
@@ -637,6 +665,21 @@ def run_window(state_path, metrics_path=None):
         font=("Segoe UI", 12, "bold"),
     )
     compact_pause_button.place(x=96, rely=0.5, anchor="w")
+
+    ctk.CTkButton(
+        compact_chrome,
+        text="Hub",
+        command=open_settings_hub,
+        width=44,
+        height=30,
+        corner_radius=8,
+        fg_color="#1f1f1f",
+        hover_color="#2a2a2a",
+        border_color="#333333",
+        border_width=1,
+        text_color="#FFFFFF",
+        font=("Segoe UI", 11, "bold"),
+    ).place(x=194, rely=0.5, anchor="w")
 
     ctk.CTkButton(
         compact_chrome,
