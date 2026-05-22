@@ -1,4 +1,22 @@
-﻿# Pyla-RL
+<p align="center">
+  <!-- Основной стек -->
+  <img src="https://shields.io" alt="Python Version">
+  <img src="https://shields.io" alt="RL">
+  <img src="https://shields.io" alt="License">
+  
+  <!-- Если используете PyTorch или TensorFlow (раскомментируйте нужный) -->
+  <!-- <img src="https://shields.io" alt="PyTorch"> -->
+  <!-- <img src="https://shields.io" alt="TensorFlow"> -->
+</p>
+
+<p align="center">
+  <!-- Статус репозитория -->
+  <img src="https://shields.io" alt="GitHub stars">
+  <img src="https://shields.io" alt="GitHub forks">
+  <img src="https://shields.io" alt="GitHub issues">
+</p>
+ 
+ # Pyla-RL
 
 This fork focuses on **Showdown** (trio). Other game modes still run off the upstream logic, but development effort and tuning here go into making Showdown play well end-to-end.
 
