@@ -70,6 +70,7 @@ class StageManager:
         self.last_player_total_trophies = None
         self.stop_after_post_match_rewards = False
         self.completion_notification_sent = False
+        self._notified_brawler_completions = set()
         self._queue_file_mtime = None
         from gui.brawler_queue import QUEUE_PATH
         if os.path.exists(QUEUE_PATH):
@@ -439,6 +440,113 @@ class StageManager:
         save_brawler_data(self.brawlers_pick_data)
         return True
 
+    def _front_push_progress(self):
+        if not self.brawlers_pick_data:
+            return 0, 1000, "trophies"
+        row = self.brawlers_pick_data[0]
+        type_of_push = row.get("type", "trophies")
+        if type_of_push not in ("trophies", "wins"):
+            type_of_push = "trophies"
+        if type_of_push == "trophies":
+            value = self._number_or_default(
+                getattr(self.Trophy_observer, "current_trophies", row.get("trophies", 0)),
+                row.get("trophies", 0),
+            )
+            default_target = 1000
+        else:
+            value = self._number_or_default(
+                getattr(self.Trophy_observer, "current_wins", row.get("wins", 0)),
+                row.get("wins", 0),
+            )
+            default_target = 300
+        target = self._number_or_default(row.get("push_until", default_target), default_target)
+        return value, target, type_of_push
+
+    def _front_target_reached(self):
+        value, target, _ = self._front_push_progress()
+        return value >= target
+
+    def _persist_front_push_progress(self):
+        if not self.brawlers_pick_data:
+            return
+        value, _, type_of_push = self._front_push_progress()
+        self.brawlers_pick_data[0][type_of_push] = value
+        self.brawlers_pick_data[0]["win_streak"] = self.Trophy_observer.win_streak
+
+    def _notify_brawler_target_complete(self, completed_brawler, target, screenshot=None, extra=None):
+        key = (
+            str(completed_brawler or "").lower(),
+            self._number_or_default(target, 0),
+        )
+        if key in self._notified_brawler_completions:
+            return False
+        self._notified_brawler_completions.add(key)
+        details = {
+            "brawler": completed_brawler,
+            "target": target,
+            "trophies": self._number_or_default(
+                getattr(self.Trophy_observer, "current_trophies", 0),
+                0,
+            ),
+            "wins": self.Trophy_observer.current_wins,
+            "win_streak": self.Trophy_observer.win_streak,
+            "brawlers_left": max(0, len(self.brawlers_pick_data) - 1),
+        }
+        if extra:
+            details.update(extra)
+        self.send_webhook_notification("brawler_complete", screenshot, details)
+        return True
+
+    def _handle_front_target_completion(self, screenshot=None):
+        if not self._front_target_reached():
+            return False
+
+        value, push_current_brawler_till, type_of_push = self._front_push_progress()
+        self._persist_front_push_progress()
+
+        if len(self.brawlers_pick_data) <= 1:
+            print(
+                "Brawler reached required trophies/wins. No more brawlers selected for pushing in the menu. "
+                "Bot will now pause itself until closed.",
+                value,
+                push_current_brawler_till,
+            )
+            if screenshot is None:
+                screenshot = self.window_controller.screenshot()
+            self.send_webhook_notification(
+                "completed",
+                screenshot,
+                self.current_target_details({"target": push_current_brawler_till}),
+            )
+            print("Bot stopping: all targets completed with no more brawlers.")
+            self.window_controller.keys_up(list("wasd"))
+            self.window_controller.close()
+            sys.exit(0)
+
+        completed_brawler = self.brawlers_pick_data[0]["brawler"]
+        if screenshot is None:
+            screenshot = self.window_controller.screenshot()
+        self._notify_brawler_target_complete(
+            completed_brawler,
+            push_current_brawler_till,
+            screenshot,
+        )
+        if not self._prepare_next_push_all_brawler(push_current_brawler_till, type_of_push):
+            print(
+                "Brawler reached required trophies/wins. "
+                "No remaining brawlers are below the Push All target."
+            )
+            self.send_webhook_notification(
+                "completed",
+                screenshot,
+                self.current_target_details({"target": push_current_brawler_till}),
+            )
+            print("Bot stopping: all Push All targets completed.")
+            self.window_controller.keys_up(list("wasd"))
+            self.window_controller.close()
+            sys.exit(0)
+        return True
+
     @staticmethod
     def _log_trophy_sync(message):
         print(f"[TrophySync] {message}")
@@ -598,7 +706,16 @@ class StageManager:
                     refreshed_row["trophies"] = api_trophies
                     changed = True
             row_target = self._number_or_default(refreshed_row.get("push_until", default_target), default_target)
-            if self._number_or_default(refreshed_row.get("trophies", 0), 0) < row_target:
+            row_trophies = self._number_or_default(refreshed_row.get("trophies", 0), 0)
+            is_front = refreshed_row.get("brawler") == old_front_brawler
+            if is_front:
+                local_trophies = self._number_or_default(
+                    getattr(self.Trophy_observer, "current_trophies", row_trophies),
+                    row_trophies,
+                )
+                if local_trophies < row_target:
+                    refreshed_rows.append(refreshed_row)
+            elif row_trophies < row_target:
                 refreshed_rows.append(refreshed_row)
 
         current_row = next(
@@ -651,9 +768,13 @@ class StageManager:
             self._sync_observer_to_current_row()
             changed = True
         else:
-            current_trophies = self._number_or_default(self.brawlers_pick_data[0].get("trophies", 0), 0)
-            if getattr(self.Trophy_observer, "current_trophies", None) != current_trophies:
-                self.Trophy_observer.change_trophies(current_trophies)
+            local_trophies = self._number_or_default(
+                getattr(self.Trophy_observer, "current_trophies", 0),
+                0,
+            )
+            row_trophies = self._number_or_default(self.brawlers_pick_data[0].get("trophies", 0), 0)
+            if local_trophies > row_trophies:
+                self.brawlers_pick_data[0]["trophies"] = local_trophies
                 changed = True
             current_wins = self._number_or_default(
                 getattr(self.Trophy_observer, "current_wins", self.brawlers_pick_data[0].get("wins", 0)),
@@ -720,72 +841,18 @@ class StageManager:
             self.window_controller.close()
             sys.exit(0)
         self.push_all_needs_selection = False
+        completion = self._handle_front_target_completion()
         self.refresh_push_all_trophies_from_api()
         if not self.brawlers_pick_data:
             print("Bot stopping: all Push All targets completed.")
             self.window_controller.keys_up(list("wasd"))
             self.window_controller.close()
             sys.exit(0)
-        values = {
-            "trophies": self.Trophy_observer.current_trophies,
-            "wins": self.Trophy_observer.current_wins
-        }
 
-        type_of_push = self.brawlers_pick_data[0]['type']
-        if type_of_push not in values:
-            type_of_push = "trophies"
-        value = values[type_of_push]
-        saved_value = self._number_or_default(self.brawlers_pick_data[0].get(type_of_push, 0), 0)
-        if value == "" and type_of_push == "wins":
-            value = 0
-        push_current_brawler_till = self.brawlers_pick_data[0]['push_until']
-        if push_current_brawler_till == "" and type_of_push == "wins":
-            push_current_brawler_till = 300
-        if push_current_brawler_till == "" and type_of_push == "trophies":
-            push_current_brawler_till = 1000
-        push_current_brawler_till = self._number_or_default(
-            push_current_brawler_till,
-            1000 if type_of_push == "trophies" else 300,
-        )
-        value = self._number_or_default(value, 0)
-        value = max(value, saved_value)
-
-        if value >= push_current_brawler_till:
-            if len(self.brawlers_pick_data) <= 1:
-                print("Brawler reached required trophies/wins. No more brawlers selected for pushing in the menu. "
-                      "Bot will now pause itself until closed.", value, push_current_brawler_till)
-                screenshot = self.window_controller.screenshot()
-                self.send_webhook_notification(
-                    "completed",
-                    screenshot,
-                    self.current_target_details({"target": push_current_brawler_till}),
-                )
-                print("Bot stopping: all targets completed with no more brawlers.")
-                self.window_controller.keys_up(list("wasd"))
-                self.window_controller.close()
-                sys.exit(0)
-            completed_brawler = self.brawlers_pick_data[0]["brawler"]
-            screenshot = self.window_controller.screenshot()
-            self.send_webhook_notification(
-                "brawler_complete",
-                screenshot,
-                self.current_target_details({
-                    "brawler": completed_brawler,
-                    "target": push_current_brawler_till,
-                    "brawlers_left": max(0, len(self.brawlers_pick_data) - 1),
-                }),
-            )
-            if not self._prepare_next_push_all_brawler(push_current_brawler_till, type_of_push):
-                print("Brawler reached required trophies/wins. No remaining brawlers are below the Push All target.")
-                self.send_webhook_notification(
-                    "completed",
-                    screenshot,
-                    self.current_target_details({"target": push_current_brawler_till}),
-                )
-                print("Bot stopping: all Push All targets completed.")
-                self.window_controller.keys_up(list("wasd"))
-                self.window_controller.close()
-                sys.exit(0)
+        should_select_next = completion or self.push_all_needs_selection
+        if should_select_next:
+            if self.push_all_needs_selection and not completion:
+                print("Push All queue changed from API; selecting the new lowest trophy brawler.")
             if self.brawlers_pick_data[0]["automatically_pick"]:
                 print("Picking next automatically picked brawler")
                 screenshot = self.window_controller.screenshot()
@@ -817,14 +884,7 @@ class StageManager:
                         return
             else:
                 print("Next brawler is in manual mode, waiting 10 seconds to let user switch.")
-
-        elif self.push_all_needs_selection:
-            print("Push All queue changed from API; selecting the new lowest trophy brawler.")
-            selected = self.Lobby_automation.select_lowest_trophy_brawler()
-            if not selected:
-                print("Could not confirm the API-refreshed brawler selection reached lobby; delaying match start.")
-                self.window_controller.keys_up(list("wasd"))
-                return
+                time.sleep(10)
 
         # q btn is over the start btn
         self.window_controller.keys_up(list("wasd"))
@@ -1128,6 +1188,12 @@ class StageManager:
                             "Will switch brawler as soon as lobby is reached.",
                             value,
                             push_current_brawler_till,
+                        )
+                        self._notify_brawler_target_complete(
+                            current_brawler,
+                            push_current_brawler_till,
+                            screenshot,
+                            {"result": found_game_result},
                         )
                         if self.post_match_action == "play_again":
                             if self.restart_and_select_next_after_target(push_current_brawler_till, type_to_push):
