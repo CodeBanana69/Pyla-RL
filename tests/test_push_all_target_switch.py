@@ -49,6 +49,17 @@ class DummyLobbyAutomation:
 
 
 class PushAllTargetSwitchTest(unittest.TestCase):
+    def setUp(self):
+        self.reload_patch = patch.object(
+            StageManager,
+            "reload_queue_from_disk_if_changed",
+            return_value=False,
+        )
+        self.reload_patch.start()
+
+    def tearDown(self):
+        self.reload_patch.stop()
+
     def make_manager(self, target):
         manager = object.__new__(StageManager)
         manager.brawlers_pick_data = [
@@ -80,6 +91,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
         manager.send_webhook_notification = lambda *args, **kwargs: None
         manager.push_all_needs_selection = False
         manager.stop_after_post_match_rewards = False
+        manager._notified_brawler_completions = set()
         return manager
 
     @patch.object(StageManager, "refresh_push_all_trophies_from_api", return_value=False)
@@ -159,25 +171,26 @@ class PushAllTargetSwitchTest(unittest.TestCase):
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.time.sleep", return_value=None)
     @patch("stage_manager.get_state", return_value="lobby")
-    def test_push_all_switches_when_saved_row_reached_target_even_if_observer_is_stale(self, *_):
+    def test_push_all_does_not_switch_when_saved_row_is_stale_but_observer_below_target(self, *_):
         for target in (250, 500, 750, 1000, 1250, 1500):
             with self.subTest(target=target):
                 manager = self.make_manager(target)
                 manager.brawlers_pick_data[0]["trophies"] = target
                 manager.Trophy_observer = DummyTrophyObserver(target - 1)
+                manager.Lobby_automation = DummyLobbyAutomation()
 
                 manager.start_game()
 
-                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
-                self.assertEqual(manager.Trophy_observer.current_trophies, 0)
-                self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
+                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "first")
+                self.assertEqual(manager.Trophy_observer.current_trophies, target - 1)
+                self.assertEqual(manager.Lobby_automation.lowest_calls, 0)
 
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.fetch_brawl_stars_player")
     @patch("stage_manager.load_brawl_stars_api_config")
     @patch("stage_manager.time.sleep", return_value=None)
     @patch("stage_manager.get_state", return_value="lobby")
-    def test_push_all_switches_when_api_says_current_reached_target(
+    def test_push_all_keeps_current_brawler_when_api_is_ahead_of_local_progress(
             self,
             _mock_get_state,
             _mock_sleep,
@@ -204,13 +217,27 @@ class PushAllTargetSwitchTest(unittest.TestCase):
 
                 manager.start_game()
 
-                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
-                self.assertTrue(manager.brawlers_pick_data[0]["automatically_pick"])
-                self.assertEqual(manager.Trophy_observer.current_trophies, 25)
-                self.assertEqual(manager.Trophy_observer.current_wins, 0)
-                self.assertEqual(manager.Trophy_observer.win_streak, 0)
-                self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
+                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "first")
+                self.assertEqual(manager.Trophy_observer.current_trophies, target - 5)
+                self.assertEqual(manager.Lobby_automation.lowest_calls, 0)
                 mock_fetch_player.reset_mock()
+
+    @patch.object(StageManager, "refresh_push_all_trophies_from_api", return_value=False)
+    @patch("stage_manager.save_brawler_data")
+    @patch("stage_manager.time.sleep", return_value=None)
+    @patch("stage_manager.get_state", return_value="lobby")
+    def test_start_game_notifies_brawler_complete_when_observer_reaches_target(self, *_):
+        manager = self.make_manager(1000)
+        notifications = []
+        manager.send_webhook_notification = lambda event, screenshot, details: notifications.append(
+            (event, details.get("brawler"), details.get("target"))
+        )
+
+        manager.start_game()
+
+        self.assertEqual(notifications[0], ("brawler_complete", "first", 1000))
+        self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
+        self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
 
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.fetch_brawl_stars_player")
