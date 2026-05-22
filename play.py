@@ -229,8 +229,17 @@ class Movement:
         return (enemy[0] + enemy[2]) / 2, (enemy[1] + enemy[3]) / 2
 
     @staticmethod
+    def get_player_foot_circle(player_data):
+        x1, y1, x2, y2 = map(float, player_data[:4])
+        radius = max(4.0, (x2 - x1) / 2.0)
+        foot_x = (x1 + x2) / 2.0
+        foot_y = y2 - radius
+        return foot_x, foot_y, radius
+
+    @staticmethod
     def get_player_pos(player_data):
-        return (player_data[0] + player_data[2]) / 2, (player_data[1] + player_data[3]) / 2
+        foot_x, foot_y, _ = Play.get_player_foot_circle(player_data)
+        return foot_x, foot_y
 
     @staticmethod
     def get_distance(enemy_coords, player_coords):
@@ -767,6 +776,7 @@ class Play(Movement):
             "must_brawler_hold_attack": self.must_brawler_hold_attack,
             "get_brawler_range": self.get_brawler_range,
             "get_player_pos": self.get_player_pos,
+            "get_player_foot_circle": self.get_player_foot_circle,
             "get_entity_pos": self.get_entity_pos,
             "is_there_enemy": self.is_there_enemy,
             "is_there_poison_gas": self.is_there_poison_gas,
@@ -1241,12 +1251,9 @@ class Play(Movement):
         band = max(30, int(r * 0.45))
         min_pixels = max(12, int(self.fog_min_pixels_in_radius * 0.45))
         direction = str(direction).lower()
-        try:
-            player_half_width = max(8, abs(float(player_data[2]) - float(player_data[0])) * 0.55)
-            player_half_height = max(8, abs(float(player_data[3]) - float(player_data[1])) * 0.55)
-        except (TypeError, ValueError, IndexError):
-            player_half_width = player_half_height = max(12, band * 0.35)
-        player_area = (np.abs(dx) <= player_half_width) & (np.abs(dy) <= player_half_height)
+        _, _, foot_radius = self.get_player_foot_circle(player_data)
+        dist_sq = dx * dx + dy * dy
+        player_area = dist_sq <= (foot_radius * foot_radius)
         if int(player_area.sum()) >= min_pixels:
             return True
         checks = {
@@ -2906,6 +2913,17 @@ class Play(Movement):
             traveled += segment
             draw = not draw
 
+    def _draw_player_foot_circle_debug(self, img, box, sp, s):
+        foot_x, foot_y, foot_r = self.get_player_foot_circle(box)
+        center = sp((foot_x, foot_y))
+        radius = max(3, s(int(round(foot_r))))
+        green = (0, 255, 0)
+        overlay = img.copy()
+        cv2.circle(overlay, center, radius, green, -1, cv2.LINE_AA)
+        cv2.addWeighted(overlay, 0.24, img, 0.76, 0, img)
+        cv2.circle(img, center, radius, green, max(2, s(2)), cv2.LINE_AA)
+        cv2.circle(img, center, max(2, s(2)), (255, 255, 255), -1, cv2.LINE_AA)
+
     def _draw_advanced_visuals(self, img, data, scale, sp, s):
         context = data.get("advanced_visuals") or {}
         if not context:
@@ -3183,7 +3201,12 @@ class Play(Movement):
                 if boxes_drawn >= self.visual_debug_max_boxes:
                     break
                 x1, y1, x2, y2 = map(int, box)
-                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
+                if key == "player":
+                    overlay = img.copy()
+                    cv2.rectangle(overlay, sp((x1, y1)), sp((x2, y2)), color, max(1, s(1)))
+                    cv2.addWeighted(overlay, 0.25, img, 0.75, 0, img)
+                else:
+                    cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
                 if key != "wall":
                     cv2.putText(img, key, sp((x1, max(y1 - 6, 0))),
                                 cv2.FONT_HERSHEY_SIMPLEX, max(0.35, 0.5 * scale), color, 1)
@@ -3277,6 +3300,9 @@ class Play(Movement):
                     y += int(18 * max(scale, 0.5))
         except Exception:
             pass
+
+        for box in data.get("player") or []:
+            self._draw_player_foot_circle_debug(img, box, sp, s)
 
         show_visual_debug_frame(img)
 

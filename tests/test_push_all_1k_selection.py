@@ -53,9 +53,7 @@ class PushAll1kSelectionTest(unittest.TestCase):
         reordered = SelectBrawler._move_brawler_to_front(data, "mina")
 
         self.assertEqual(reordered[0]["brawler"], "mina")
-        self.assertFalse(reordered[0]["automatically_pick"])
-        self.assertTrue(reordered[1]["automatically_pick"])
-        self.assertTrue(reordered[2]["automatically_pick"])
+        self.assertTrue(all(row["automatically_pick"] for row in reordered))
 
     def test_push_all_priority_order_moves_selected_brawlers_first(self):
         obj = object.__new__(SelectBrawler)
@@ -101,7 +99,7 @@ class PushAll1kSelectionTest(unittest.TestCase):
 
         self.assertEqual([row["brawler"] for row in data], ["shelly"])
         self.assertEqual(data[0]["push_until"], 500)
-        self.assertFalse(data[0]["automatically_pick"])
+        self.assertTrue(data[0]["automatically_pick"])
         self.assertEqual(data[0]["selection_method"], "lowest_trophies")
 
     def test_push_all_targets_all_use_lowest_trophies_selection_method(self):
@@ -127,8 +125,7 @@ class PushAll1kSelectionTest(unittest.TestCase):
                     self.assertTrue(data)
                     self.assertTrue(all(row["push_until"] == target for row in data))
                     self.assertTrue(all(row["selection_method"] == "lowest_trophies" for row in data))
-                    self.assertFalse(data[0]["automatically_pick"])
-                    self.assertTrue(all(row["automatically_pick"] for row in data[1:]))
+                    self.assertTrue(all(row["automatically_pick"] for row in data))
 
 
 if __name__ == "__main__":

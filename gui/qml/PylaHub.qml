@@ -6,12 +6,12 @@ import QtQuick.Window
 
 ApplicationWindow {
     id: root
-    width: 820
-    height: 560
-    minimumWidth: 820
-    minimumHeight: 560
+    width: settingsOnly ? 640 : 820
+    height: settingsOnly ? 600 : 560
+    minimumWidth: 720
+    minimumHeight: 480
     visible: true
-    title: "Pyla-RL Hub"
+    title: settingsOnly ? "Pyla-RL Settings" : "Pyla-RL Hub"
     color: theme.bg
     flags: Qt.FramelessWindowHint | Qt.Window
 
@@ -36,8 +36,46 @@ ApplicationWindow {
     property string pickerBrawler: ""
     property string pickerTarget: "1000"
     property string pickerType: "trophies"
-    property bool pickerAutoPick: true
     property string historySort: "games"
+    readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
+    readonly property var filteredPickerOptions: {
+        const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
+        const needle = pickerFilter.trim().toLowerCase()
+        if (!needle) {
+            return options
+        }
+        return options.filter(function(item) {
+            return String(item.name || "").toLowerCase().indexOf(needle) >= 0
+        })
+    }
+    property int queueDragSource: -1
+    property int queueDropTarget: -1
+
+    function navLabel(tab) {
+        if (tab === "Farm Plan") {
+            var count = (hubState.queue || []).length
+            return count > 0 ? ("Farm Plan (" + count + ")") : "Farm Plan"
+        }
+        return tab
+    }
+
+    function closeHubWindow() {
+        if (settingsOnly && hubBridge) {
+            hubBridge.closeHub()
+        } else {
+            root.close()
+        }
+    }
+
+    Timer {
+        id: statusToastTimer
+        interval: 2500
+        onTriggered: {
+            if (root.statusOk) {
+                root.statusText = ""
+            }
+        }
+    }
 
     function reloadState() {
         if (hubBridge) {
@@ -57,6 +95,9 @@ ApplicationWindow {
         if (result.message) {
             statusText = result.message
             statusOk = !!result.ok
+            if (result.ok) {
+                statusToastTimer.restart()
+            }
         }
         return result
     }
@@ -69,6 +110,7 @@ ApplicationWindow {
         } else if (result.ok) {
             statusText = "Saved"
             statusOk = true
+            statusToastTimer.restart()
         }
         return result
     }
@@ -88,30 +130,25 @@ ApplicationWindow {
     function runAction(action) {
         statusText = "Working..."
         statusOk = true
-        applyBridgeResult(hubBridge.runAction(action))
+        const result = applyBridgeResult(hubBridge.runAction(action))
+        if (result.ok) {
+            statusToastTimer.restart()
+        }
     }
 
     function runActionWithPayload(action, payload) {
         statusText = "Working..."
         statusOk = true
-        applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
+        const result = applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
+        if (result.ok) {
+            statusToastTimer.restart()
+        }
     }
 
     function startBot() {
         statusText = "Checking pre-flight..."
         statusOk = true
         applyBridgeResult(hubBridge.startPyla())
-    }
-
-    function filteredBrawlerOptions() {
-        const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
-        const needle = pickerFilter.trim().toLowerCase()
-        if (!needle) {
-            return options
-        }
-        return options.filter(function(item) {
-            return String(item.name || "").toLowerCase().indexOf(needle) >= 0
-        })
     }
 
     function sortedHistoryItems() {
@@ -129,6 +166,11 @@ ApplicationWindow {
     Component.onCompleted: {
         reloadState()
         runAction("ensure-brawler-icons")
+        if (settingsOnly) {
+            showWizard = false
+            activeTab = "Farm Plan"
+            return
+        }
         const needsLicense = !(hubState.meta && hubState.meta.licenseAccepted)
         const needsWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
         showWizard = needsLicense || needsWizard
@@ -148,6 +190,9 @@ ApplicationWindow {
         function onStateChanged(nextMode, nextEmulator) {
             root.mode = nextMode
             root.emulator = nextEmulator
+        }
+        function onQueueChanged() {
+            reloadState()
         }
     }
 
@@ -238,11 +283,12 @@ ApplicationWindow {
     component NavButton: Rectangle {
         id: nav
         property string label: ""
-        property bool selected: root.activeTab === label
+        property string tabId: ""
+        property bool selected: root.activeTab === tabId
         property bool hovered: false
         signal clicked()
 
-        width: 108
+        width: Math.max(96, navText.implicitWidth + 18)
         height: 30
         radius: 7
         color: selected ? theme.panel3 : (hovered ? "#211f1a" : "transparent")
@@ -250,6 +296,7 @@ ApplicationWindow {
         border.color: selected ? theme.border : "transparent"
 
         Text {
+            id: navText
             anchors.centerIn: parent
             text: nav.label
             color: nav.selected ? theme.text : theme.muted
@@ -467,16 +514,18 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.rightMargin: inputBox.secret ? 54 : 12
             verticalAlignment: TextInput.AlignVCenter
-            text: inputBox.value
             color: theme.text
             selectionColor: theme.accent
             selectedTextColor: "#ffffff"
             font.pixelSize: 12
             echoMode: inputBox.secret && !inputBox.revealed ? TextInput.Password : TextInput.Normal
+            selectByMouse: true
             clip: true
             onTextChanged: if (inputBox.live) inputBox.saved(text)
             onEditingFinished: if (!inputBox.live) inputBox.saved(text)
         }
+
+        Component.onCompleted: field.text = inputBox.value
 
         onValueChanged: {
             if (field.text !== inputBox.value) {
@@ -723,14 +772,29 @@ ApplicationWindow {
         id: row
         property string label: ""
         property string hint: ""
+        property bool pinnedInSettingsSearch: false
         default property alias content: slot.data
 
+        readonly property string panelTitle: {
+            var item = row.parent
+            if (item && item.parent && item.parent.title !== undefined) {
+                return String(item.parent.title)
+            }
+            return ""
+        }
+
         readonly property bool filterMatch: {
-            var query = root.settingsFilter.trim().toLowerCase()
-            if (query === "")
+            if (root.activeTab !== "Settings" || row.pinnedInSettingsSearch) {
                 return true
+            }
+            var query = root.settingsFilter.trim().toLowerCase()
+            if (query === "") {
+                return true
+            }
+            var panel = row.panelTitle.toLowerCase()
             return row.label.toLowerCase().indexOf(query) >= 0
                     || row.hint.toLowerCase().indexOf(query) >= 0
+                    || (panel !== "" && panel.indexOf(query) >= 0)
         }
         visible: filterMatch
 
@@ -832,10 +896,17 @@ ApplicationWindow {
         color: theme.panel
         border.width: 1
         border.color: theme.borderSoft
-        visible: root.activeTab !== "Settings"
-            || !root.settingsFilter.trim()
-            || panel.title.toLowerCase().indexOf(root.settingsFilter.trim().toLowerCase()) >= 0
-            || body.implicitHeight > 38
+        readonly property bool settingsPanelVisible: {
+            if (root.activeTab !== "Settings" || !root.settingsFilter.trim()) {
+                return true
+            }
+            var query = root.settingsFilter.trim().toLowerCase()
+            if (panel.title.toLowerCase().indexOf(query) >= 0) {
+                return true
+            }
+            return body.implicitHeight > 52
+        }
+        visible: settingsPanelVisible
 
         ColumnLayout {
             id: body
@@ -860,10 +931,527 @@ ApplicationWindow {
 
         ColumnLayout {
             id: pageBody
-            width: Math.min(680, page.availableWidth - 24)
+            width: Math.max(320, page.availableWidth - 24)
             x: Math.max(12, (page.availableWidth - width) / 2)
             y: 20
             spacing: 12
+        }
+    }
+
+    component IconButton: Rectangle {
+        id: iconButton
+        property string glyph: "×"
+        signal clicked()
+
+        width: 28
+        height: 28
+        radius: 6
+        color: iconMouse.containsMouse ? theme.panel3 : "transparent"
+
+        Text {
+            anchors.centerIn: parent
+            text: iconButton.glyph
+            color: theme.muted
+            font.pixelSize: iconButton.glyph === "−" ? 16 : 14
+            font.weight: Font.Bold
+        }
+
+        MouseArea {
+            id: iconMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: iconButton.clicked()
+        }
+    }
+
+    component WindowResizeGrip: Item {
+        anchors.fill: parent
+        z: 200
+
+        MouseArea {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 6
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.LeftEdge)
+        }
+        MouseArea {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 6
+            cursorShape: Qt.SizeHorCursor
+            onPressed: root.startSystemResize(Qt.RightEdge)
+        }
+        MouseArea {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: 6
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.TopEdge)
+        }
+        MouseArea {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 6
+            cursorShape: Qt.SizeVerCursor
+            onPressed: root.startSystemResize(Qt.BottomEdge)
+        }
+        MouseArea {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            width: 10
+            height: 10
+            cursorShape: Qt.SizeFDiagCursor
+            onPressed: root.startSystemResize(Qt.LeftEdge | Qt.TopEdge)
+        }
+        MouseArea {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            width: 10
+            height: 10
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: root.startSystemResize(Qt.RightEdge | Qt.TopEdge)
+        }
+        MouseArea {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            width: 10
+            height: 10
+            cursorShape: Qt.SizeBDiagCursor
+            onPressed: root.startSystemResize(Qt.LeftEdge | Qt.BottomEdge)
+        }
+        MouseArea {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: 10
+            height: 10
+            cursorShape: Qt.SizeFDiagCursor
+            onPressed: root.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+        }
+    }
+
+    component QueueRow: Rectangle {
+        id: queueRow
+        property var rowData: ({})
+        property int rowIndex: -1
+        property bool isDropTarget: root.queueDropTarget === rowIndex
+        property bool isDragSource: root.queueDragSource === rowIndex
+        property bool hovered: false
+
+        height: 52
+        radius: 8
+        color: hovered ? theme.panel2 : theme.panel
+        opacity: isDragSource ? 0.72 : 1.0
+        border.width: isDropTarget || rowIndex === 0 ? 2 : 1
+        border.color: isDropTarget ? theme.accent : (rowIndex === 0 ? theme.accentBorder : theme.borderSoft)
+
+        Behavior on color { ColorAnimation { duration: 100 } }
+
+        Rectangle {
+            visible: rowIndex === 0
+            width: 3
+            radius: 2
+            color: theme.accent
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 4
+            anchors.topMargin: 8
+            anchors.bottomMargin: 8
+        }
+
+        DropArea {
+            anchors.fill: parent
+            onEntered: function(drag) {
+                if (drag.hasText || drag.hasColor) {
+                    root.queueDropTarget = queueRow.rowIndex
+                }
+            }
+            onExited: {
+                if (root.queueDropTarget === queueRow.rowIndex) {
+                    root.queueDropTarget = -1
+                }
+            }
+            onDropped: function(drop) {
+                var from = parseInt(drop.text)
+                if (isNaN(from)) {
+                    from = root.queueDragSource
+                }
+                if (from >= 0 && from !== queueRow.rowIndex) {
+                    root.runActionWithPayload("reorder-queue", {
+                        fromIndex: from,
+                        toIndex: queueRow.rowIndex
+                    })
+                }
+                root.queueDragSource = -1
+                root.queueDropTarget = -1
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            onContainsMouseChanged: queueRow.hovered = containsMouse
+        }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 8
+            spacing: 8
+
+            Rectangle {
+                id: dragGrip
+                Layout.preferredWidth: 22
+                Layout.preferredHeight: 32
+                radius: 6
+                color: gripDrag.active ? theme.panel3 : "transparent"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "\u2261"
+                    color: theme.faint
+                    font.pixelSize: 14
+                    font.weight: Font.Bold
+                }
+
+                DragHandler {
+                    id: gripDrag
+                    target: dragGrip
+                    onActiveChanged: {
+                        if (active) {
+                            root.queueDragSource = queueRow.rowIndex
+                        } else if (root.queueDragSource === queueRow.rowIndex) {
+                            root.queueDragSource = -1
+                        }
+                    }
+                }
+
+                Drag.active: gripDrag.active
+                Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.MoveAction
+                Drag.mimeData: {
+                    "text/plain": String(queueRow.rowIndex)
+                }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                radius: 6
+                color: theme.panel2
+                border.width: 1
+                border.color: theme.borderSoft
+                clip: true
+
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 3
+                    source: queueRow.rowData.icon || ""
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
+                    visible: (queueRow.rowData.icon || "") !== ""
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: queueRow.rowData.brawler ? queueRow.rowData.brawler.charAt(0).toUpperCase() : "?"
+                    color: theme.faint
+                    font.pixelSize: 13
+                    font.weight: Font.Bold
+                    visible: (queueRow.rowData.icon || "") === ""
+                }
+            }
+
+            Text {
+                Layout.preferredWidth: 28
+                text: "#" + (queueRow.rowIndex + 1)
+                color: theme.faint
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: queueRow.rowData.brawler || "?"
+                color: theme.text
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                elide: Text.ElideRight
+            }
+
+            Rectangle {
+                visible: queueRow.rowIndex === 0
+                Layout.preferredHeight: 18
+                Layout.preferredWidth: activePill.implicitWidth + 10
+                radius: 9
+                color: theme.accentSoft
+                border.width: 1
+                border.color: theme.accentBorder
+                Text {
+                    id: activePill
+                    anchors.centerIn: parent
+                    text: "ACTIVE"
+                    color: theme.accent
+                    font.pixelSize: 8
+                    font.weight: Font.Bold
+                }
+            }
+
+            Text {
+                text: String(queueRow.rowData.trophies || 0) + " \u2192"
+                color: theme.muted
+                font.pixelSize: 11
+            }
+
+            Rectangle {
+                id: targetButton
+                Layout.preferredHeight: 22
+                Layout.preferredWidth: targetLabel.implicitWidth + 12
+                radius: 6
+                color: targetMouse.containsMouse ? theme.panel3 : theme.panel2
+                border.width: 1
+                border.color: targetMouse.containsMouse ? theme.accentBorder : theme.borderSoft
+
+                Text {
+                    id: targetLabel
+                    anchors.centerIn: parent
+                    text: String(queueRow.rowData.target || "")
+                    color: theme.accent
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
+                }
+
+                MouseArea {
+                    id: targetMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: queueTargetPopup.open()
+                }
+
+                Popup {
+                    id: queueTargetPopup
+                    parent: Overlay.overlay
+                    x: targetButton.mapToItem(null, 0, targetButton.height).x
+                    y: targetButton.mapToItem(null, 0, targetButton.height).y + 4
+                    width: targetPopupRow.implicitWidth + 16
+                    height: targetPopupRow.implicitHeight + 16
+                    padding: 8
+                    modal: true
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                    background: Rectangle {
+                        radius: 8
+                        color: theme.panel2
+                        border.width: 1
+                        border.color: theme.borderSoft
+                    }
+
+                    Row {
+                        id: targetPopupRow
+                        spacing: 6
+                        Repeater {
+                            model: root.queueTargetOptions
+                            delegate: ChoicePill {
+                                label: modelData
+                                selected: String(queueRow.rowData.target || "") === modelData
+                                onClicked: {
+                                    root.runActionWithPayload("update-queue-item", {
+                                        index: queueRow.rowIndex,
+                                        push_until: parseInt(modelData)
+                                    })
+                                    queueTargetPopup.close()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            IconButton {
+                glyph: "×"
+                onClicked: root.runActionWithPayload("remove-from-queue", { index: queueRow.rowIndex })
+            }
+        }
+    }
+
+    component FarmPlanPage: Item {
+        id: farmPage
+        anchors.fill: parent
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: pushAllColumn.implicitHeight + 24
+                radius: 10
+                color: theme.panel
+                border.width: 1
+                border.color: theme.borderSoft
+
+                ColumnLayout {
+                    id: pushAllColumn
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Text {
+                        text: "PUSH ALL"
+                        color: theme.text
+                        font.pixelSize: 12
+                        font.weight: Font.Bold
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Repeater {
+                            model: ["250", "500", "750", "1000", "1250", "1500"]
+                            delegate: ChoicePill {
+                                label: modelData
+                                selected: root.pushAllTarget === modelData
+                                onClicked: root.pushAllTarget = modelData
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        HubButton {
+                            label: "Build Queue"
+                            compact: true
+                            onClicked: root.runActionWithPayload("build-push-all", { target: parseInt(root.pushAllTarget) })
+                        }
+                        HubButton { label: "Import"; secondary: true; compact: true; onClicked: importQueueDialog.open() }
+                        HubButton {
+                            label: "Export"
+                            secondary: true
+                            compact: true
+                            onClicked: {
+                                if (!(root.hubState.queue && root.hubState.queue.length)) {
+                                    root.statusText = "Farm plan is empty."
+                                    root.statusOk = false
+                                    return
+                                }
+                                exportQueueDialog.open()
+                            }
+                        }
+                        HubButton { label: "Clear"; secondary: true; compact: true; onClicked: root.runAction("clear-queue") }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: 10
+                color: theme.panel
+                border.width: 1
+                border.color: theme.borderSoft
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: "QUEUE"
+                            color: theme.text
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                        }
+                        Text {
+                            text: ((root.hubState.queue || []).length) + " brawler" + (((root.hubState.queue || []).length) === 1 ? "" : "s")
+                            color: theme.faint
+                            font.pixelSize: 11
+                        }
+                        Item { Layout.fillWidth: true }
+                        HubButton {
+                            label: "Refresh"
+                            secondary: true
+                            compact: true
+                            onClicked: root.reloadState()
+                        }
+                        HubButton {
+                            label: "Add"
+                            compact: true
+                            onClicked: {
+                                const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions : []
+                                root.pickerBrawler = options.length ? options[0].name : ""
+                                root.pickerFilter = ""
+                                root.showBrawlerPicker = true
+                            }
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        ListView {
+                            id: farmQueueList
+                            anchors.fill: parent
+                            spacing: 6
+                            clip: true
+                            model: root.hubState.queue || []
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AsNeeded
+                            }
+                            delegate: QueueRow {
+                                width: farmQueueList.width
+                                rowData: modelData
+                                rowIndex: modelData.index
+                            }
+                            displaced: Transition {
+                                NumberAnimation { properties: "x,y"; duration: 120; easing.type: Easing.OutCubic }
+                            }
+                        }
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            visible: !(root.hubState.queue && root.hubState.queue.length)
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: "No brawlers in the farm plan yet"
+                                color: theme.muted
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: "Build a queue from API trophies or add brawlers manually"
+                                color: theme.faint
+                                font.pixelSize: 11
+                            }
+                            HubButton {
+                                Layout.alignment: Qt.AlignHCenter
+                                label: "Add Brawler"
+                                compact: true
+                                onClicked: {
+                                    const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions : []
+                                    root.pickerBrawler = options.length ? options[0].name : ""
+                                    root.pickerFilter = ""
+                                    root.showBrawlerPicker = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -883,7 +1471,10 @@ ApplicationWindow {
                 border.color: theme.borderSoft
 
                 MouseArea {
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.right: titleWindowControls.left
                     onPressed: root.startSystemMove()
                 }
 
@@ -903,10 +1494,25 @@ ApplicationWindow {
                         font.weight: Font.Bold
                     }
                     Text {
-                        text: "Pyla-RL Hub"
+                        text: settingsOnly ? "Pyla-RL Settings (bot running)" : "Pyla-RL Hub"
                         color: theme.muted
                         font.pixelSize: 13
                         font.weight: Font.DemiBold
+                    }
+                }
+
+                Row {
+                    id: titleWindowControls
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    IconButton {
+                        glyph: "−"
+                        onClicked: root.showMinimized()
+                    }
+                    IconButton {
+                        onClicked: root.closeHubWindow()
                     }
                 }
             }
@@ -971,7 +1577,8 @@ ApplicationWindow {
                             Repeater {
                                 model: ["Overview", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
                                 delegate: NavButton {
-                                    label: modelData
+                                    tabId: modelData
+                                    label: root.navLabel(modelData)
                                     onClicked: root.activeTab = modelData
                                 }
                             }
@@ -1131,165 +1738,8 @@ ApplicationWindow {
 
                 }
 
-                TabPage {
+                FarmPlanPage {
                     visible: root.activeTab === "Farm Plan"
-
-                    FormPanel {
-                        title: "PUSH ALL"
-                        Text {
-                            text: "Build a trophy farm queue from your API brawlers. Restart the bot after changing the plan."
-                            color: theme.faint
-                            font.pixelSize: 11
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-                        RowLayout {
-                            spacing: 10
-                            Repeater {
-                                model: ["250", "500", "750", "1000", "1250", "1500"]
-                                delegate: ChoicePill {
-                                    label: modelData
-                                    selected: root.pushAllTarget === modelData
-                                    onClicked: root.pushAllTarget = modelData
-                                }
-                            }
-                        }
-                        ActionRow {
-                            HubButton {
-                                label: "Build Queue"
-                                onClicked: root.runActionWithPayload("build-push-all", { target: parseInt(root.pushAllTarget) })
-                            }
-                            HubButton { label: "Tutorial"; secondary: true; onClicked: root.showFarmPlanTutorial = true }
-                            HubButton { label: "Import"; secondary: true; onClicked: importQueueDialog.open() }
-                            HubButton {
-                                label: "Export"
-                                secondary: true
-                                onClicked: {
-                                    if (!(root.hubState.queue && root.hubState.queue.length)) {
-                                        root.statusText = "Farm plan is empty."
-                                        root.statusOk = false
-                                        return
-                                    }
-                                    exportQueueDialog.open()
-                                }
-                            }
-                            HubButton { label: "Clear"; secondary: true; onClicked: root.runAction("clear-queue") }
-                        }
-                    }
-
-                    FormPanel {
-                        title: "QUEUE"
-                        ActionRow {
-                            HubButton {
-                                label: "Add Brawler"
-                                onClicked: {
-                                    const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions : []
-                                    root.pickerBrawler = options.length ? options[0].name : ""
-                                    root.pickerFilter = ""
-                                    root.showBrawlerPicker = true
-                                }
-                            }
-                            HubButton { label: "Tutorial"; secondary: true; onClicked: root.showFarmPlanTutorial = true }
-                        }
-                        Flow {
-                            Layout.fillWidth: true
-                            spacing: 10
-                            Repeater {
-                                model: root.hubState.queue || []
-                                delegate: Rectangle {
-                                    width: 196
-                                    height: 118
-                                    radius: 10
-                                    color: theme.panel
-                                    border.width: 1
-                                    border.color: theme.borderSoft
-                                    clip: true
-
-                                    ColumnLayout {
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 6
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 8
-                                            Rectangle {
-                                                Layout.preferredWidth: 44
-                                                Layout.preferredHeight: 44
-                                                radius: 8
-                                                color: theme.panel2
-                                                border.width: 1
-                                                border.color: theme.borderSoft
-                                                clip: true
-                                                Image {
-                                                    anchors.fill: parent
-                                                    anchors.margins: 4
-                                                    source: modelData.icon
-                                                    fillMode: Image.PreserveAspectFit
-                                                    smooth: true
-                                                    visible: modelData.icon !== ""
-                                                }
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: modelData.brawler ? modelData.brawler.charAt(0).toUpperCase() : "?"
-                                                    color: theme.faint
-                                                    font.pixelSize: 16
-                                                    font.weight: Font.Bold
-                                                    visible: modelData.icon === ""
-                                                }
-                                            }
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 2
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: modelData.brawler
-                                                    color: theme.text
-                                                    font.pixelSize: 13
-                                                    font.weight: Font.DemiBold
-                                                    elide: Text.ElideRight
-                                                }
-                                                Text {
-                                                    text: "Target: " + modelData.target
-                                                    color: theme.muted
-                                                    font.pixelSize: 11
-                                                }
-                                                Text {
-                                                    text: modelData.autoPick ? "Auto-pick" : "Manual pick"
-                                                    color: theme.faint
-                                                    font.pixelSize: 10
-                                                }
-                                            }
-                                        }
-
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            spacing: 6
-                                            HubButton {
-                                                label: "Up"
-                                                compact: true
-                                                secondary: true
-                                                onClicked: root.runActionWithPayload("move-queue-item", { index: modelData.index, direction: -1 })
-                                            }
-                                            HubButton {
-                                                label: "Down"
-                                                compact: true
-                                                secondary: true
-                                                onClicked: root.runActionWithPayload("move-queue-item", { index: modelData.index, direction: 1 })
-                                            }
-                                            HubButton {
-                                                label: "Remove"
-                                                compact: true
-                                                secondary: true
-                                                onClicked: root.runActionWithPayload("remove-from-queue", { index: modelData.index })
-                                            }
-                                            Item { Layout.fillWidth: true }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
 
                 TabPage {
@@ -1299,6 +1749,7 @@ ApplicationWindow {
                         title: "HUB"
                         FieldRow {
                             label: "Search Settings"
+                            pinnedInSettingsSearch: true
                             ConfigInput {
                                 anchors.fill: parent
                                 live: true
@@ -1828,6 +2279,7 @@ ApplicationWindow {
 
                     Rectangle {
                         id: startButton
+                        visible: !settingsOnly
                         Layout.preferredWidth: 168
                         Layout.preferredHeight: 44
                         radius: 10
@@ -1850,6 +2302,33 @@ ApplicationWindow {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.startBot()
+                        }
+                    }
+
+                    Rectangle {
+                        id: closeSettingsButton
+                        visible: settingsOnly
+                        Layout.preferredWidth: 168
+                        Layout.preferredHeight: 44
+                        radius: 10
+                        color: closeSettingsMouse.containsMouse ? theme.panel3 : theme.panel2
+                        border.width: 1
+                        border.color: theme.border
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CLOSE"
+                            color: theme.text
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                        }
+
+                        MouseArea {
+                            id: closeSettingsMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: hubBridge.closeHub()
                         }
                     }
 
@@ -1891,6 +2370,8 @@ ApplicationWindow {
                 }
             }
         }
+
+        WindowResizeGrip {}
     }
 
     Rectangle {
@@ -2074,10 +2555,11 @@ ApplicationWindow {
                     text: "Quick start:\n"
                         + "1. Fill the API tab (player tag + token) for Push All.\n"
                         + "2. Pick a trophy target and click Build Queue.\n"
-                        + "3. Reorder brawlers with Up/Down. The first brawler is picked manually unless Auto Pick is on.\n"
+                        + "3. Drag the grip to reorder brawlers. The first brawler is active.\n"
                         + "4. Press START on Overview. Restart the bot after changing the plan.\n\n"
                         + "Manual add:\n"
-                        + "• Click Add Brawler, search the grid, set target trophies, and toggle Auto Pick.\n\n"
+                        + "• Click Add Brawler, search the grid, set target trophies, then add.\n"
+                        + "• Click a queue row target to change push-until after adding.\n\n"
                         + "Tips:\n"
                         + "• Push All only includes brawlers below your target from the API.\n"
                         + "• Export/Import saves farm_plan.json for backup.\n"
@@ -2138,7 +2620,7 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Search and click a brawler. Set the trophy target and whether the bot should auto-pick them in-game."
+                    text: "Search and click a brawler, then set the trophy target before adding."
                     color: theme.faint
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
@@ -2166,7 +2648,7 @@ ApplicationWindow {
                         width: parent.width
                         spacing: 8
                         Repeater {
-                            model: root.filteredBrawlerOptions()
+                            model: root.filteredPickerOptions
                             delegate: BrawlerPickTile {
                                 name: modelData.name
                                 iconSource: modelData.icon
@@ -2177,7 +2659,7 @@ ApplicationWindow {
                     }
                 }
                 Text {
-                    visible: root.filteredBrawlerOptions().length === 0
+                    visible: root.filteredPickerOptions.length === 0
                     Layout.fillWidth: true
                     text: "No brawlers match your search."
                     color: theme.faint
@@ -2199,10 +2681,6 @@ ApplicationWindow {
                         }
                     }
                 }
-                FieldRow {
-                    label: "Auto Pick"
-                    CenterRow { ToggleSwitch { checked: root.pickerAutoPick; onToggled: function(checked) { root.pickerAutoPick = checked } } }
-                }
                 RowLayout {
                     spacing: 8
                     HubButton {
@@ -2221,7 +2699,7 @@ ApplicationWindow {
                                 trophies: 0,
                                 wins: 0,
                                 type: root.pickerType,
-                                automatically_pick: root.pickerAutoPick,
+                                automatically_pick: true,
                                 selection_method: "named_brawler",
                                 win_streak: 0
                             })

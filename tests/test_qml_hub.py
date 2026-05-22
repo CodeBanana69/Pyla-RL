@@ -134,6 +134,41 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertFalse(toml.load(paths["api"])["sync_trophies_after_match"])
         self.assertEqual(toml.load(paths["timers"])["low_ips_app_restart_after"], 3)
 
+    def test_reorder_queue_action_is_wired(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+        self.assertIn('if action == "reorder-queue":', bridge)
+        self.assertIn('runActionWithPayload("reorder-queue"', qml)
+        self.assertIn("component QueueRow", qml)
+        self.assertIn("DragHandler {", qml)
+        self.assertIn("DropArea {", qml)
+        self.assertIn('"text/plain": String(queueRow.rowIndex)', qml)
+        self.assertIn("filteredPickerOptions", qml)
+        self.assertIn('runActionWithPayload("update-queue-item"', qml)
+        self.assertIn('action == "update-queue-item"', bridge)
+
+    def test_farm_plan_page_uses_fill_height_queue(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        self.assertIn("component FarmPlanPage", qml)
+        self.assertIn("id: farmQueueList", qml)
+        self.assertIn("Layout.fillHeight: true", qml)
+        self.assertIn("No brawlers in the farm plan yet", qml)
+
+    def test_hub_window_is_resizable(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        self.assertIn("minimumWidth: 720", qml)
+        self.assertIn("minimumHeight: 480", qml)
+        self.assertIn("component WindowResizeGrip", qml)
+        self.assertIn("startSystemResize", qml)
+        self.assertIn("function navLabel(tab)", qml)
+        self.assertIn("statusToastTimer", qml)
+
+    def test_settings_only_entrypoint_exists(self):
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+        self.assertIn("--settings-only", bridge)
+        self.assertIn('context.setContextProperty("settingsOnly", settings_only)', bridge)
+        self.assertIn("def closeHub(self):", bridge)
+
     def test_qml_uses_styled_sliders_for_timer_values(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 
@@ -198,8 +233,9 @@ class QmlHubStateTests(unittest.TestCase):
 
         self.assertNotIn('label: "LDPlayer"\n                                    iconKind:', qml)
         self.assertNotIn('label: "MuMu"\n                                    iconKind:', qml)
-        self.assertIn('font.weight: Font.Bold\n                    }\n                    Text {\n                        text: "Pyla-RL Hub', qml)
+        self.assertIn('text: settingsOnly ? "Pyla-RL Settings (bot running)" : "Pyla-RL Hub"', qml)
         self.assertIn("id: startButton", qml)
+        self.assertIn("id: closeSettingsButton", qml)
         self.assertIn("id: startBar", qml)
         self.assertIn('text: "START"', qml)
         self.assertIn("hubState.preflight", qml)
@@ -222,8 +258,8 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("showFarmPlanTutorial", qml)
         self.assertIn("Farm Plan Tutorial", qml)
         self.assertIn("component BrawlerPickTile", qml)
-        self.assertIn("filteredBrawlerOptions", qml)
-        self.assertIn('label: "Tutorial"', qml)
+        self.assertIn("filteredPickerOptions", qml)
+        self.assertIn("label: \"Refresh\"", qml)
         self.assertIn("compact: true", qml)
 
         self.assertIn("import QtQuick.Dialogs", qml)

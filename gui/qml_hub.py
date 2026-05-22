@@ -47,31 +47,63 @@ class QmlHub:
             latest_version_str,
             correct_zoom=True,
             on_close_callback=None,
+            settings_only=False,
     ):
         ensure_pyside6_available()
-        from PySide6.QtCore import QObject, QUrl, Signal, Slot
+        from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer
         from PySide6.QtGui import QGuiApplication, QIcon
         from PySide6.QtQml import QQmlApplicationEngine
 
         class HubBridge(QObject):
             stateChanged = Signal(str, str)
             iconsUpdated = Signal(str)
+            queueChanged = Signal()
             closeRequested = Signal()
 
-            def __init__(self, store, correct_zoom=True):
+            def __init__(self, store, correct_zoom=True, settings_only=False):
                 super().__init__()
                 self._store = store
                 self._correct_zoom = correct_zoom
+                self._settings_only = settings_only
                 self._preflight_cache = {"ready": False, "checks": []}
                 self._icon_download_started = False
                 state = store.initial_state()
                 self._mode = state["mode"]
                 self._emulator = state["emulator"]
+                self._queue_reload_timer = QTimer()
+                self._queue_reload_timer.setSingleShot(True)
+                self._queue_reload_timer.setInterval(300)
+                self._queue_reload_timer.timeout.connect(self.queueChanged.emit)
+                self._queue_watcher = QFileSystemWatcher()
+                from gui.brawler_queue import QUEUE_PATH
+
+                queue_path = Path(QUEUE_PATH).resolve()
+                if queue_path.exists():
+                    self._queue_watcher.addPath(str(queue_path))
+                else:
+                    self._queue_watcher.addPath(str(queue_path.parent.resolve()))
+                self._queue_watcher.fileChanged.connect(self._on_queue_file_changed)
 
             def _ui_state(self, preflight=None):
                 if preflight is None:
                     preflight = self._preflight_cache
                 return self._store.ui_state(preflight=preflight, correct_zoom=self._correct_zoom)
+
+            def _on_queue_file_changed(self, _path):
+                from gui.brawler_queue import QUEUE_PATH
+
+                queue_path = str(Path(QUEUE_PATH).resolve())
+                if Path(queue_path).exists() and queue_path not in self._queue_watcher.files():
+                    self._queue_watcher.addPath(queue_path)
+                self._queue_reload_timer.start()
+
+            @Slot(result=bool)
+            def settingsOnly(self):
+                return self._settings_only
+
+            @Slot()
+            def closeHub(self):
+                self._app.quit()
 
             @Slot(result=str)
             def mode(self):
@@ -313,6 +345,38 @@ class QmlHub:
                     queue.insert(target, item)
                     persist_queue(queue)
                     return "Queue order updated."
+                if action == "reorder-queue":
+                    from gui.brawler_queue import load_queue, persist_queue
+
+                    from_index = int(payload.get("fromIndex", -1))
+                    to_index = int(payload.get("toIndex", -1))
+                    queue = load_queue()
+                    if from_index < 0 or from_index >= len(queue):
+                        raise ValueError("Invalid source queue index.")
+                    if to_index < 0 or to_index >= len(queue):
+                        raise ValueError("Invalid target queue index.")
+                    if from_index == to_index:
+                        return "Queue order unchanged."
+                    item = queue.pop(from_index)
+                    queue.insert(to_index, item)
+                    persist_queue(queue)
+                    return "Queue order updated."
+                if action == "update-queue-item":
+                    from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
+
+                    index = int(payload.get("index", -1))
+                    queue = load_queue()
+                    if index < 0 or index >= len(queue):
+                        raise ValueError("Invalid queue index.")
+                    row = dict(queue[index])
+                    if "push_until" in payload:
+                        row["push_until"] = int(payload.get("push_until", row.get("push_until", 1000)) or 1000)
+                    if "automatically_pick" in payload:
+                        row["automatically_pick"] = bool(payload.get("automatically_pick"))
+                    queue[index] = normalize_queue_row(row)
+                    persist_queue(queue)
+                    brawler = queue[index].get("brawler", "brawler")
+                    return f"Updated {brawler} target to {queue[index]['push_until']} trophies."
                 if action == "open-brawler-picker":
                     return "Use Add Brawler in the farm plan tab."
                 if action == "open-config-folder":
@@ -375,6 +439,12 @@ class QmlHub:
 
             @Slot(result=str)
             def startPyla(self):
+                if self._settings_only:
+                    return json.dumps({
+                        "ok": False,
+                        "message": "START is disabled while the bot is running. Close this window when finished editing settings.",
+                        "state": self._ui_state(),
+                    })
                 from gui.hub_state import _to_bool
                 from gui.preflight import run_preflight_checks
 
@@ -428,6 +498,7 @@ class QmlHub:
         self.latest_version_str = latest_version_str
         self.correct_zoom = correct_zoom
         self.on_close_callback = on_close_callback
+        self.settings_only = settings_only
         self.started = False
 
         app = QGuiApplication.instance()
@@ -435,7 +506,7 @@ class QmlHub:
         if app is None:
             app = QGuiApplication(sys.argv[:1])
 
-        app.setApplicationName("Pyla-RL Hub")
+        app.setApplicationName("Pyla-RL Settings" if settings_only else "Pyla-RL Hub")
         icon_path = Path(__file__).resolve().parent.parent / "images" / "icon.ico"
         if icon_path.exists():
             app.setWindowIcon(QIcon(str(icon_path)))
@@ -443,12 +514,15 @@ class QmlHub:
         from gui import brand
 
         self._store = HubStateStore()
-        self._bridge = HubBridge(self._store, correct_zoom=correct_zoom)
-        self._bridge.closeRequested.connect(self._mark_started_and_close)
+        self._bridge = HubBridge(self._store, correct_zoom=correct_zoom, settings_only=settings_only)
+        self._bridge._app = app
+        if not settings_only:
+            self._bridge.closeRequested.connect(self._mark_started_and_close)
 
         engine = QQmlApplicationEngine()
         context = engine.rootContext()
         context.setContextProperty("hubBridge", self._bridge)
+        context.setContextProperty("settingsOnly", settings_only)
         context.setContextProperty("hubVersion", self.version_str)
         context.setContextProperty("latestVersion", self.latest_version_str or "")
         context.setContextProperty("correctZoom", self.correct_zoom)
@@ -479,3 +553,23 @@ class QmlHub:
     def _mark_started_and_close(self):
         self.started = True
         self._app.quit()
+
+
+def main():
+    import argparse
+
+    from utils import load_toml_as_dict
+
+    parser = argparse.ArgumentParser(description="Launch the Pyla-RL QML hub.")
+    parser.add_argument(
+        "--settings-only",
+        action="store_true",
+        help="Open settings without starting the bot (for use during an active session).",
+    )
+    args = parser.parse_args()
+    version = str(load_toml_as_dict("cfg/general_config.toml").get("pyla_version", "0.8.1"))
+    QmlHub(version, version, settings_only=args.settings_only)
+
+
+if __name__ == "__main__":
+    main()

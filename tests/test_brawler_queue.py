@@ -35,6 +35,14 @@ class BrawlerQueueTests(unittest.TestCase):
             self.assertEqual(items[0]["brawler"], "shelly")
             self.assertEqual(items[0]["index"], 0)
 
+    def test_normalize_queue_row_forces_auto_pick(self):
+        row = normalize_queue_row({
+            "brawler": "jacky",
+            "push_until": 1000,
+            "automatically_pick": False,
+        })
+        self.assertTrue(row["automatically_pick"])
+
     def test_normalize_queue_row_fills_missing_trophies(self):
         row = normalize_queue_row({
             "brawler": "jacky",
