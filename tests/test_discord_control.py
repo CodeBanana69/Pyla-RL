@@ -2,6 +2,7 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 from discord_control import (
     command_allowed,
@@ -9,6 +10,7 @@ from discord_control import (
     run_callback,
     set_runtime_state,
     status_text,
+    sync_discord_command_tree,
 )
 from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, is_stop_requested, read_state, request_stop
 
@@ -115,6 +117,29 @@ class DiscordControlTest(unittest.TestCase):
 
     def test_resolve_brawler_choice_rejects_unknown_brawler(self):
         self.assertIsNone(resolve_brawler_choice("not_a_real_brawler_xyz"))
+
+    def test_sync_discord_command_tree_clears_global_when_guild_configured(self):
+        async def runner():
+            tree = MagicMock()
+            tree.sync = AsyncMock()
+            scope = await sync_discord_command_tree(tree, "123456789")
+            return tree, scope
+
+        tree, scope = asyncio.run(runner())
+
+        tree.copy_global_to.assert_called_once()
+        tree.clear_commands.assert_called_once_with(guild=None)
+        self.assertEqual(tree.sync.await_count, 2)
+        self.assertIn("guild 123456789", scope)
+
+    def test_sync_discord_command_tree_uses_global_scope_without_guild(self):
+        async def runner():
+            tree = MagicMock()
+            tree.sync = AsyncMock()
+            return await sync_discord_command_tree(tree, "")
+
+        scope = asyncio.run(runner())
+        self.assertEqual(scope, "global")
 
 
 if __name__ == "__main__":
