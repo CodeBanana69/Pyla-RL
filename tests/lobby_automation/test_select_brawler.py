@@ -166,9 +166,15 @@ class TestBrawlerDetailVerification(unittest.TestCase):
         self.assertFalse(self.automation._verify_brawler_detail_card(screenshot, "jacky"))
 
     def test_short_brawler_names_require_exact_grid_match(self):
-        self.assertTrue(LobbyAutomation._is_confident_grid_name_match("bo", "bo"))
-        self.assertFalse(LobbyAutomation._is_confident_grid_name_match("box", "bo"))
-        self.assertTrue(LobbyAutomation._is_confident_grid_name_match("jacky", "jacky"))
+        self.automation.known_brawler_names.add("bo")
+        self.assertTrue(self.automation._is_confident_grid_name_match("bo", "bo"))
+        self.assertFalse(self.automation._is_confident_grid_name_match("box", "bo"))
+
+    def test_short_brawler_names_accept_ocr_digit_confusions(self):
+        self.automation.known_brawler_names.update({"bo", "max", "gus"})
+        self.assertEqual(self.automation._normalize_grid_label("8o"), "bo")
+        self.assertEqual(self.automation._normalize_grid_label("BO"), "bo")
+        self.assertTrue(self.automation._is_confident_grid_name_match("jacky", "jacky"))
 
     def test_text_box_click_uses_label_bbox(self):
         text_box = {

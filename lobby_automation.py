@@ -290,16 +290,49 @@ class LobbyAutomation:
         gx0, gy0, gx1, gy1 = self._grid_region_bounds(full_h, full_w)
         return gx0 <= cx <= gx1 and gy0 <= cy <= gy1
 
-    @classmethod
-    def _is_confident_grid_name_match(cls, detected_name, target_name):
+    @staticmethod
+    def _ocr_digit_fixes():
+        return str.maketrans({
+            "0": "o",
+            "1": "l",
+            "8": "b",
+            "5": "s",
+            "|": "l",
+        })
+
+    def _normalize_grid_label(self, raw_text):
+        normalized = self.resolve_ocr_typos(self.normalize_ocr_name(raw_text))
+        if len(normalized) <= 4:
+            fixed = normalized.translate(self._ocr_digit_fixes())
+            fixed = self.resolve_ocr_typos(fixed)
+            if fixed in self.known_brawler_names:
+                return fixed
+        return normalized
+
+    def _is_confident_grid_name_match(self, detected_name, target_name):
         if detected_name == target_name:
             return True
         if len(target_name) <= 3:
-            return False
-        return cls.names_match(detected_name, target_name)
+            if detected_name not in self.known_brawler_names:
+                return False
+            if detected_name == target_name:
+                return True
+            return self.bounded_edit_distance(detected_name, target_name, 1) <= 1
+        return self.names_match(detected_name, target_name)
 
-    def _collect_easyocr_grid_matches(self, screenshot_full, target_key, ocr_scale, debug_enabled=False):
-        entries = self._run_easyocr_on_brawler_grid(screenshot_full, ocr_scale)
+    @staticmethod
+    def _grid_page_signature(entries):
+        labels = [str(entry.get("text", "")).strip().lower() for entry in entries if entry.get("text")]
+        return tuple(sorted(labels[:24]))
+
+    @staticmethod
+    def _is_brawler_grid_end(ocr_labels):
+        blob = LobbyAutomation.normalize_ocr_name(" ".join(ocr_labels))
+        return "comingsoon" in blob or "brawlerscoming" in blob
+
+    def _collect_easyocr_grid_matches(self, screenshot_full, target_key, ocr_scale, debug_enabled=False, entries=None):
+        if entries is None:
+            entries = self._run_easyocr_on_brawler_grid(screenshot_full, ocr_scale)
         if debug_enabled:
             print(
                 "EasyOCR grid texts:",
@@ -308,7 +341,7 @@ class LobbyAutomation:
         full_h, full_w = screenshot_full.shape[:2]
         matches = []
         for entry in entries:
-            detected_name = self.resolve_ocr_typos(self.normalize_ocr_name(entry["text"]))
+            detected_name = self._normalize_grid_label(entry["text"])
             if not self._is_confident_grid_name_match(detected_name, target_key):
                 continue
             if not self._is_probable_grid_label(entry["box"], full_h, full_w):
@@ -473,10 +506,14 @@ class LobbyAutomation:
             previous = crop
             time.sleep(delay)
 
-    def _scroll_brawler_grid(self, wr, hr):
+    def _scroll_brawler_grid(self, wr, hr, direction="down"):
         scroll_x = int(320 * wr)
-        start_y = int(790 * hr)
-        end_y = int(570 * hr)
+        if direction == "up":
+            start_y = int(570 * hr)
+            end_y = int(790 * hr)
+        else:
+            start_y = int(790 * hr)
+            end_y = int(570 * hr)
         self.window_controller.swipe(scroll_x, start_y, scroll_x, end_y, duration=0.28)
         self._wait_for_grid_settle()
 
@@ -503,18 +540,27 @@ class LobbyAutomation:
 
         same_screen_attempts = 0
         max_same_screen_attempts = 3
-        for _scroll in range(50):
+        scroll_direction = "down"
+        previous_page_signature = None
+        unchanged_pages = 0
+        for scroll_index in range(50):
             self._dismiss_open_detail_card()
 
             screenshot_full = self.window_controller.screenshot()
+            entries = self._run_easyocr_on_brawler_grid(screenshot_full, grid_ocr_scale)
+            page_signature = self._grid_page_signature(entries)
+            page_labels = [entry["text"] for entry in entries]
+
             matches = self._collect_easyocr_grid_matches(
                 screenshot_full,
                 target_key,
                 grid_ocr_scale,
                 debug_enabled=debug_enabled,
+                entries=entries,
             )
 
             if matches:
+                scroll_reason = "pick_failed"
                 if self._attempt_easyocr_pick(
                     brawler,
                     target_key,
@@ -539,12 +585,35 @@ class LobbyAutomation:
                 same_screen_attempts = 0
             else:
                 same_screen_attempts = 0
+                scroll_reason = "no_matches"
                 if debug_enabled:
                     print(f"EasyOCR did not find '{brawler}' on the current brawler grid page.")
 
             wr = self.window_controller.width_ratio
             hr = self.window_controller.height_ratio
-            self._scroll_brawler_grid(wr, hr)
+            if page_signature == previous_page_signature:
+                unchanged_pages += 1
+            else:
+                unchanged_pages = 0
+            previous_page_signature = page_signature
+
+            if self._is_brawler_grid_end(page_labels):
+                if scroll_direction == "down":
+                    scroll_direction = "up"
+                    unchanged_pages = 0
+                    previous_page_signature = None
+                else:
+                    break
+
+            if unchanged_pages >= 2:
+                if scroll_direction == "down":
+                    scroll_direction = "up"
+                    unchanged_pages = 0
+                    previous_page_signature = None
+                else:
+                    break
+
+            self._scroll_brawler_grid(wr, hr, direction=scroll_direction)
 
         print(f"WARNING: Brawler '{brawler}' was not found after 50 scroll attempts. "
               f"The bot will continue with the currently selected brawler.")

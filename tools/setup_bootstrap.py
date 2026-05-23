@@ -314,6 +314,16 @@ def main():
         progress_window.update("Installing Pyla-RL dependencies...")
     run(venv_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
 
+    if progress_window:
+        progress_window.update("Verifying EasyOCR runtime...")
+    try:
+        run(venv_command + ["-c", "import skimage; import easyocr"], cwd=project_dir)
+    except SystemExit:
+        print("")
+        print("EasyOCR verification failed. Re-run setup or install missing packages with:")
+        print(f'  "{venv_executable}" -m pip install scikit-image ninja pyclipper python-bidi Shapely')
+        return 1
+
     from tools.hub_first_run import ensure_hub_first_run_wizard
     from tools.launcher_bat import create_run_file
     from tools.python_runtime import verify_cv2_import, write_setup_status
