@@ -335,6 +335,10 @@ def pyla_main(data):
                 time_thresholds.get("starr_nova_info_check_interval", 60.0)
             )
             self.last_starr_nova_info_check = 0.0
+            self.last_brawl_pass_escape_at = 0.0
+            self.brawl_pass_escape_interval = float(
+                time_thresholds.get("brawl_pass_escape_interval", 1.5)
+            )
             self.match_start_fast_check_interval = float(
                 time_thresholds.get("match_start_fast_check_interval", 0.20)
             )
@@ -1174,9 +1178,13 @@ def pyla_main(data):
             screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             if not (is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)):
                 return False
+            now = time.time()
+            if now - self.last_brawl_pass_escape_at < self.brawl_pass_escape_interval:
+                return True
+            self.last_brawl_pass_escape_at = now
             print("Brawl Pass panel detected; backing out.")
             self.window_controller.keys_up(list("wasd"))
-            self.Stage_manager.quit_shop()
+            self.lobby_automator.press_back()
             self.lobby_entered_at = None
             self.last_lobby_start_press = time.time()
             return True

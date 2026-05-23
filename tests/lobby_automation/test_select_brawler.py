@@ -93,20 +93,33 @@ class TestOpenBrawlerSelection(unittest.TestCase):
         self.assertEqual(automation.window_controller.back_presses, 1)
         first_click = automation.window_controller.clicks[0]
         self.assertLess(first_click[1], 650)
-        self.assertEqual(first_click, (70, 500))
+        self.assertEqual(first_click, (96, 430))
 
+    @patch.object(LobbyAutomation, "_ensure_lobby_before_brawler_click", return_value=True)
+    @patch.object(LobbyAutomation, "_confirm_brawler_menu_open")
     @patch("lobby_automation.extract_text_and_positions", return_value={})
     @patch("lobby_automation.time.sleep", return_value=None)
-    @patch("lobby_automation.get_state", side_effect=["lobby", "shop", "lobby", "shop", "lobby", "shop", "lobby", "shop", "lobby", "shop", "lobby", "shop", "lobby", "shop", "lobby", "brawler_selection"])
-    def test_retries_upper_brawler_button_band_after_lobby_panels(self, *_):
+    @patch("lobby_automation.get_state", return_value="shop")
+    def test_retries_upper_brawler_button_band_after_lobby_panels(
+        self,
+        mock_state,
+        _sleep,
+        _extract,
+        mock_confirm,
+        _ensure,
+    ):
         automation = object.__new__(LobbyAutomation)
         automation.window_controller = DummyBrawlerMenuController()
         automation.coords_cfg = {"lobby": {"brawler_btn": (110, 490), "select_btn": (0, 0)}}
+        mock_confirm.side_effect = (
+            lambda *_args, **_kwargs: len(automation.window_controller.clicks) >= 8
+        )
 
         self.assertTrue(automation.open_brawler_selection(attempts=8))
 
         self.assertIn((76, 420), automation.window_controller.clicks)
-        self.assertGreaterEqual(automation.window_controller.back_presses, 7)
+        self.assertGreaterEqual(automation.window_controller.back_presses, 1)
+        self.assertGreaterEqual(len(automation.window_controller.clicks), 8)
 
     @patch("lobby_automation.extract_text_and_positions", return_value={"BRAWLERS": {"center": (96, 430)}})
     @patch("lobby_automation.time.sleep", return_value=None)
@@ -120,12 +133,25 @@ class TestOpenBrawlerSelection(unittest.TestCase):
 
         self.assertEqual(automation.window_controller.clicks, [(96, 430)])
 
+    @patch.object(LobbyAutomation, "_try_open_brawler_via_ocr", return_value=False)
+    @patch("lobby_automation.extract_text_and_positions", return_value={"brawlers": {"center": (52, 259)}})
+    @patch("lobby_automation.time.sleep", return_value=None)
+    @patch("lobby_automation.get_state", side_effect=["lobby", "lobby"])
+    def test_rejects_ocr_brawlers_label_outside_safe_band(self, *_):
+        automation = object.__new__(LobbyAutomation)
+        automation.window_controller = DummyBrawlerMenuController()
+        automation.coords_cfg = {"lobby": {"brawler_btn": (110, 490), "select_btn": (0, 0)}}
+
+        self.assertFalse(automation.open_brawler_selection(attempts=0))
+
+        self.assertEqual(automation.window_controller.clicks, [])
+
     @patch("lobby_automation.extract_text_and_positions", return_value={
         "gus": {"center": (420, 300)},
         "jessie": {"center": (720, 300)},
     })
     @patch("lobby_automation.time.sleep", return_value=None)
-    @patch("lobby_automation.get_state", side_effect=["lobby", "shop"])
+    @patch("lobby_automation.get_state", side_effect=["lobby", "lobby", "shop"])
     def test_accepts_brawler_grid_when_state_looks_like_shop(self, *_):
         automation = object.__new__(LobbyAutomation)
         automation.window_controller = DummyBrawlerMenuController()

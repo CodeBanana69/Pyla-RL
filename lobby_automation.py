@@ -7,7 +7,9 @@ import numpy as np
 from state_finder import (
     get_state,
     get_starr_nova_hub_back_button_center,
+    is_in_brawl_pass,
     is_in_brawler_selection,
+    is_in_star_road,
     is_starr_nova_hub_screen,
 )
 from utils import (
@@ -77,30 +79,73 @@ class LobbyAutomation:
             dismissed = True
         return dismissed
 
+    def _brawlers_label_click_is_safe(self, x, y, screenshot):
+        height, width = screenshot.shape[:2]
+        if width <= 0 or height <= 0:
+            return False
+        if x > width * 0.22:
+            return False
+        y_on_1080 = y * (1080.0 / height)
+        # Keep OCR clicks above the bottom-left Brawl Pass banner band.
+        return 360.0 <= y_on_1080 <= 500.0
+
+    def _is_pass_panel(self, screenshot_bgr):
+        if screenshot_bgr is None:
+            return False
+        return is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)
+
+    def _back_out_of_lobby_panel(self):
+        self.press_back()
+        time.sleep(0.65)
+
+    def _brawler_button_points(self):
+        cfg_x, cfg_y = tuple(self.coords_cfg.get("lobby", {}).get("brawler_btn", (110, 490)))
+        if cfg_y < 400:
+            cfg_x, cfg_y = cfg_x, 430
+        return (
+            (96, 430),
+            (112, 420),
+            (122, 420),
+            (132, 455),
+            (100, 455),
+            (98, 420),
+            (76, 420),
+            (cfg_x, cfg_y),
+            (110, 490),
+            (128, 500),
+        )
+
+    def _ensure_lobby_before_brawler_click(self, max_attempts=4):
+        for _ in range(max_attempts):
+            state = self._read_state()
+            screenshot = self.window_controller.screenshot()
+            if state in (None, "lobby"):
+                return True
+            if state == "brawler_selection" or self._confirm_brawler_menu_open(screenshot):
+                return True
+            if state == "shop" and self.is_probably_brawler_selection_screen(screenshot):
+                return True
+            self._back_out_of_lobby_panel()
+        return self._read_state() in (None, "lobby")
+
+    def _try_open_brawler_via_ocr(self):
+        if not self.click_visible_brawler_menu_button():
+            return False
+        time.sleep(0.8)
+        self._dismiss_starr_nova_hub_if_present()
+        state = self._read_state()
+        if state == "brawler_selection" or self._confirm_brawler_menu_open():
+            return True
+        if state == "shop" and self.is_probably_brawler_selection_screen():
+            return True
+        if state == "shop":
+            self._back_out_of_lobby_panel()
+        return False
+
     def open_brawler_selection(self, attempts=None):
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
-        # Keep these clicks in the left-side BRAWLERS button band. Different
-        # emulator scales and event layouts shift the safe center a bit; points
-        # that are too low can open the pass/event panels instead.
-        cfg_point = tuple(self.coords_cfg.get("lobby", {}).get("brawler_btn", (110, 490)))
-        brawler_button_points = (
-            (70, 500),
-            (90, 500),
-            (110, 490),
-            (128, 500),
-            (60, 535),
-            (145, 505),
-            cfg_point,
-            (76, 420),
-            (98, 420),
-            (122, 420),
-            (72, 455),
-            (100, 455),
-            (132, 455),
-            (82, 385),
-            (112, 385),
-        )
+        brawler_button_points = self._brawler_button_points()
         if attempts is None:
             attempts = len(brawler_button_points)
 
@@ -111,19 +156,21 @@ class LobbyAutomation:
             return True
         if state == "shop" and self.is_probably_brawler_selection_screen():
             return True
-
-        if state == "lobby" and self.click_visible_brawler_menu_button():
-            time.sleep(0.8)
-            self._dismiss_starr_nova_hub_if_present()
+        if state == "shop":
+            self._back_out_of_lobby_panel()
             state = self._read_state()
-            if state == "brawler_selection":
-                return True
-            if state == "shop" and self.is_probably_brawler_selection_screen():
-                return True
+
+        if state in (None, "lobby") and self._try_open_brawler_via_ocr():
+            return True
 
         for attempt in range(attempts):
+            if not self._ensure_lobby_before_brawler_click():
+                continue
+
             x, y = brawler_button_points[min(attempt, len(brawler_button_points) - 1)]
-            self.window_controller.click(int(x * wr), int(y * hr))
+            click_x = int(x * wr)
+            click_y = int(y * hr)
+            self.window_controller.click(click_x, click_y)
             time.sleep(0.8)
 
             state = self._read_state()
@@ -134,7 +181,6 @@ class LobbyAutomation:
             probably_brawler = self.is_probably_brawler_selection_screen(screenshot)
             if nova_hub:
                 self._dismiss_starr_nova_hub_if_present()
-                state = self._read_state()
                 continue
             if brawler_open or state == "brawler_selection":
                 return True
@@ -146,13 +192,18 @@ class LobbyAutomation:
                     return True
                 if self.is_probably_brawler_selection_screen():
                     return True
-                print("Brawler menu click opened a lobby panel; backing out and retrying Brawlers.")
-                self.press_back()
-                time.sleep(0.8)
-                state = self._read_state()
+                panel_kind = "pass" if self._is_pass_panel(screenshot_bgr) else "shop"
+                print(
+                    f"Brawler menu click opened lobby {panel_kind} panel; "
+                    "backing out and retrying Brawlers."
+                )
+                self._back_out_of_lobby_panel()
                 continue
             if state is None:
                 continue
+
+        if self._read_state() in (None, "lobby") and self._try_open_brawler_via_ocr():
+            return True
 
         return False
 
@@ -223,6 +274,8 @@ class LobbyAutomation:
                 continue
             x, y = center
             if x > screenshot.shape[1] * 0.35:
+                continue
+            if not self._brawlers_label_click_is_safe(x, y, screenshot):
                 continue
             self.window_controller.click(int(x), int(y))
             return True
@@ -643,7 +696,10 @@ class LobbyAutomation:
 
         print(f"Selecting next brawler by sorting {sort_label}.")
         self._dismiss_starr_nova_hub_if_present()
-        tap(128, 500, 1.4)   # left Brawlers button in lobby
+        if not self.open_brawler_selection():
+            print(f"WARNING: Could not open brawler selection menu for {recovery_label.lower()} pick.")
+            self.press_back()
+            return False
         self._dismiss_starr_nova_hub_if_present()
         tap(1210, 45, 0.6)   # sort dropdown
         tap(1210, sort_y, 1.0)

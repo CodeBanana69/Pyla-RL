@@ -1438,15 +1438,19 @@ class StageManager:
         log_info("match", f"Game has ended ({current_state})")
 
     def quit_shop(self):
-        for _ in range(2):
-            if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
-                time.sleep(0.35)
-                continue
-            self.window_controller.click(
-                100 * self.window_controller.width_ratio,
-                60 * self.window_controller.height_ratio,
-            )
+        now = time.time()
+        last_escape = getattr(self, "_last_shop_escape_at", 0.0)
+        if now - last_escape < 1.0:
+            return
+        self._last_shop_escape_at = now
+        if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
             time.sleep(0.35)
+            return
+        self.window_controller.click(
+            100 * self.window_controller.width_ratio,
+            60 * self.window_controller.height_ratio,
+        )
+        time.sleep(0.35)
 
     def close_pop_up(self):
         screenshot = self.window_controller.screenshot()

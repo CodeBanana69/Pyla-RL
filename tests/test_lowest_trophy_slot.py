@@ -24,6 +24,7 @@ class DummyWindowController:
 
 
 class LowestTrophySelectionTests(unittest.TestCase):
+    @patch.object(LobbyAutomation, "open_brawler_selection", return_value=True)
     @patch("lobby_automation.time.sleep", return_value=None)
     def test_sorts_by_least_trophies_in_menu(self, *_):
         automation = object.__new__(LobbyAutomation)
@@ -33,7 +34,18 @@ class LowestTrophySelectionTests(unittest.TestCase):
 
         automation.select_lowest_trophy_brawler()
 
-        self.assertEqual(automation.window_controller.clicks[2], (1210, 426))
+        self.assertEqual(automation.window_controller.clicks[1], (1210, 426))
+
+    @patch("lobby_automation.time.sleep", return_value=None)
+    @patch.object(LobbyAutomation, "open_brawler_selection", return_value=True)
+    def test_always_clicks_first_lowest_trophy_brawler_card(self, *_):
+        automation = object.__new__(LobbyAutomation)
+        automation.window_controller = DummyWindowController()
+        automation.ensure_lobby_after_selection = lambda: True
+
+        automation.select_lowest_trophy_brawler()
+
+        self.assertEqual(automation.window_controller.clicks[2], (422, 359))
 
     @patch("lobby_automation.time.sleep", return_value=None)
     @patch.object(LobbyAutomation, "_select_brawler_on_open_grid", return_value=True)
@@ -55,16 +67,6 @@ class LowestTrophySelectionTests(unittest.TestCase):
         self.assertTrue(automation.select_lowest_trophy_brawler("finx"))
         mock_sort.assert_called_once_with("lowest")
         mock_grid.assert_called_once_with("finx", sort_applied=True)
-
-    @patch("lobby_automation.time.sleep", return_value=None)
-    def test_always_clicks_first_lowest_trophy_brawler_card(self, *_):
-        automation = object.__new__(LobbyAutomation)
-        automation.window_controller = DummyWindowController()
-        automation.ensure_lobby_after_selection = lambda: True
-
-        automation.select_lowest_trophy_brawler()
-
-        self.assertEqual(automation.window_controller.clicks[3], (422, 359))
 
     @patch("lobby_automation.time.sleep", return_value=None)
     @patch("lobby_automation.get_state", side_effect=["match", "lobby"])
