@@ -84,6 +84,7 @@ from utils import (
     get_latest_version,
     get_latest_wall_model_file,
     load_toml_as_dict,
+    normalize_brawler_name,
     update_missing_brawlers_info,
     update_wall_model_classes,
 )
@@ -676,6 +677,11 @@ def pyla_main(data):
             from gui.brawler_queue import persist_queue, QUEUE_PATH
             from gui.remote_formatting import format_command_result, format_queue_lines
 
+            playing = str(self.Play.current_brawler or "")
+            old_front = ""
+            if self.Stage_manager.brawlers_pick_data:
+                old_front = str(self.Stage_manager.brawlers_pick_data[0].get("brawler", "") or "")
+
             persist_queue(new_queue)
             self.Stage_manager.brawlers_pick_data = new_queue
             try:
@@ -685,16 +691,22 @@ def pyla_main(data):
                 pass
             if new_queue and hasattr(self.Stage_manager, "_sync_observer_to_current_row"):
                 self.Stage_manager._sync_observer_to_current_row()
-            if new_queue:
-                self.Play.current_brawler = new_queue[0].get("brawler", "")
             write_state(self.control_window.state_path, RUNNING)
 
             active = new_queue[0].get("brawler", "") if new_queue else ""
+            if active and (
+                normalize_brawler_name(active) != normalize_brawler_name(playing)
+                or normalize_brawler_name(active) != normalize_brawler_name(old_front)
+            ):
+                self.Stage_manager.pending_brawler_reselection = True
+            if new_queue:
+                self.Play.current_brawler = active
             reselect_now = self.state == "lobby" and active
             reselect_note = ""
             if reselect_now:
                 if self.lobby_automator.select_brawler(active):
                     self.pending_discord_brawler = None
+                    self.Stage_manager.pending_brawler_reselection = False
                     reselect_note = " Brawler reselected in lobby."
                 else:
                     self.pending_discord_brawler = active
@@ -1283,6 +1295,10 @@ def pyla_main(data):
                 elif previous_state != "match" and state == "match":
                     self.Play.reset_match_control_state()
                     self.match_ready_at = time.time() + self.match_warmup_seconds
+                    self.Stage_manager.active_match_brawler = self.Play.current_brawler or (
+                        self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                        if self.Stage_manager.brawlers_pick_data else ""
+                    )
                     if previous_state in {"lobby", "match_making"}:
                         self.Stage_manager.reset_prestige_reward_gate()
                 frame_data = None
@@ -1323,6 +1339,10 @@ def pyla_main(data):
             self.match_launch_pending = False
             self.Play.reset_match_control_state()
             self.match_ready_at = time.time() + self.match_warmup_seconds
+            self.Stage_manager.active_match_brawler = self.Play.current_brawler or (
+                self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                if self.Stage_manager.brawlers_pick_data else ""
+            )
             if previous_state in {"lobby", "match_making"}:
                 self.Stage_manager.reset_prestige_reward_gate()
             print("Fast match start detected; movement loop active.")

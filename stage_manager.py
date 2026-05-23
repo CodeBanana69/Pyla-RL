@@ -69,6 +69,8 @@ class StageManager:
         self.last_match_api_sync_ok = None
         self.last_player_total_trophies = None
         self.stop_after_post_match_rewards = False
+        self.pending_brawler_reselection = False
+        self.active_match_brawler = ""
         self.completion_notification_sent = False
         self._notified_brawler_completions = set()
         self._queue_file_mtime = None
@@ -101,8 +103,37 @@ class StageManager:
             'reward_unlock': self.handle_reward_unlock,
         }
 
-    def should_use_play_again(self, value=0, target=0):
+    def requires_brawler_reselection(self, active_brawler=None):
+        if getattr(self, "pending_brawler_reselection", False):
+            return True
+        if getattr(self, "push_all_needs_selection", False):
+            return True
+        brawlers_pick_data = getattr(self, "brawlers_pick_data", None)
+        if not brawlers_pick_data:
+            return False
+        active_name = normalize_brawler_name(active_brawler or getattr(self, "active_match_brawler", ""))
+        front_name = normalize_brawler_name(brawlers_pick_data[0].get("brawler", ""))
+        return bool(active_name and front_name and active_name != front_name)
+
+    def should_return_to_lobby_after_match(self, active_brawler=None):
+        if getattr(self, "stop_after_post_match_rewards", False):
+            return True
+        if self.requires_brawler_reselection(active_brawler):
+            return True
+        if getattr(self, "brawlers_pick_data", None) and getattr(self, "Trophy_observer", None):
+            if self._front_target_reached():
+                return True
+        return False
+
+    def should_use_play_again(self, value=0, target=0, active_brawler=None):
         if self.post_match_action != "play_again":
+            return False
+        try:
+            if int(value) >= int(target):
+                return False
+        except (TypeError, ValueError):
+            pass
+        if self.should_return_to_lobby_after_match(active_brawler):
             return False
         try:
             return int(value) < int(target)
@@ -905,6 +936,8 @@ class StageManager:
                 print("Next brawler is in manual mode, waiting 10 seconds to let user switch.")
                 time.sleep(10)
 
+        self.pending_brawler_reselection = False
+
         # q btn is over the start btn
         self.window_controller.keys_up(list("wasd"))
         self.window_controller.press_key("Q")
@@ -1099,6 +1132,9 @@ class StageManager:
         already_recorded = current_result is not None and self.active_end_result == current_result
         stats_recorded = already_recorded
         use_play_again = False
+        match_brawler = getattr(self, "active_match_brawler", "") or (
+            self.brawlers_pick_data[0].get("brawler", "") if self.brawlers_pick_data else ""
+        )
         if already_recorded:
             found_game_result = current_result
             print(f"end_game: re-entry on '{current_state}', skipping trophy update")
@@ -1119,6 +1155,7 @@ class StageManager:
                     use_play_again = self.should_use_play_again(
                         value,
                         self._number_or_default(self.brawlers_pick_data[0].get("push_until", 1000), 1000),
+                        active_brawler=match_brawler,
                     )
 
         while current_state.startswith("end") and time.time() - end_screen_time < 25:
@@ -1181,7 +1218,12 @@ class StageManager:
                     1000 if type_to_push == "trophies" else 300,
                 )
                 value = self._number_or_default(value, 0)
-                use_play_again = self.should_use_play_again(value, push_current_brawler_till)
+                self.reload_queue_from_disk_if_changed()
+                use_play_again = self.should_use_play_again(
+                    value,
+                    push_current_brawler_till,
+                    active_brawler=match_brawler,
+                )
 
                 if value >= push_current_brawler_till:
                     use_play_again = False
@@ -1214,10 +1256,15 @@ class StageManager:
                             screenshot,
                             {"result": found_game_result},
                         )
-                        if self.post_match_action == "play_again":
-                            if self.restart_and_select_next_after_target(push_current_brawler_till, type_to_push):
-                                return
-            
+                        print(
+                            "Target reached; returning to lobby to select the next brawler.",
+                        )
+
+            if use_play_again:
+                print("Post-match action: Play Again.")
+            elif self.should_return_to_lobby_after_match(match_brawler):
+                print("Post-match action: return to lobby (target reached or brawler reselection pending).")
+
             # Keep pressing the dismiss key on every iteration until the
             # end-of-match screens give way. One press is rarely enough in
             # showdown: after the place screen there can be star drops,
