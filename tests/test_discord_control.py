@@ -5,13 +5,14 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from discord_control import (
+    build_status_embed,
     command_allowed,
     resolve_brawler_choice,
     run_callback,
-    set_runtime_state,
     status_text,
     sync_discord_command_tree,
 )
+from runtime_control import set_runtime_state
 from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, is_stop_requested, read_state, request_stop
 
 
@@ -70,6 +71,24 @@ class DiscordControlTest(unittest.TestCase):
         self.assertIn("State: match", text)
         self.assertIn("IPS: 29.50", text)
         self.assertIn("Feed FPS: 60.00", text)
+
+    def test_build_status_embed_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "runtime.state"
+            set_runtime_state(state_path, paused=False)
+
+            embed = build_status_embed(
+                state_path,
+                lambda: {
+                    "state": "lobby",
+                    "ips": "25.00",
+                    "brawler": "colt",
+                    "target": "750",
+                },
+            )
+
+        self.assertEqual(embed.title, "Pyla-RL Status")
+        self.assertIn("Running", embed.description)
 
     def test_run_callback_runs_sync_callbacks_off_loop(self):
         async def runner():

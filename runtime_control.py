@@ -69,6 +69,12 @@ def write_state(path, state):
     Path(path).write_text(state, encoding="utf-8")
 
 
+def set_runtime_state(state_path, paused: bool) -> str:
+    state = PAUSED if paused else RUNNING
+    write_state(state_path, state)
+    return state
+
+
 def read_state(path):
     try:
         return Path(path).read_text(encoding="utf-8").strip().lower()

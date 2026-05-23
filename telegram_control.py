@@ -9,7 +9,7 @@ from typing import Any, Callable
 import aiohttp
 
 from discord_control import callback_result_message, resolve_brawler_choice
-from runtime_control import PAUSED, RUNNING, read_state, request_stop, write_state
+from runtime_control import PAUSED, RUNNING, read_state, request_stop, set_runtime_state, write_state
 from telegram_notifier import (
     allowed_chat_ids,
     async_send_message,
@@ -21,12 +21,6 @@ from telegram_notifier import (
 from utils import _config_bool
 
 from gui.remote_formatting import format_telegram_command_result, format_telegram_help, format_telegram_queue, format_telegram_stats, format_telegram_status
-
-
-def set_runtime_state(state_path: str | Path, paused: bool) -> str:
-    state = PAUSED if paused else RUNNING
-    write_state(state_path, state)
-    return state
 
 
 async def run_callback(callback: Callable[..., Any] | None, *args: Any) -> tuple[bool, str]:

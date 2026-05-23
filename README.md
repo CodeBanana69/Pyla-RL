@@ -32,6 +32,8 @@ See [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md) for what is prohibited and 
 
 See [docs/TUTORIAL.md](docs/TUTORIAL.md) for step-by-step guides for every feature.
 
+See [docs/REPO_LAYOUT.md](docs/REPO_LAYOUT.md) for a map of folders, config tiers, and where runtime data is stored.
+
 For normal users, you only need `setup.exe`.
 
 1. Download or clone this repository.

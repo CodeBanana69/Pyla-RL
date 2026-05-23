@@ -15,6 +15,7 @@ Step-by-step guides for every major feature. Quick summaries are also available 
 ## Hub settings
 
 - [Settings and Performance](tutorials/settings-and-performance.md) — license, cfg folder, debug options
+- [Repository layout](../REPO_LAYOUT.md) — folders, config tiers, runtime data paths
 
 ## Integrations
 

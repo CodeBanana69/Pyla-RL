@@ -1,3 +1,0 @@
-This tutorial moved to docs/tutorials/discord-remote-control.md
-
-Open docs/TUTORIAL.md for the full guide index.

@@ -4,7 +4,7 @@ import time
 import cv2
 import numpy as np
 
-from state_finder import get_state
+from state_finder import get_state, is_starr_nova_hub_screen, get_starr_nova_hub_back_button_center
 from utils import (
     extract_text_and_positions,
     extract_all_text_boxes,
@@ -35,6 +35,25 @@ class LobbyAutomation:
                 print(f"Could not read state while opening brawler menu: {e}")
             return None
 
+    def _dismiss_starr_nova_hub_if_present(self, max_attempts=3):
+        dismissed = False
+        for _ in range(max_attempts):
+            screenshot = self.window_controller.screenshot()
+            if screenshot is None:
+                break
+            screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+            if not is_starr_nova_hub_screen(screenshot_bgr):
+                break
+            back_center = get_starr_nova_hub_back_button_center(screenshot_bgr)
+            if back_center is None:
+                break
+            print("Starr Nova hub open during brawler selection; clicking back.")
+            self.window_controller.keys_up(list("wasd"))
+            self.window_controller.click(*back_center, delay=0.08)
+            time.sleep(0.8)
+            dismissed = True
+        return dismissed
+
     def open_brawler_selection(self, attempts=None):
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
@@ -62,6 +81,8 @@ class LobbyAutomation:
         if attempts is None:
             attempts = len(brawler_button_points)
 
+        self._dismiss_starr_nova_hub_if_present()
+
         state = self._read_state()
         if state == "brawler_selection":
             return True
@@ -70,6 +91,7 @@ class LobbyAutomation:
 
         if state == "lobby" and self.click_visible_brawler_menu_button():
             time.sleep(0.8)
+            self._dismiss_starr_nova_hub_if_present()
             state = self._read_state()
             if state == "brawler_selection":
                 return True
@@ -101,6 +123,14 @@ class LobbyAutomation:
             time.sleep(0.8)
 
             state = self._read_state()
+            screenshot = self.window_controller.screenshot()
+            nova_hub = False
+            if screenshot is not None:
+                nova_hub = is_starr_nova_hub_screen(cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
+            if nova_hub:
+                self._dismiss_starr_nova_hub_if_present()
+                state = self._read_state()
+                continue
             if state == "brawler_selection":
                 return True
             if state == "shop" and self.is_probably_brawler_selection_screen():
@@ -518,7 +548,9 @@ class LobbyAutomation:
             time.sleep(wait)
 
         print("Selecting next brawler by sorting lowest trophies.")
+        self._dismiss_starr_nova_hub_if_present()
         tap(128, 500, 1.4)   # left Brawlers button in lobby
+        self._dismiss_starr_nova_hub_if_present()
         tap(1210, 45, 0.6)   # sort dropdown
         tap(1210, 426, 1.0)  # Least Trophies
         tap(422, 359, 1.0)   # first brawler card after sorting

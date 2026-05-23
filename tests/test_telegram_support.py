@@ -5,8 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import telegram_notifier
-from runtime_control import PAUSED, RUNNING, read_state
-from telegram_control import set_runtime_state
+from runtime_control import PAUSED, RUNNING, read_state, set_runtime_state
 
 
 class TelegramSupportTests(unittest.TestCase):

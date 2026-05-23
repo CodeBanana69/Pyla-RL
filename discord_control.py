@@ -13,13 +13,18 @@ from gui.remote_formatting import (
     EMBED_COLORS,
     format_queue_lines,
     format_status_lines,
-    format_telegram_command_result,
-    format_telegram_help,
-    format_telegram_queue,
-    format_telegram_status,
+    runtime_color_from_state,
     runtime_label_from_state,
 )
-from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, read_state, request_stop, write_state
+from runtime_control import (
+    PAUSED,
+    RUNNING,
+    STOP_REQUESTED,
+    read_state,
+    request_stop,
+    set_runtime_state,
+    write_state,
+)
 from utils import _config_bool, load_brawlers_info, normalize_brawler_name, resolve_brawler_name_alias
 from discord_notifier import _image_to_file, load_webhook_settings
 
@@ -44,12 +49,6 @@ def command_allowed(settings: dict[str, Any], user_id: int | str, channel_id: in
         and _ids_match(allowed_channel, channel_id)
         and _ids_match(allowed_guild, guild_id)
     )
-
-
-def set_runtime_state(state_path: str | Path, paused: bool) -> str:
-    state = PAUSED if paused else RUNNING
-    write_state(state_path, state)
-    return state
 
 
 def resolve_brawler_choice(name: str) -> str | None:
@@ -199,9 +198,6 @@ def callback_result_message(result: Any) -> str:
     if isinstance(result, str) and result.strip():
         return result.strip()
     return "Command finished."
-
-
-DISCORD_COMMAND_HELP = format_telegram_help().replace("<b>", "").replace("</b>", "").replace("<pre>", "").replace("</pre>", "")
 
 
 async def sync_discord_command_tree(tree: app_commands.CommandTree, guild_id: str | None) -> str:

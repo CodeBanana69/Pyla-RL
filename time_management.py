@@ -3,6 +3,7 @@ from utils import load_toml_as_dict
 
 class TimeManagement:
     def __init__(self):
+        # cfg/time_tresholds.toml keeps the legacy filename spelling for compatibility.
         self.thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
         self.states = {key: time.time() for key in self.thresholds.keys()}
 

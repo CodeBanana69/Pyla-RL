@@ -8,7 +8,8 @@ cfg/brawl_stars_api.local.toml
 cfg/discord_config.local.toml
 cfg/.hub_license_acknowledged
 latest_brawler_data.json
-cfg/match_history.toml
+instances/**/latest_brawler_data.json
+instances/**/instance.local.toml
 test.py
 /debug_frames
 /datasets
@@ -22,7 +23,3 @@ main.spec
 PylaAi-XXZ.zip
 start.bat
 run.py
-web_ui/server.py
-web_ui/static/main.js
-web_ui/static/style.css
-web_ui/templates/index.html

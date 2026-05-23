@@ -225,6 +225,6 @@ if any(cmd in sys.argv for cmd in ["install", "develop"]):
 
 setup(
     name="PylaAi-XXZ", version="1.0.0",
-    packages=find_packages(exclude=["api", "cfg", "models", "typization"]),
+    packages=find_packages(exclude=["api", "cfg", "models"]),
     install_requires=[]
 )

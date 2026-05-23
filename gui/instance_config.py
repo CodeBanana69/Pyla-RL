@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""Per-instance paths and multi-instance registry.
+
+Data tiers:
+- cfg/*.toml — shipped defaults (versioned)
+- cfg/*.local.toml — machine secrets (gitignored)
+- instances/<id>/ — per-bot farm plan and overrides (runtime)
+"""
 import os
 import re
 from pathlib import Path

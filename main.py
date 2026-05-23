@@ -375,6 +375,8 @@ def pyla_main(data):
                 "Pause menu ready: F8 pause/resume, − minimize, × compact, □ expand full panel."
             )
             self.remote_control_enabled = not self.instance_id
+            # Single-instance remote control wiring (Discord slash + Telegram commands).
+            # See docs/tutorials/discord-remote-control.md and docs/tutorials/telegram.md.
             if self.remote_control_enabled:
                 self.discord_control = DiscordControlServer(
                     self.control_window.state_path,
@@ -430,7 +432,6 @@ def pyla_main(data):
                 )
             self.was_paused = False
             self.pause_started_at = None
-            self.pending_discord_brawler = None
             self.runtime_notice = "Running"
             self.last_recovery = None
             self.recovery_count_session = 0
@@ -1143,6 +1144,12 @@ def pyla_main(data):
             if self.lobby_entered_at is None:
                 self.lobby_entered_at = now
 
+            if (
+                getattr(self.Stage_manager, "pending_queue", None)
+                or getattr(self.Stage_manager, "pending_brawler_reselection", False)
+            ):
+                return False
+
             if now - self.last_lobby_start_press >= self.lobby_start_retry_interval:
                 print("Lobby watchdog: pressing start again.")
                 self.window_controller.keys_up(list("wasd"))
@@ -1276,16 +1283,13 @@ def pyla_main(data):
                 self.Stage_manager.do_state(state, frame_data)
                 if state == "lobby":
                     self.match_launch_pending = True
-                    if self.Stage_manager.pending_queue:
-                        if self.Stage_manager.apply_pending_reselection_in_lobby():
-                            active = (
-                                self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
-                                if self.Stage_manager.brawlers_pick_data else ""
-                            )
-                            if active:
-                                self.Play.current_brawler = active
-                                print(f"Staged farm plan applied; active brawler is {active}.")
-                        self.pending_discord_brawler = None
+                    if (
+                        not self.Stage_manager.pending_queue
+                        and self.Stage_manager.brawlers_pick_data
+                    ):
+                        active = self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                        if active:
+                            self.Play.current_brawler = active
                 self.handle_lobby_watchdog(state)
 
             if self.Time_management.no_detections_check():

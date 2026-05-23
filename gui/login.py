@@ -2,7 +2,7 @@ import os
 import sys
 
 import customtkinter as ctk  # Import the customtkinter library
-from gui.api import check_if_exists
+from gui.license_client import check_if_exists
 from gui.theme import THEME
 from utils import api_base_url, save_dict_as_toml
 

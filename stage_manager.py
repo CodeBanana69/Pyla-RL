@@ -577,7 +577,6 @@ class StageManager:
         front = self.pending_queue[0]
         selection_method = str(front.get("selection_method", "named_brawler") or "named_brawler")
         brawler_name = self.pending_reselect_brawler or front.get("brawler", "")
-
         if selection_method == "lowest_trophies":
             selected = self.Lobby_automation.select_lowest_trophy_brawler()
         else:
