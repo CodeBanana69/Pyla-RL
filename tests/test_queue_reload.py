@@ -22,6 +22,7 @@ class QueueReloadTests(unittest.TestCase):
         ]
         manager.Trophy_observer = DummyTrophyObserver()
         manager._queue_file_mtime = None
+        manager.pending_queue = None
 
         with tempfile.TemporaryDirectory() as tmp:
             queue_path = os.path.join(tmp, "latest_brawler_data.json")
@@ -37,8 +38,10 @@ class QueueReloadTests(unittest.TestCase):
                 manager._queue_file_mtime = None
                 changed = manager.reload_queue_from_disk_if_changed()
                 self.assertTrue(changed)
-                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "colt")
-                self.assertEqual(manager.Trophy_observer.current_trophies, 50)
+                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "shelly")
+                self.assertEqual(manager.pending_queue[0]["brawler"], "colt")
+                self.assertEqual(manager.Trophy_observer.current_trophies, 100)
+                self.assertTrue(manager.pending_brawler_reselection)
 
                 changed_again = manager.reload_queue_from_disk_if_changed()
                 self.assertFalse(changed_again)

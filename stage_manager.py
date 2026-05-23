@@ -71,6 +71,10 @@ class StageManager:
         self.stop_after_post_match_rewards = False
         self.pending_brawler_reselection = False
         self.active_match_brawler = ""
+        self.pending_queue = None
+        self.pending_reselect_brawler = ""
+        self.pending_target_completion = False
+        self.pending_queue_source = ""
         self.completion_notification_sent = False
         self._notified_brawler_completions = set()
         self._queue_file_mtime = None
@@ -104,6 +108,8 @@ class StageManager:
         }
 
     def requires_brawler_reselection(self, active_brawler=None):
+        if getattr(self, "pending_queue", None):
+            return True
         if getattr(self, "pending_brawler_reselection", False):
             return True
         if getattr(self, "push_all_needs_selection", False):
@@ -430,45 +436,36 @@ class StageManager:
         self.Trophy_observer.current_wins = self._number_or_default(current.get("wins", 0), 0)
         self.Trophy_observer.win_streak = self._number_or_default(current.get("win_streak", 0), 0)
 
-    def _prepare_next_push_all_brawler(self, target, type_of_push="trophies"):
-        """Remove completed Push All rows and choose the current lowest remaining row.
-
-        Push All queues are built from API trophies at launch, but the queue can
-        become stale after each match. Re-sorting here keeps all trophy targets
-        targets on the same "least trophies next" behavior the player sees in
-        the Brawl Stars brawler menu.
-        """
+    def _build_next_queue_rows(self, target, type_of_push="trophies"):
         if not self.brawlers_pick_data:
-            return False
+            return []
 
         target = self._number_or_default(target, 1000 if type_of_push == "trophies" else 300)
-        current_row = self.brawlers_pick_data[0]
+        current_row = dict(self.brawlers_pick_data[0])
         current_row[type_of_push] = self._number_or_default(
             getattr(self.Trophy_observer, f"current_{type_of_push}", current_row.get(type_of_push, 0)),
             current_row.get(type_of_push, 0),
         )
         current_row["win_streak"] = self.Trophy_observer.win_streak
 
-        remaining = self.brawlers_pick_data[1:]
+        remaining = [dict(row) for row in self.brawlers_pick_data[1:]]
         if type_of_push == "trophies":
             remaining = [
-                dict(row)
+                row
                 for row in remaining
                 if self._number_or_default(row.get("trophies", 0), 0)
                 < self._number_or_default(row.get("push_until", target), target)
             ]
         else:
             remaining = [
-                dict(row)
+                row
                 for row in remaining
                 if self._number_or_default(row.get("wins", 0), 0)
                 < self._number_or_default(row.get("push_until", target), target)
             ]
 
         if not remaining:
-            self.brawlers_pick_data = []
-            save_brawler_data(self.brawlers_pick_data)
-            return False
+            return []
 
         if any(row.get("selection_method") == "lowest_trophies" for row in remaining):
             remaining.sort(
@@ -481,10 +478,156 @@ class StageManager:
                 row["selection_method"] = "lowest_trophies"
                 row["automatically_pick"] = True
 
+        return remaining
+
+    def _prepare_next_push_all_brawler(self, target, type_of_push="trophies"):
+        """Remove completed Push All rows and choose the current lowest remaining row."""
+        remaining = self._build_next_queue_rows(target, type_of_push)
+        if not remaining:
+            self.brawlers_pick_data = []
+            save_brawler_data(self.brawlers_pick_data)
+            return False
+
         self.brawlers_pick_data = remaining
         self._sync_observer_to_current_row()
         save_brawler_data(self.brawlers_pick_data)
         return True
+
+    def stage_queue_update(self, new_queue, *, reason="remote", reselect_brawler=None):
+        from gui.brawler_queue import normalize_queue
+
+        normalized = normalize_queue(new_queue if isinstance(new_queue, list) else [])
+        if not normalized:
+            return False
+
+        self.pending_queue = [dict(row) for row in normalized]
+        self.pending_queue_source = str(reason or "remote")
+        self.pending_reselect_brawler = str(
+            reselect_brawler or normalized[0].get("brawler", "") or ""
+        )
+        self.pending_brawler_reselection = True
+        print(
+            f"[Queue] staged {len(normalized)} brawler(s) from {self.pending_queue_source}; "
+            "waiting for lobby selection."
+        )
+        return True
+
+    def _stage_next_queue_after_target(self, target, type_of_push="trophies", source="target"):
+        remaining = self._build_next_queue_rows(target, type_of_push)
+        if not remaining:
+            return False
+        self.pending_target_completion = True
+        return self.stage_queue_update(
+            remaining,
+            reason=source,
+            reselect_brawler=remaining[0].get("brawler"),
+        )
+
+    def stage_queue_from_disk_if_changed(self):
+        from gui.brawler_queue import load_queue, normalize_queue
+        from gui.brawler_queue import QUEUE_PATH
+
+        queue_path = QUEUE_PATH
+        if not os.path.exists(queue_path):
+            return False
+        mtime = os.path.getmtime(queue_path)
+        last_mtime = getattr(self, "_queue_file_mtime", None)
+        if last_mtime is not None and mtime == last_mtime:
+            return False
+
+        queue = load_queue()
+        normalized = normalize_queue(queue)
+        active = normalize_queue(self.brawlers_pick_data or [])
+        if normalized == active:
+            self._queue_file_mtime = mtime
+            return False
+        if getattr(self, "pending_queue", None) and normalized == normalize_queue(self.pending_queue):
+            return False
+
+        self.stage_queue_update(normalized, reason="hub")
+        return True
+
+    def commit_pending_queue(self):
+        pending_queue = getattr(self, "pending_queue", None)
+        if not pending_queue:
+            return False
+
+        from gui.brawler_queue import persist_queue, normalize_queue, QUEUE_PATH
+
+        self.brawlers_pick_data = [dict(row) for row in normalize_queue(pending_queue)]
+        persist_queue(self.brawlers_pick_data)
+        save_brawler_data(self.brawlers_pick_data)
+        self._sync_observer_to_current_row()
+
+        queue_path = QUEUE_PATH
+        if os.path.exists(queue_path):
+            self._queue_file_mtime = os.path.getmtime(queue_path)
+
+        self.pending_queue = None
+        self.pending_reselect_brawler = ""
+        self.pending_target_completion = False
+        self.pending_queue_source = ""
+        self.pending_brawler_reselection = False
+        return True
+
+    def apply_pending_reselection_in_lobby(self):
+        if not getattr(self, "pending_queue", None):
+            return True
+
+        front = self.pending_queue[0]
+        selection_method = str(front.get("selection_method", "named_brawler") or "named_brawler")
+        brawler_name = self.pending_reselect_brawler or front.get("brawler", "")
+
+        if selection_method == "lowest_trophies":
+            selected = self.Lobby_automation.select_lowest_trophy_brawler()
+        else:
+            selected = self.Lobby_automation.select_brawler(brawler_name)
+
+        if not selected:
+            print(
+                f"Could not select staged brawler '{brawler_name}'; "
+                "will retry when lobby is detected again."
+            )
+            return False
+
+        self.commit_pending_queue()
+        print(f"Staged queue committed after selecting {brawler_name or 'lowest-trophy brawler'}.")
+        return True
+
+    def reload_queue_from_disk_if_changed(self):
+        """Legacy helper: stage hub edits instead of applying them immediately."""
+        return self.stage_queue_from_disk_if_changed()
+
+    def _match_row_progress(self, match_brawler=None):
+        if not self.brawlers_pick_data:
+            return 0, 1000, "trophies"
+
+        active_name = normalize_brawler_name(
+            match_brawler or getattr(self, "active_match_brawler", "")
+        )
+        row = self.brawlers_pick_data[0]
+        for candidate in self.brawlers_pick_data:
+            if active_name and normalize_brawler_name(candidate.get("brawler", "")) == active_name:
+                row = candidate
+                break
+
+        type_of_push = row.get("type", "trophies")
+        if type_of_push not in ("trophies", "wins"):
+            type_of_push = "trophies"
+        if type_of_push == "trophies":
+            value = self._number_or_default(
+                getattr(self.Trophy_observer, "current_trophies", row.get("trophies", 0)),
+                row.get("trophies", 0),
+            )
+            default_target = 1000
+        else:
+            value = self._number_or_default(
+                getattr(self.Trophy_observer, "current_wins", row.get("wins", 0)),
+                row.get("wins", 0),
+            )
+            default_target = 300
+        target = self._number_or_default(row.get("push_until", default_target), default_target)
+        return value, target, type_of_push
 
     def _front_push_progress(self):
         if not self.brawlers_pick_data:
@@ -581,7 +724,7 @@ class StageManager:
             push_current_brawler_till,
             screenshot,
         )
-        if not self._prepare_next_push_all_brawler(push_current_brawler_till, type_of_push):
+        if not self._stage_next_queue_after_target(push_current_brawler_till, type_of_push, source="target"):
             print(
                 "Brawler reached required trophies/wins. "
                 "No remaining brawlers are below the Push All target."
@@ -861,28 +1004,9 @@ class StageManager:
             int(api_config.get("timeout_seconds", 15)),
         )
 
-    def reload_queue_from_disk_if_changed(self):
-        from gui.brawler_queue import QUEUE_PATH, load_queue
-
-        if not os.path.exists(QUEUE_PATH):
-            return False
-        mtime = os.path.getmtime(QUEUE_PATH)
-        last_mtime = getattr(self, "_queue_file_mtime", None)
-        if last_mtime is not None and mtime == last_mtime:
-            return False
-        self._queue_file_mtime = mtime
-        queue = load_queue()
-        if queue == self.brawlers_pick_data:
-            return False
-        self.brawlers_pick_data = queue
-        if self.brawlers_pick_data:
-            self._sync_observer_to_current_row()
-        print(f"[Queue] reloaded from hub edits ({len(queue)} brawler(s))")
-        return True
-
     def start_game(self):
         print("state is lobby, starting game")
-        self.reload_queue_from_disk_if_changed()
+        self.stage_queue_from_disk_if_changed()
         if getattr(self, "stop_after_post_match_rewards", False):
             print("Post-match rewards cleared; stopping after completed target.")
             if os.path.exists("latest_brawler_data.json"):
@@ -890,58 +1014,42 @@ class StageManager:
             self.window_controller.keys_up(list("wasd"))
             self.window_controller.close()
             sys.exit(0)
+
         self.push_all_needs_selection = False
-        completion = self._handle_front_target_completion()
         self.refresh_push_all_trophies_from_api()
-        if not self.brawlers_pick_data:
+        if not self.brawlers_pick_data and not getattr(self, "pending_queue", None):
             print("Bot stopping: all Push All targets completed.")
             self.window_controller.keys_up(list("wasd"))
             self.window_controller.close()
             sys.exit(0)
 
-        should_select_next = completion or self.push_all_needs_selection
-        if should_select_next:
-            if self.push_all_needs_selection and not completion:
-                print("Push All queue changed from API; selecting the new lowest trophy brawler.")
-            if self.brawlers_pick_data[0]["automatically_pick"]:
-                print("Picking next automatically picked brawler")
-                screenshot = self.window_controller.screenshot()
-                current_state = get_state(screenshot)
-                if current_state != "lobby":
-                    print("Trying to reach the lobby to switch brawler")
-
-                max_attempts = 30
-                attempts = 0
-                while current_state != "lobby" and attempts < max_attempts:
-                    self.window_controller.press_key("Q")
-                    print("Pressed Q to return to lobby")
-                    time.sleep(1)
-                    screenshot = self.window_controller.screenshot()
-                    current_state = get_state(screenshot)
-                    attempts += 1
-                if attempts >= max_attempts:
-                    print("Failed to reach lobby after max attempts")
-                else:
-                    selection_method = self.brawlers_pick_data[0].get("selection_method", "named_brawler")
-                    if selection_method == "lowest_trophies":
-                        selected = self.Lobby_automation.select_lowest_trophy_brawler()
-                    else:
-                        next_brawler_name = self.brawlers_pick_data[0]['brawler']
-                        selected = self.Lobby_automation.select_brawler(next_brawler_name)
-                    if not selected:
-                        print("Could not confirm the next brawler selection reached lobby; delaying match start.")
-                        self.window_controller.keys_up(list("wasd"))
-                        return
-            else:
-                print("Next brawler is in manual mode, waiting 10 seconds to let user switch.")
-                time.sleep(10)
-
-        self.pending_brawler_reselection = False
+        if getattr(self, "pending_queue", None) or getattr(self, "pending_target_completion", False):
+            if not self.apply_pending_reselection_in_lobby():
+                self.window_controller.keys_up(list("wasd"))
+                return
+        else:
+            completion = self._handle_front_target_completion()
+            if completion:
+                if not self.apply_pending_reselection_in_lobby():
+                    self.window_controller.keys_up(list("wasd"))
+                    return
+            elif self.push_all_needs_selection:
+                print("Push All queue changed from API; staging reselection for lobby.")
+                self.stage_queue_update(
+                    [dict(row) for row in self.brawlers_pick_data],
+                    reason="push_all",
+                    reselect_brawler=self.brawlers_pick_data[0].get("brawler"),
+                )
+                self.push_all_needs_selection = False
+                if not self.apply_pending_reselection_in_lobby():
+                    self.window_controller.keys_up(list("wasd"))
+                    return
 
         # q btn is over the start btn
         self.window_controller.keys_up(list("wasd"))
         self.window_controller.press_key("Q")
         print("Pressed Q to start a match")
+
     def advance_to_next_brawler_after_prestige(self):
         if not self.brawlers_pick_data:
             return False
@@ -1161,7 +1269,7 @@ class StageManager:
         while current_state.startswith("end") and time.time() - end_screen_time < 25:
             if not stats_recorded:
                 found_game_result = current_state.split("_")[1]
-                current_brawler = self.brawlers_pick_data[0]['brawler']
+                current_brawler = match_brawler or self.brawlers_pick_data[0]['brawler']
                 trophies_before = self._number_or_default(
                     getattr(self.Trophy_observer, "current_trophies", 0),
                     0,
@@ -1205,10 +1313,7 @@ class StageManager:
                         "target": self.brawlers_pick_data[0].get("push_until", ""),
                     }),
                 )
-                push_current_brawler_till = self.brawlers_pick_data[0]['push_until']
-
-                if value == "" and type_to_push == "wins":
-                    value = 0
+                value, push_current_brawler_till, type_to_push = self._match_row_progress(match_brawler)
                 if push_current_brawler_till == "" and type_to_push == "wins":
                     push_current_brawler_till = 300
                 if push_current_brawler_till == "" and type_to_push == "trophies":
@@ -1218,7 +1323,13 @@ class StageManager:
                     1000 if type_to_push == "trophies" else 300,
                 )
                 value = self._number_or_default(value, 0)
-                self.reload_queue_from_disk_if_changed()
+                for row in self.brawlers_pick_data:
+                    if normalize_brawler_name(row.get("brawler", "")) == normalize_brawler_name(current_brawler):
+                        row[type_to_push] = value
+                        row["win_streak"] = self.Trophy_observer.win_streak
+                        break
+                save_brawler_data(self.brawlers_pick_data)
+                self.stage_queue_from_disk_if_changed()
                 use_play_again = self.should_use_play_again(
                     value,
                     push_current_brawler_till,
@@ -1251,10 +1362,15 @@ class StageManager:
                             push_current_brawler_till,
                         )
                         self._notify_brawler_target_complete(
-                            current_brawler,
+                            match_brawler,
                             push_current_brawler_till,
                             screenshot,
                             {"result": found_game_result},
+                        )
+                        self._stage_next_queue_after_target(
+                            push_current_brawler_till,
+                            type_to_push,
+                            source="target",
                         )
                         print(
                             "Target reached; returning to lobby to select the next brawler.",

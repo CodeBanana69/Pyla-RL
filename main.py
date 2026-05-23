@@ -674,46 +674,17 @@ def pyla_main(data):
             return "PylaAi-XXZ is stopping. The bot process will exit shortly."
 
         def _apply_remote_queue_change(self, new_queue, message: str):
-            from gui.brawler_queue import persist_queue, QUEUE_PATH
             from gui.remote_formatting import format_command_result, format_queue_lines
 
-            playing = str(self.Play.current_brawler or "")
-            old_front = ""
-            if self.Stage_manager.brawlers_pick_data:
-                old_front = str(self.Stage_manager.brawlers_pick_data[0].get("brawler", "") or "")
-
-            persist_queue(new_queue)
-            self.Stage_manager.brawlers_pick_data = new_queue
-            try:
-                if Path(QUEUE_PATH).exists():
-                    self.Stage_manager._queue_file_mtime = os.path.getmtime(QUEUE_PATH)
-            except OSError:
-                pass
-            if new_queue and hasattr(self.Stage_manager, "_sync_observer_to_current_row"):
-                self.Stage_manager._sync_observer_to_current_row()
+            active = new_queue[0].get("brawler", "") if new_queue else ""
+            staged = self.Stage_manager.stage_queue_update(new_queue, reason="remote", reselect_brawler=active)
             write_state(self.control_window.state_path, RUNNING)
 
-            active = new_queue[0].get("brawler", "") if new_queue else ""
-            if active and (
-                normalize_brawler_name(active) != normalize_brawler_name(playing)
-                or normalize_brawler_name(active) != normalize_brawler_name(old_front)
-            ):
-                self.Stage_manager.pending_brawler_reselection = True
-            if new_queue:
-                self.Play.current_brawler = active
-            reselect_now = self.state == "lobby" and active
             reselect_note = ""
-            if reselect_now:
-                if self.lobby_automator.select_brawler(active):
-                    self.pending_discord_brawler = None
-                    self.Stage_manager.pending_brawler_reselection = False
-                    reselect_note = " Brawler reselected in lobby."
-                else:
-                    self.pending_discord_brawler = active
-                    reselect_note = " Will retry brawler selection when lobby is detected."
+            if staged and active:
+                reselect_note = f" Will reselect {active} after returning to lobby."
             elif active:
-                self.pending_discord_brawler = active
-                reselect_note = " Brawler will be reselected when the bot returns to lobby."
+                reselect_note = " Farm plan unchanged."
 
             payload = format_command_result("Farm Plan Updated", message + reselect_note, new_queue)
             payload["queue_text"] = format_queue_lines(new_queue)
@@ -1305,11 +1276,15 @@ def pyla_main(data):
                 self.Stage_manager.do_state(state, frame_data)
                 if state == "lobby":
                     self.match_launch_pending = True
-                    if self.pending_discord_brawler:
-                        pending = self.pending_discord_brawler
-                        if self.lobby_automator.select_brawler(pending):
-                            self.Play.current_brawler = pending
-                            print(f"Discord push: reselected brawler {pending} in lobby.")
+                    if self.Stage_manager.pending_queue:
+                        if self.Stage_manager.apply_pending_reselection_in_lobby():
+                            active = (
+                                self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                                if self.Stage_manager.brawlers_pick_data else ""
+                            )
+                            if active:
+                                self.Play.current_brawler = active
+                                print(f"Staged farm plan applied; active brawler is {active}.")
                         self.pending_discord_brawler = None
                 self.handle_lobby_watchdog(state)
 

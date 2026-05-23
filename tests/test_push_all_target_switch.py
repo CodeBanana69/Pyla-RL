@@ -50,15 +50,15 @@ class DummyLobbyAutomation:
 
 class PushAllTargetSwitchTest(unittest.TestCase):
     def setUp(self):
-        self.reload_patch = patch.object(
+        self.stage_patch = patch.object(
             StageManager,
-            "reload_queue_from_disk_if_changed",
+            "stage_queue_from_disk_if_changed",
             return_value=False,
         )
-        self.reload_patch.start()
+        self.stage_patch.start()
 
     def tearDown(self):
-        self.reload_patch.stop()
+        self.stage_patch.stop()
 
     def make_manager(self, target):
         manager = object.__new__(StageManager)
@@ -92,6 +92,11 @@ class PushAllTargetSwitchTest(unittest.TestCase):
         manager.push_all_needs_selection = False
         manager.stop_after_post_match_rewards = False
         manager._notified_brawler_completions = set()
+        manager.pending_queue = None
+        manager.pending_reselect_brawler = ""
+        manager.pending_target_completion = False
+        manager.pending_queue_source = ""
+        manager.pending_brawler_reselection = False
         return manager
 
     @patch.object(StageManager, "refresh_push_all_trophies_from_api", return_value=False)

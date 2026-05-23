@@ -219,6 +219,58 @@ class PostMatchActionTests(unittest.TestCase):
         self.assertFalse(manager.should_use_play_again(value=250, target=250, active_brawler="first"))
         self.assertTrue(manager.should_return_to_lobby_after_match(active_brawler="first"))
 
+    @patch("stage_manager.save_brawler_data")
+    def test_target_completion_stages_queue_without_commit(self, *_):
+        manager = self.make_manager("play_again")
+        manager.brawlers_pick_data = [
+            {
+                "brawler": "first",
+                "push_until": 250,
+                "trophies": 249,
+                "wins": 0,
+                "type": "trophies",
+                "win_streak": 0,
+            },
+            {
+                "brawler": "second",
+                "push_until": 250,
+                "trophies": 10,
+                "wins": 0,
+                "type": "trophies",
+                "win_streak": 0,
+            },
+        ]
+        manager.Trophy_observer = DummyTrophyObserver()
+        manager.Trophy_observer.current_trophies = 250
+        manager.active_match_brawler = "first"
+        manager.pending_queue = None
+        notifications = []
+        manager.send_webhook_notification = lambda event, screenshot, details: notifications.append(
+            (event, details.get("brawler"), details.get("target"))
+        )
+        manager._notified_brawler_completions = set()
+        manager._stage_next_queue_after_target(250, "trophies", source="target")
+
+        self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "first")
+        self.assertEqual(manager.pending_queue[0]["brawler"], "second")
+        self.assertFalse(manager.should_use_play_again(value=250, target=250, active_brawler="first"))
+
+    def test_match_row_progress_uses_active_match_brawler(self):
+        manager = self.make_manager("play_again")
+        manager.brawlers_pick_data = [
+            {"brawler": "shelly", "push_until": 500, "trophies": 100, "type": "trophies"},
+            {"brawler": "colt", "push_until": 250, "trophies": 250, "type": "trophies"},
+        ]
+        manager.Trophy_observer = DummyTrophyObserver()
+        manager.Trophy_observer.current_trophies = 250
+        manager.active_match_brawler = "colt"
+
+        value, target, type_of_push = manager._match_row_progress("colt")
+
+        self.assertEqual(value, 250)
+        self.assertEqual(target, 250)
+        self.assertEqual(type_of_push, "trophies")
+
 
 if __name__ == "__main__":
     unittest.main()
