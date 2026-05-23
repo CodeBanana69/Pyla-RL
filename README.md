@@ -42,11 +42,11 @@ For normal users, you only need `setup.exe`.
 5. Start your Android emulator.
 6. Open Brawl Stars in the emulator.
 7. Set the emulator resolution to `1920x1080` for best results.
-8. Double-click the generated `Run Pyla-RL.bat` file or run `python main.py`.
+8. Double-click `pyla-rl.bat` or run `python main.py`.
 9. In the hub, choose your emulator, select your brawler setup, then press Start.
 
 Emulator and ADB troubleshooting:
-- After setup, use **`Run Pyla-RL.bat`** only (older `Run PylaAi-XXZ.bat` launchers are removed automatically).
+- After setup, use **`pyla-rl.bat`** only (older `Run Pyla-RL.bat` and `Run PylaAi-XXZ.bat` launchers are removed automatically).
 - On the Hub **Overview** tab, pick **LDPlayer** or **MuMu** first, then click **Run Checks**.
 - **LDPlayer:** enable ADB in Settings → Other settings → ADB debugging, then restart the emulator. Default port is `5555` (instance 1 uses `5557`, instance 2 uses `5559`).
 - **MuMu:** confirm ADB is enabled in emulator settings. Default port is `16384` (instance 1 uses `16416`).
@@ -84,7 +84,8 @@ Recovery features :
 - While the bot is running, a small `Pyla-RL Control` window lets you pause and resume movement safely.
 
 Multi-instance mode (LDPlayer + MuMu):
-- Enable **Multi-Instance** in the Hub **Instances** tab, then restart the Hub so the shared Discord/Telegram router starts.
+- Open the Hub **Instances** tab and enable **Multi-Instance**, then start each bot from that tab.
+- Restart the Hub after enabling if Discord/Telegram remote control does not pick up instances.
 - Each instance profile gets its own emulator port, farm plan (`instances/<id>/latest_brawler_data.json`), and worker process.
 - Supported emulators: **LDPlayer** (5555/5557/5559) and **MuMu** (16384/16416/16448). Each running instance must use a unique ADB port.
 - Use the Instances dashboard to start/stop workers while the Hub stays open.

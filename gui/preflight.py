@@ -5,15 +5,14 @@ import subprocess
 from pathlib import Path
 
 from gui.emulator_adb import (
-    adb_executable,
     connect_emulator_adb,
     detect_emulator_process,
     normalize_emulator_name,
     ports_for_emulator,
+    run_adb as _run_adb,
 )
 from utils import load_toml_as_dict, save_dict_as_toml
 
-LOCAL_ADB_EXE = Path(__file__).resolve().parent.parent / "adb.exe"
 RESOLUTION_1080P_OK = {
     (1920, 1080),
     (1080, 1920),
@@ -24,31 +23,6 @@ RESOLUTION_720P_OK = {
     (1280, 720),
     (720, 1280),
 }
-
-
-def _run_adb(args, serial=None, timeout=8):
-    adb = adb_executable()
-    if not adb:
-        return None, "ADB not found (bundled adb.exe and PATH both missing)"
-    command = [adb]
-    if serial:
-        command.extend(["-s", serial])
-    command.extend(args)
-    try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return None, str(exc)
-    output = (result.stdout or "") + (result.stderr or "")
-    if result.returncode != 0:
-        return None, output.strip() or f"adb exited with code {result.returncode}"
-    return output.strip(), ""
 
 
 def _parse_wm_sizes(output):

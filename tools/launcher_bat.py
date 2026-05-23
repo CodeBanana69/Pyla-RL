@@ -1,38 +1,91 @@
-"""Create the single Run Pyla-RL.bat launcher and remove legacy launchers."""
+"""Create the single pyla-rl.bat launcher and remove legacy launchers."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-RUN_BAT_NAME = "Run Pyla-RL.bat"
-LEGACY_BAT_NAMES = ("Run PylaAi-XXZ.bat",)
+RUN_BAT_NAME = "pyla-rl.bat"
+LEGACY_BAT_NAMES = ("Run Pyla-RL.bat", "Run PylaAi-XXZ.bat", "start.bat")
 
+_BAT_CONTENT = """\
+@echo off
+setlocal EnableExtensions
 
-def _bat_content(python_invocation: str) -> str:
-    return (
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "set OMP_NUM_THREADS=2\n"
-        "set OPENBLAS_NUM_THREADS=2\n"
-        "set MKL_NUM_THREADS=2\n"
-        "set NUMEXPR_NUM_THREADS=2\n"
-        f"{python_invocation} main.py\n"
-        "pause\n"
+cd /d "%~dp0"
+
+set "OMP_NUM_THREADS=2"
+set "OPENBLAS_NUM_THREADS=2"
+set "MKL_NUM_THREADS=2"
+set "NUMEXPR_NUM_THREADS=2"
+
+title Pyla-RL
+
+echo.
+echo Pyla-RL launcher
+echo Official free download: https://github.com/CodeBanana69/Pyla-RL
+echo.
+
+if exist ".venv\\Scripts\\python.exe" (
+    set "PY=.venv\\Scripts\\python.exe"
+    goto :run
+)
+
+where py >nul 2>&1
+if not errorlevel 1 (
+    py -3.11-64 -c "import sys" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=py -3.11-64"
+        goto :run
     )
+    py -3.11 -c "import sys" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=py -3.11"
+        goto :run
+    )
+)
+
+where python >nul 2>&1
+if not errorlevel 1 (
+    python -c "import sys; raise SystemExit(0 if sys.maxsize > 2**32 else 1)" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=python"
+        goto :run
+    )
+)
+
+echo Could not find a 64-bit Python 3.11 install.
+echo Run setup.exe in this folder first, then try again.
+echo.
+pause
+exit /b 1
+
+:run
+echo Using: %PY%
+echo.
+echo Make sure your emulator is running and Brawl Stars is open.
+echo.
+
+%PY% main.py
+set "EXIT_CODE=%ERRORLEVEL%"
+
+if not "%EXIT_CODE%"=="0" (
+    echo.
+    echo Pyla-RL exited with code %EXIT_CODE%.
+    echo.
+    pause
+)
+
+exit /b %EXIT_CODE%
+"""
 
 
-def python_invocation_from_command(python_command: list[str]) -> str:
-    return " ".join(f'"{part}"' if " " in part else part for part in python_command)
-
-
-def create_run_file(project_dir: Path, python_command: list[str] | None = None, python_executable: str | None = None) -> Path:
+def create_run_file(
+    project_dir: Path,
+    python_command: list[str] | None = None,
+    python_executable: str | None = None,
+) -> Path:
+    del python_command, python_executable
     project_dir = Path(project_dir)
-    if python_command is not None:
-        invocation = python_invocation_from_command(python_command)
-    elif python_executable:
-        invocation = f'"{python_executable}"'
-    else:
-        raise ValueError("python_command or python_executable is required")
 
     for legacy_name in LEGACY_BAT_NAMES:
         legacy_path = project_dir / legacy_name
@@ -41,6 +94,6 @@ def create_run_file(project_dir: Path, python_command: list[str] | None = None, 
             print(f"Removed legacy launcher {legacy_name}")
 
     run_bat = project_dir / RUN_BAT_NAME
-    run_bat.write_text(_bat_content(invocation), encoding="ascii")
+    run_bat.write_text(_BAT_CONTENT, encoding="ascii")
     print(f"Created {run_bat.name}")
     return run_bat

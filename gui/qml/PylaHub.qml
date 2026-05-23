@@ -38,9 +38,7 @@ ApplicationWindow {
     property string pickerType: "trophies"
     property string historySort: "games"
     readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
-    readonly property var navItems: (hubState.multiInstance && hubState.multiInstance.enabled)
-        ? ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
-        : ["Overview", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
+    readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
         const needle = pickerFilter.trim().toLowerCase()
@@ -53,6 +51,11 @@ ApplicationWindow {
     }
     property int queueDragSource: -1
     property int queueDropTarget: -1
+    property bool showAddInstanceForm: false
+    property string instanceFormId: ""
+    property string instanceFormName: ""
+    property string instanceFormEmulator: "ldplayer"
+    property string instanceFormPort: "5555"
 
     function reloadHubState() {
         if (!hubBridge) {
@@ -118,6 +121,34 @@ ApplicationWindow {
             }
         }
         return result
+    }
+
+    function saveNewInstance() {
+        const payload = {
+            id: instanceFormId.trim(),
+            name: instanceFormName.trim() || instanceFormId.trim(),
+            emulator: instanceFormEmulator,
+            emulator_port: parseInt(instanceFormPort, 10) || 5555,
+            enabled: true
+        }
+        const result = applyBridgeResult(hubBridge.saveInstanceProfile(JSON.stringify(payload)))
+        if (result.ok) {
+            showAddInstanceForm = false
+            instanceFormId = ""
+            instanceFormName = ""
+            instanceFormEmulator = "ldplayer"
+            instanceFormPort = "5555"
+        }
+        return result
+    }
+
+    function setInstanceFormEmulator(value) {
+        instanceFormEmulator = value
+        if (value === "mumu" && (instanceFormPort === "5555" || instanceFormPort === "5557" || instanceFormPort === "5559")) {
+            instanceFormPort = "16384"
+        } else if (value === "ldplayer" && (instanceFormPort === "16384" || instanceFormPort === "16416" || instanceFormPort === "16448")) {
+            instanceFormPort = "5555"
+        }
     }
 
     function saveValue(section, key, value) {
@@ -241,14 +272,15 @@ ApplicationWindow {
         height: 16
 
         Canvas {
+            id: glyphCanvas
             anchors.fill: parent
             antialiasing: true
             onWidthChanged: requestPaint()
             onHeightChanged: requestPaint()
             Connections {
                 target: icon
-                function onKindChanged() { parent.requestPaint() }
-                function onStrokeChanged() { parent.requestPaint() }
+                function onKindChanged() { glyphCanvas.requestPaint() }
+                function onStrokeChanged() { glyphCanvas.requestPaint() }
             }
             onPaint: {
                 const ctx = getContext("2d")
@@ -1632,10 +1664,97 @@ ApplicationWindow {
                                 }
                             }
                         }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !(hubState.multiInstance && hubState.multiInstance.enabled)
+                            text: "Single-instance mode uses START on Overview. Enable this to run multiple LDPlayer or MuMu bots in parallel from this tab."
+                            color: theme.faint
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                            text: "Multi-instance mode is active. Start each bot with Start below instead of Overview START."
+                            color: theme.ok
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
                         HubButton {
                             label: "Refresh Instances"
                             secondary: true
                             onClicked: applyBridgeResult(hubBridge.refreshInstances())
+                        }
+                    }
+
+                    FormPanel {
+                        title: "ADD INSTANCE"
+                        visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            ActionRow {
+                                HubButton {
+                                    label: showAddInstanceForm ? "Hide Form" : "Add Instance"
+                                    secondary: true
+                                    onClicked: showAddInstanceForm = !showAddInstanceForm
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: showAddInstanceForm
+                                FieldRow {
+                                    label: "Instance ID"
+                                    ConfigInput {
+                                        anchors.fill: parent
+                                        live: true
+                                        value: root.instanceFormId
+                                        onSaved: function(value) { root.instanceFormId = value }
+                                    }
+                                }
+                                FieldRow {
+                                    label: "Display Name"
+                                    ConfigInput {
+                                        anchors.fill: parent
+                                        live: true
+                                        value: root.instanceFormName
+                                        onSaved: function(value) { root.instanceFormName = value }
+                                    }
+                                }
+                                FieldRow {
+                                    label: "Emulator"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        spacing: 8
+                                        HubButton {
+                                            label: "LDPlayer"
+                                            secondary: root.instanceFormEmulator !== "ldplayer"
+                                            onClicked: root.setInstanceFormEmulator("ldplayer")
+                                        }
+                                        HubButton {
+                                            label: "MuMu"
+                                            secondary: root.instanceFormEmulator !== "mumu"
+                                            onClicked: root.setInstanceFormEmulator("mumu")
+                                        }
+                                    }
+                                }
+                                FieldRow {
+                                    label: "ADB Port"
+                                    ConfigInput {
+                                        anchors.fill: parent
+                                        live: true
+                                        value: root.instanceFormPort
+                                        onSaved: function(value) { root.instanceFormPort = value }
+                                    }
+                                }
+                                ActionRow {
+                                    HubButton {
+                                        label: "Save Instance"
+                                        onClicked: root.saveNewInstance()
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -1685,6 +1804,12 @@ ApplicationWindow {
                                                 secondary: true
                                                 visible: !!modelData.running
                                                 onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id))
+                                            }
+                                            HubButton {
+                                                label: "Delete"
+                                                secondary: true
+                                                visible: modelData.id !== String((hubState.multiInstance && hubState.multiInstance.defaultInstance) || "default")
+                                                onClicked: applyBridgeResult(hubBridge.deleteInstanceProfile(modelData.id))
                                             }
                                         }
                                     }

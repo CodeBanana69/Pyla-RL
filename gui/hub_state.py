@@ -363,10 +363,10 @@ class HubStateStore:
         }
 
     def set_multi_instance_enabled(self, enabled: bool):
-        from gui.instance_config import migrate_single_instance_to_default, set_multi_instance_enabled
+        from gui.instance_config import ensure_multi_instance_profiles, set_multi_instance_enabled
 
         if enabled:
-            migrate_single_instance_to_default()
+            ensure_multi_instance_profiles()
         return set_multi_instance_enabled(enabled)
 
     def save_instance_profile(self, instance_id: str, profile: dict):

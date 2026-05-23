@@ -266,6 +266,24 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("id: importQueueDialog", qml)
         self.assertIn("id: exportQueueDialog", qml)
 
+    def test_qml_instances_tab_is_always_available(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]',
+            qml,
+        )
+        self.assertIn("setMultiInstanceEnabled", qml)
+        self.assertIn('visible: root.activeTab === "Instances"', qml)
+
+    def test_qml_instances_tab_supports_add_and_save(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+
+        self.assertIn('title: "ADD INSTANCE"', qml)
+        self.assertIn("saveNewInstance", qml)
+        self.assertIn("saveInstanceProfile", qml)
+        self.assertIn("deleteInstanceProfile", qml)
+
     def test_qml_anti_reseller_ui_contract(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 

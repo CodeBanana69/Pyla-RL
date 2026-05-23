@@ -81,7 +81,7 @@ class Client:
 
         # Connect to device
         if device is None:
-            device = adb.device_list()[0]
+            raise ValueError("scrcpy Client requires an explicit ADB device or serial")
         elif isinstance(device, str):
             device = adb.device(serial=device)
 

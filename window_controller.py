@@ -20,9 +20,11 @@ from utils import load_toml_as_dict
 from gui.emulator_adb import (
     EMULATOR_PORTS,
     ADB_SERVER_PORT,
+    cleanup_conflicting_devices,
     is_port_open as _is_port_open,
     is_local_adb_serial as _is_local_adb_serial,
     ports_for_emulator,
+    run_adb as _run_adb_cli,
     serial_port as _serial_port,
 )
 
@@ -142,17 +144,14 @@ def _adb_executable():
 
 
 def _run_adb(serial, args, timeout=5):
-    command = [_adb_executable()]
-    if serial:
-        command.extend(["-s", serial])
-    command.extend(args)
-    return subprocess.run(
-        command,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    output, error = _run_adb_cli(list(args), serial=serial or None, timeout=timeout)
+    completed = subprocess.CompletedProcess(
+        args=[_adb_executable()] + (["-s", serial] if serial else []) + list(args),
+        returncode=0 if output is not None else 1,
+        stdout=output or "",
+        stderr=error or "",
     )
+    return completed
 
 
 def _is_adb_serial_online(serial, timeout=3):
@@ -617,6 +616,7 @@ class WindowController:
                 if not ports_to_try and not device_list:
                     ports_to_try = candidate_ports
                 for port in ports_to_try:
+                    cleanup_conflicting_devices(port, keep_serial=f"127.0.0.1:{port}")
                     try:
                         adb.connect(f"127.0.0.1:{port}")
                     except Exception:

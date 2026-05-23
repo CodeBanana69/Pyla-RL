@@ -61,11 +61,20 @@ class QmlHub:
             closeRequested = Signal()
             instancesUpdated = Signal()
 
-            def __init__(self, store, correct_zoom=True, settings_only=False):
+            def __init__(
+                self,
+                store,
+                correct_zoom=True,
+                settings_only=False,
+                on_multi_instance_enabled=None,
+                on_multi_instance_disabled=None,
+            ):
                 super().__init__()
                 self._store = store
                 self._correct_zoom = correct_zoom
                 self._settings_only = settings_only
+                self._on_multi_instance_enabled = on_multi_instance_enabled
+                self._on_multi_instance_disabled = on_multi_instance_disabled
                 self._preflight_cache = {"ready": False, "checks": []}
                 self._icon_download_started = False
                 self._multi_instance_service = None
@@ -105,8 +114,25 @@ class QmlHub:
             @Slot(bool, result=str)
             def setMultiInstanceEnabled(self, enabled):
                 try:
+                    from gui.instance_config import is_multi_instance_enabled
+
+                    was_enabled = is_multi_instance_enabled()
                     self._store.set_multi_instance_enabled(bool(enabled))
-                    return json.dumps({"ok": True, "state": self._ui_state()})
+                    if enabled and not was_enabled:
+                        if self._on_multi_instance_enabled:
+                            self._on_multi_instance_enabled()
+                        message = (
+                            "Multi-instance enabled. Start bots from this tab. "
+                            "Restart the Hub if Discord/Telegram remote control does not pick up instances."
+                        )
+                    elif not enabled and was_enabled:
+                        if self._on_multi_instance_disabled:
+                            self._on_multi_instance_disabled()
+                        message = "Multi-instance disabled. Use START on Overview for single-instance mode."
+                    else:
+                        message = "Multi-instance setting saved."
+                    self.instancesUpdated.emit()
+                    return json.dumps({"ok": True, "message": message, "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -145,7 +171,10 @@ class QmlHub:
 
             @Slot(result=str)
             def refreshInstances(self):
-                return self.stateJson()
+                from gui.instance_config import ensure_multi_instance_profiles
+
+                ensure_multi_instance_profiles()
+                return json.dumps({"ok": True, "state": self._ui_state()})
 
             def _ui_state(self, preflight=None):
                 if preflight is None:
@@ -604,18 +633,43 @@ class QmlHub:
         from gui import brand
 
         self._store = HubStateStore()
-        self._bridge = HubBridge(self._store, correct_zoom=correct_zoom, settings_only=settings_only)
-        self._bridge._app = app
         self._multi_instance_service = None
+
+        def _start_multi_instance_service():
+            if self._multi_instance_service is not None or settings_only:
+                return
+            from gui.multi_instance_service import MultiInstanceService
+
+            self._multi_instance_service = MultiInstanceService()
+            self._multi_instance_service.start()
+            self._bridge.set_multi_instance_service(self._multi_instance_service)
+
+        def _stop_multi_instance_service():
+            if self._multi_instance_service is None:
+                return
+            for item in self._multi_instance_service.list_instances():
+                if item.get("running"):
+                    self._multi_instance_service.stop_instance(item["id"])
+            self._multi_instance_service.close()
+            self._multi_instance_service = None
+            self._bridge.set_multi_instance_service(None)
+
+        self._start_multi_instance_service = _start_multi_instance_service
+        self._stop_multi_instance_service = _stop_multi_instance_service
+        self._bridge = HubBridge(
+            self._store,
+            correct_zoom=correct_zoom,
+            settings_only=settings_only,
+            on_multi_instance_enabled=_start_multi_instance_service,
+            on_multi_instance_disabled=_stop_multi_instance_service,
+        )
+        self._bridge._app = app
         if not settings_only:
-            from gui.instance_config import is_multi_instance_enabled
+            from gui.instance_config import ensure_multi_instance_profiles, is_multi_instance_enabled
 
             if is_multi_instance_enabled():
-                from gui.multi_instance_service import MultiInstanceService
-
-                self._multi_instance_service = MultiInstanceService()
-                self._multi_instance_service.start()
-                self._bridge.set_multi_instance_service(self._multi_instance_service)
+                ensure_multi_instance_profiles()
+                _start_multi_instance_service()
         if not settings_only:
             self._bridge.closeRequested.connect(self._mark_started_and_close)
 

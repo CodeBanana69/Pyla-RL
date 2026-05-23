@@ -758,100 +758,24 @@ class SelectBrawler:
         return None
 
     def get_adb_device_for_quick_select(self):
+        from gui.emulator_adb import connect_emulator_adb, normalize_emulator_name
+
         general_config = load_toml_as_dict("cfg/general_config.toml")
         configured_port = general_config.get("emulator_port", 0)
-        selected_emulator = general_config.get("current_emulator", "LDPlayer")
-        brawl_package = general_config.get("brawl_stars_package", "com.supercell.brawlstars").strip()
-        emulator_ports = {
-            "LDPlayer": [5555, 5557, 5559, 5554],
-            "MuMu": [16384, 16416, 16448, 7555, 5558, 5557, 5556, 5555, 5554],
-        }
-        if selected_emulator not in emulator_ports:
-            try:
-                configured_port_int = int(configured_port)
-            except (TypeError, ValueError):
-                configured_port_int = 0
-            selected_emulator = "MuMu" if configured_port_int in (16384, 16416, 16448, 7555) else "LDPlayer"
+        selected_emulator = normalize_emulator_name(general_config.get("current_emulator", "LDPlayer"))
         try:
             configured_port = int(configured_port)
         except (TypeError, ValueError):
-            configured_port = 0
-        preferred_ports = []
-        port_candidates = [configured_port] + emulator_ports[selected_emulator] + emulator_ports["LDPlayer"] + emulator_ports["MuMu"]
-        for port in port_candidates:
-            try:
-                port = int(port)
-            except (TypeError, ValueError):
-                continue
-            if port != 5037 and port not in preferred_ports:
-                preferred_ports.append(port)
-        configured_ports = []
-        try:
-            configured_ports = [int(configured_port)]
-        except (TypeError, ValueError):
-            pass
+            configured_port = None
 
-        def serial_port(serial):
-            if serial.startswith("emulator-"):
-                try:
-                    return int(serial.rsplit("-", 1)[1])
-                except ValueError:
-                    return None
-            if ":" in serial:
-                try:
-                    return int(serial.rsplit(":", 1)[1])
-                except ValueError:
-                    return None
-            return None
+        result = connect_emulator_adb(selected_emulator, configured_port)
+        if not result.get("ok"):
+            raise ConnectionError(result.get("detail") or "No ADB device found for Push All.")
 
-        def online_devices():
-            devices = []
-            for dev in adb.device_list():
-                try:
-                    if dev.get_state() == "device":
-                        devices.append(dev)
-                except Exception:
-                    pass
-            return devices
-
-        def choose_device(devices):
-            best_device = None
-            best_score = None
-            for index, dev in enumerate(devices):
-                port = serial_port(dev.serial)
-                try:
-                    opened_package = dev.app_current().package.strip()
-                except Exception:
-                    opened_package = ""
-                score = (
-                    opened_package == brawl_package,
-                    port in configured_ports,
-                    port in preferred_ports,
-                    -index,
-                )
-                if best_score is None or score > best_score:
-                    best_device = dev
-                    best_score = score
-            return best_device
-
-        devices = online_devices()
-        device = choose_device(devices)
-        if device:
-            return device
-
-        for port in preferred_ports:
-            if port == 5037:
-                continue
-            try:
-                adb.connect(f"127.0.0.1:{port}")
-            except Exception:
-                pass
-
-        devices = online_devices()
-        device = choose_device(devices)
-        if not device:
-            raise ConnectionError("No ADB device found for Push All.")
-        return device
+        serial = str(result.get("serial") or "")
+        if not serial:
+            raise ConnectionError("No ADB serial returned for Push All.")
+        return adb.device(serial=serial)
 
     def quick_select_least_trophies_brawler(self):
         device = self.get_adb_device_for_quick_select()

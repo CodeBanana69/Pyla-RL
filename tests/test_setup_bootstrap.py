@@ -70,6 +70,7 @@ class SetupBootstrapTests(unittest.TestCase):
 
         self.assertIn("Run PylaAi-XXZ.bat", source)
         self.assertIn("Run Pyla-RL.bat", source)
+        self.assertIn("pyla-rl.bat", source)
         self.assertIn("legacy_path.unlink()", source)
 
     def test_main_repairs_numpy_before_importing_cv2(self):

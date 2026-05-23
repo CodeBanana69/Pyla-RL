@@ -86,8 +86,8 @@ def save_instances_config(data: dict[str, Any]) -> str:
     normalized["multi_instance"].update(data.get("multi_instance") or {})
     instances = data.get("instances") or {}
     normalized["instances"] = instances if isinstance(instances, dict) else {}
-    save_dict_as_toml(normalized, INSTANCES_CONFIG_PATH)
-    return str(resolve_project_path(INSTANCES_CONFIG_PATH))
+    path = save_dict_as_toml(normalized, INSTANCES_CONFIG_PATH)
+    return path
 
 
 def set_multi_instance_enabled(enabled: bool) -> dict[str, Any]:
@@ -163,6 +163,11 @@ def upsert_instance_profile(instance_id: str, profile: dict[str, Any]) -> dict[s
     data = load_instances_config()
     instance_id = _slugify(instance_id or profile.get("id", ""))
     normalized = normalize_instance_profile(instance_id, profile)
+    collision = find_port_collision(instance_id, normalized["emulator_port"])
+    if collision:
+        raise ValueError(
+            f"Port {normalized['emulator_port']} is already used by instance '{collision}'."
+        )
     instances = dict(data.get("instances") or {})
     instances[instance_id] = {
         "name": normalized["name"],
@@ -262,8 +267,37 @@ def migrate_single_instance_to_default() -> dict[str, Any]:
         target_queue.parent.mkdir(parents=True, exist_ok=True)
         target_queue.write_text(source_queue.read_text(encoding="utf-8"), encoding="utf-8")
 
+    data = load_instances_config()
     data["multi_instance"]["default_instance"] = profile["id"]
     save_instances_config(data)
+    return data
+
+
+def ensure_multi_instance_profiles() -> dict[str, Any]:
+    data = load_instances_config()
+    if not is_multi_instance_enabled():
+        return data
+
+    instances = data.get("instances") or {}
+    if not instances:
+        return migrate_single_instance_to_default()
+
+    default_id = _slugify(str(data.get("multi_instance", {}).get("default_instance", "") or ""))
+    if default_id and default_id not in instances:
+        general = load_toml_as_dict("cfg/general_config.toml")
+        emulator = normalize_emulator_name(general.get("current_emulator", "LDPlayer"))
+        port = int(
+            general.get("emulator_port", default_port_for_emulator(emulator))
+            or default_port_for_emulator(emulator)
+        )
+        upsert_instance_profile(default_id, {
+            "name": "Default Instance" if default_id == "default" else default_id.replace("-", " ").title(),
+            "enabled": True,
+            "emulator": emulator,
+            "emulator_port": port,
+            "emulator_profile_index": general.get("emulator_profile_index", infer_profile_index(emulator, port)),
+        })
+        return load_instances_config()
     return data
 
 

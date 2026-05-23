@@ -166,7 +166,7 @@ def main():
             emulator = cfg.get("current_emulator", "LDPlayer")
             print(f"This causes 1-2 IPS with low Python CPU usage. Fix {emulator} settings first:")
             print("- Apply Pyla's balanced performance profile, then restart: python tools/apply_performance_profile.py --profile balanced")
-            print("- Use Python 3.11 64-bit via Run Pyla-RL.bat, not 32-bit python.exe.")
+            print("- Use Python 3.11 64-bit via pyla-rl.bat, not 32-bit python.exe.")
             print("- Set emulator resolution to 1920x1080 landscape.")
             print("- Set emulator FPS to 60 and disable low-FPS/eco/power-saving mode.")
             print(f"- Disable Windows Efficiency mode for {emulator} and Python.")

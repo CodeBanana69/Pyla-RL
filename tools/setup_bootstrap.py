@@ -304,7 +304,7 @@ def main():
 
     print("")
     print("Pyla-RL setup completed.")
-    print("Start your emulator, open Brawl Stars, then run Run Pyla-RL.bat or python main.py.")
+    print("Start your emulator, open Brawl Stars, then run pyla-rl.bat or python main.py.")
     if progress_window:
         progress_window.update("Setup completed.")
         progress_window.close()

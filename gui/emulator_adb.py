@@ -135,17 +135,97 @@ def adb_start_server() -> None:
     _run_adb(["start-server"], timeout=10)
 
 
-def adb_connect_serial(serial: str) -> tuple[bool, str]:
+def run_adb(args: list[str], serial: str | None = None, timeout: int = 8) -> tuple[str | None, str]:
+    """Run an adb command, optionally targeting a specific device serial."""
+    return _run_adb(args, serial=serial, timeout=timeout)
+
+
+def is_adb_ambiguity_error(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return (
+        "more than one device" in lowered
+        or "multiple devices" in lowered
+        or "device/emulator" in lowered and "more than" in lowered
+    )
+
+
+def conflicting_serials(port: int, *, keep_serial: str | None = None) -> list[str]:
+    """Return local serial aliases that can refer to the same emulator ADB endpoint."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return []
+    if port <= 0 or port == ADB_SERVER_PORT:
+        return []
+
+    candidates = [
+        f"127.0.0.1:{port}",
+        f"localhost:{port}",
+        f"emulator-{port}",
+    ]
+    if port != 5554:
+        candidates.append("emulator-5554")
+
+    ordered: list[str] = []
+    for serial in candidates:
+        if keep_serial and serial == keep_serial:
+            continue
+        if serial not in ordered:
+            ordered.append(serial)
+    return ordered
+
+
+def adb_disconnect_serial(serial: str) -> tuple[bool, str]:
+    serial = str(serial or "").strip()
+    if not serial:
+        return False, "Missing serial"
+    output, error = _run_adb(["disconnect", serial], timeout=10)
+    if error and "not connected" not in error.lower():
+        return False, error
+    return True, output or "Disconnected"
+
+
+def cleanup_conflicting_devices(port: int, *, keep_serial: str | None = None) -> list[str]:
+    """Disconnect ghost/conflicting ADB entries for a port before reconnecting."""
+    disconnected: list[str] = []
+    for serial in conflicting_serials(port, keep_serial=keep_serial):
+        ok, _ = adb_disconnect_serial(serial)
+        if ok:
+            disconnected.append(serial)
+    return disconnected
+
+
+def adb_connect_serial(serial: str, *, disconnect_first: bool = True) -> tuple[bool, str]:
+    serial = str(serial or "").strip()
+    if not serial:
+        return False, "Missing serial"
+
+    port = serial_port(serial)
+    if disconnect_first and port:
+        cleanup_conflicting_devices(port, keep_serial=serial)
+
     devices, _ = list_adb_devices()
     if serial in devices:
         return True, "Connected"
+
     output, error = _run_adb(["connect", serial], timeout=10)
-    if error:
+    if error and not is_adb_ambiguity_error(error):
         return False, error
+
     devices, _ = list_adb_devices()
     if serial in devices:
         return True, output or "Connected"
-    return False, output or f"Could not connect to {serial}"
+
+    if port:
+        cleanup_conflicting_devices(port, keep_serial=serial)
+        output, error = _run_adb(["connect", serial], timeout=10)
+        if error and not is_adb_ambiguity_error(error):
+            return False, error
+        devices, _ = list_adb_devices()
+        if serial in devices:
+            return True, output or "Connected"
+
+    return False, output or error or f"Could not connect to {serial}"
 
 
 def adb_hint_for_emulator(emulator: str) -> str:
@@ -176,16 +256,23 @@ def connect_emulator_adb(
     devices, devices_error = list_adb_devices()
     allowed_ports = set(candidate_ports)
 
+    matches: list[tuple[str, int]] = []
     for device in devices:
         port = serial_port(device)
         if is_local_adb_serial(device) and port in allowed_ports:
-            return {
-                "ok": True,
-                "serial": device,
-                "port": port or 0,
-                "detail": f"Connected to {device}",
-                "ports_tried": candidate_ports,
-            }
+            matches.append((device, port or 0))
+    if matches:
+        preferred_serial, preferred_port = sorted(
+            matches,
+            key=lambda item: (not str(item[0]).startswith("127.0.0.1:"), item[1]),
+        )[0]
+        return {
+            "ok": True,
+            "serial": preferred_serial,
+            "port": preferred_port,
+            "detail": f"Connected to {preferred_serial}",
+            "ports_tried": candidate_ports,
+        }
 
     ports_to_try = candidate_ports
     if probe_open_ports:
@@ -196,7 +283,8 @@ def connect_emulator_adb(
     last_message = devices_error or ""
     for port in ports_to_try:
         serial = f"127.0.0.1:{port}"
-        connected, message = adb_connect_serial(serial)
+        cleanup_conflicting_devices(port, keep_serial=serial)
+        connected, message = adb_connect_serial(serial, disconnect_first=False)
         if connected:
             return {
                 "ok": True,
