@@ -22,6 +22,35 @@ STOP_REQUESTED = "stop_requested"
 SPARKLINE_WIDTH = 200
 SPARKLINE_HEIGHT = 32
 _settings_hub_process = None
+_SW_MINIMIZE = 6
+
+
+def minimize_frameless_window(window):
+    """Minimize a frameless CustomTkinter/Tk window on Windows."""
+    if sys.platform == "win32":
+        try:
+            window.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(window.winfo_id())
+            if not hwnd:
+                hwnd = window.winfo_id()
+            ctypes.windll.user32.ShowWindow(hwnd, _SW_MINIMIZE)
+            return True
+        except Exception as exc:
+            print(f"[Control] Win32 minimize failed: {exc}")
+
+    try:
+        override = bool(window.overrideredirect())
+        if override:
+            window.overrideredirect(False)
+            window.update_idletasks()
+        window.iconify()
+        if override:
+            window.after(50, lambda: window.overrideredirect(True))
+        return True
+    except Exception as exc:
+        print(f"[Control] Minimize fallback failed: {exc}")
+        window.withdraw()
+        return False
 
 
 def open_settings_hub():
@@ -108,6 +137,98 @@ def read_and_clear_control_command(state_path):
     except OSError:
         pass
     return command
+
+
+def remote_command_path(state_path):
+    state = Path(state_path)
+    return state.with_name(f"{state.stem}.remote.jsonl")
+
+
+def enqueue_remote_command(state_path, command: dict) -> str:
+    import json
+    import uuid
+
+    command = dict(command or {})
+    command.setdefault("id", str(uuid.uuid4()))
+    path = remote_command_path(state_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(command) + "\n")
+    return str(command["id"])
+
+
+def read_remote_commands(state_path):
+    import json
+
+    path = remote_command_path(state_path)
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    commands = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            commands.append(payload)
+    return commands
+
+
+def clear_remote_commands(state_path):
+    try:
+        remote_command_path(state_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def write_remote_reply(reply_path, payload: dict) -> None:
+    import json
+
+    path = Path(reply_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    import os
+    os.replace(temp_path, path)
+
+
+def read_remote_reply(reply_path, *, clear: bool = False):
+    import json
+
+    path = Path(reply_path)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if clear:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return payload if isinstance(payload, dict) else None
+
+
+def drain_remote_commands(state_path, handler):
+    commands = read_remote_commands(state_path)
+    if not commands:
+        return
+    for command in commands:
+        try:
+            handler(command)
+        except Exception as exc:
+            reply_path = command.get("reply_path")
+            if reply_path:
+                write_remote_reply(reply_path, {"ok": False, "error": str(exc)})
+    clear_remote_commands(state_path)
 
 
 def draw_ips_sparkline(canvas, samples, color, width=SPARKLINE_WIDTH, height=SPARKLINE_HEIGHT):
@@ -289,10 +410,10 @@ def run_window(state_path, metrics_path=None):
         compact_root.attributes("-topmost", True)
 
     def minimize_full():
-        root.iconify()
+        minimize_frameless_window(root)
 
     def minimize_compact():
-        compact_root.iconify()
+        minimize_frameless_window(compact_root)
 
     def handle_control_command():
         command = read_and_clear_control_command(state_path)

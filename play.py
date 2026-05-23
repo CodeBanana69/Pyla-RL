@@ -11,6 +11,11 @@ import numpy as np
 from state_finder import get_state
 from detect import Detect
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info
+from visual_debug_window import (
+    log_visual_debug_startup,
+    opencv_highgui_available,
+    show_visual_debug_frame,
+)
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
@@ -19,101 +24,6 @@ visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 
 def vlog(*args):
     if visual_debug:
         print("[DBG]", *args)
-
-
-_opencv_highgui_available = None
-_opencv_highgui_warned = False
-
-
-def opencv_highgui_available():
-    global _opencv_highgui_available
-    if _opencv_highgui_available is not None:
-        return _opencv_highgui_available
-    try:
-        cv2.namedWindow("__pyla_gui_check__", cv2.WINDOW_NORMAL)
-        cv2.destroyWindow("__pyla_gui_check__")
-        _opencv_highgui_available = True
-    except cv2.error:
-        _opencv_highgui_available = False
-    return _opencv_highgui_available
-
-
-def warn_missing_opencv_highgui_once():
-    global _opencv_highgui_warned
-    if _opencv_highgui_warned:
-        return
-    _opencv_highgui_warned = True
-    print(
-        "Visual debug: OpenCV GUI is unavailable (opencv-python-headless is installed). "
-        "Using fallback window. Fix: pip uninstall opencv-python-headless && "
-        "pip install opencv-python==4.8.0.76"
-    )
-
-
-class TkVisualDebugWindow:
-    """Fallback debug window when opencv-python-headless blocks cv2.imshow."""
-
-    _lock = threading.Lock()
-    _instance = None
-
-    def __init__(self):
-        self._frame_queue = queue.Queue(maxsize=1)
-        self._thread = threading.Thread(
-            target=self._run,
-            name="PylaTkVisualDebug",
-            daemon=True,
-        )
-        self._thread.start()
-
-    @classmethod
-    def instance(cls):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = cls()
-            return cls._instance
-
-    def show(self, rgb_image):
-        while True:
-            try:
-                self._frame_queue.get_nowait()
-            except queue.Empty:
-                break
-        try:
-            self._frame_queue.put_nowait(rgb_image)
-        except queue.Full:
-            pass
-
-    def _run(self):
-        import tkinter as tk
-        from PIL import Image, ImageTk
-
-        root = tk.Tk()
-        root.title("PylaAi-XXZ Visual Debug")
-        root.configure(bg="black")
-        label = tk.Label(root, bg="black")
-        label.pack()
-        photo_ref = {"photo": None}
-
-        def poll():
-            try:
-                img = self._frame_queue.get_nowait()
-                photo_ref["photo"] = ImageTk.PhotoImage(Image.fromarray(img))
-                label.configure(image=photo_ref["photo"])
-            except queue.Empty:
-                pass
-            root.after(33, poll)
-
-        poll()
-        root.mainloop()
-
-
-def show_visual_debug_frame(img):
-    if opencv_highgui_available():
-        cv2.imshow("PylaAi-XXZ Visual Debug", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-        cv2.waitKey(1)
-        return
-    warn_missing_opencv_highgui_once()
-    TkVisualDebugWindow.instance().show(img)
 
 
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
@@ -651,8 +561,12 @@ class Play(Movement):
         self._visual_debug_next_enqueue_at = 0.0
         self._visual_debug_lock = threading.Lock()
         self._visual_debug_payload = None
+        self._visual_debug_display_queue = queue.Queue(maxsize=1)
         self._visual_debug_thread = None
         self._visual_debug_stop = False
+        if visual_debug:
+            opencv_highgui_available()
+            log_visual_debug_startup()
         self.capture_bad_vision_frames = str(general_config.get("capture_bad_vision_frames", "no")).lower() in ("yes", "true", "1")
         self.bad_vision_capture_dir = general_config.get("bad_vision_capture_dir", "debug_frames/vision")
         self.bad_vision_capture_interval = float(general_config.get("bad_vision_capture_interval", 2.0))
@@ -2785,6 +2699,8 @@ class Play(Movement):
                         self.window_controller.press_key("Q")
                         self.time_since_last_no_detection_q = current_time
                     self.time_since_last_proceeding = time.time()
+            if visual_debug:
+                self.queue_visual_debug(frame, {"status": "No detections"}, brawler)
             return
         self.time_since_last_proceeding = time.time()
         self.refresh_ready_abilities(frame, current_time)
@@ -3077,6 +2993,26 @@ class Play(Movement):
         )
         self._visual_debug_thread.start()
 
+    def _enqueue_visual_debug_display(self, img):
+        while True:
+            try:
+                self._visual_debug_display_queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self._visual_debug_display_queue.put_nowait(img)
+        except queue.Full:
+            pass
+
+    def pump_visual_debug_display(self):
+        if not visual_debug:
+            return
+        try:
+            img = self._visual_debug_display_queue.get_nowait()
+        except queue.Empty:
+            return
+        show_visual_debug_frame(img)
+
     def queue_visual_debug(self, frame, data, brawler=None):
         now = time.time()
         frame_delay = 1.0 / self.visual_debug_max_fps
@@ -3121,6 +3057,19 @@ class Play(Movement):
             img = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         else:
             img = frame.copy() if isinstance(frame, np.ndarray) else np.array(frame)
+
+        status = data.get("status")
+        if status:
+            cv2.putText(
+                img,
+                status,
+                (8, max(24, img.shape[0] - 12)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.5, 0.7 * scale),
+                (255, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
 
         def s(value):
             return int(value * scale)
@@ -3304,7 +3253,7 @@ class Play(Movement):
         for box in data.get("player") or []:
             self._draw_player_foot_circle_debug(img, box, sp, s)
 
-        show_visual_debug_frame(img)
+        self._enqueue_visual_debug_display(img)
 
     @staticmethod
     def movement_to_direction(movement):

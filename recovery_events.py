@@ -50,6 +50,17 @@ def count_session_events(session_id=None, path=None):
     )
 
 
+def count_session_events_by_type(session_id=None, path=None):
+    session_id = session_id or str(os.getpid())
+    counts = {}
+    for event in read_recent_events(limit=500, path=path):
+        if str(event.get("session_id", "")) != session_id:
+            continue
+        event_type = str(event.get("event_type", "unknown"))
+        counts[event_type] = counts.get(event_type, 0) + 1
+    return counts
+
+
 def should_send_recovery_alert(
         event_type,
         threshold=3,

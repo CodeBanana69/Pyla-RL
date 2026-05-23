@@ -4,7 +4,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from utils import load_toml_as_dict
+from gui.emulator_adb import (
+    adb_executable,
+    connect_emulator_adb,
+    detect_emulator_process,
+    normalize_emulator_name,
+    ports_for_emulator,
+)
+from utils import load_toml_as_dict, save_dict_as_toml
 
 LOCAL_ADB_EXE = Path(__file__).resolve().parent.parent / "adb.exe"
 RESOLUTION_1080P_OK = {
@@ -19,15 +26,8 @@ RESOLUTION_720P_OK = {
 }
 
 
-def _adb_executable():
-    if LOCAL_ADB_EXE.exists():
-        return str(LOCAL_ADB_EXE)
-    found = shutil.which("adb")
-    return found or ""
-
-
 def _run_adb(args, serial=None, timeout=8):
-    adb = _adb_executable()
+    adb = adb_executable()
     if not adb:
         return None, "ADB not found (bundled adb.exe and PATH both missing)"
     command = [adb]
@@ -49,38 +49,6 @@ def _run_adb(args, serial=None, timeout=8):
     if result.returncode != 0:
         return None, output.strip() or f"adb exited with code {result.returncode}"
     return output.strip(), ""
-
-
-def _list_adb_devices():
-    output, error = _run_adb(["devices"])
-    if not output:
-        return [], error
-    devices = []
-    for line in output.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 2 and parts[1] == "device":
-            devices.append(parts[0])
-    return devices, ""
-
-
-def _is_serial_online(serial):
-    if not serial:
-        return False
-    for device in _list_adb_devices()[0]:
-        if device == serial:
-            return True
-    return False
-
-
-def _adb_connect(serial):
-    if _is_serial_online(serial):
-        return True, "Connected"
-    output, error = _run_adb(["connect", serial], timeout=10)
-    if error:
-        return False, error
-    if _is_serial_online(serial):
-        return True, output or "Connected"
-    return False, output or f"Could not connect to {serial}"
 
 
 def _parse_wm_sizes(output):
@@ -123,66 +91,66 @@ def _check_item(item_id, label, ok, detail, severity="required"):
     }
 
 
-def run_preflight_checks(correct_zoom=True):
+def _resolve_emulator_settings(general, emulator=None, port=None):
+    selected = normalize_emulator_name(emulator or general.get("current_emulator", "LDPlayer"))
+    if port is not None:
+        try:
+            configured_port = int(port)
+        except (TypeError, ValueError):
+            configured_port = ports_for_emulator(selected)[0]
+    else:
+        try:
+            configured_port = int(general.get("emulator_port", ports_for_emulator(selected)[0]) or ports_for_emulator(selected)[0])
+        except (TypeError, ValueError):
+            configured_port = ports_for_emulator(selected)[0]
+    return selected, configured_port
+
+
+def _persist_discovered_port(emulator, port, previous_port):
+    if not port or port == previous_port:
+        return
+    general_path = Path("cfg/general_config.toml")
+    general = load_toml_as_dict(str(general_path))
+    general["current_emulator"] = emulator
+    general["emulator_port"] = int(port)
+    save_dict_as_toml(general, str(general_path))
+
+
+def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_port=True):
     general = load_toml_as_dict("cfg/general_config.toml")
-    emulator = str(general.get("current_emulator", "LDPlayer")).strip()
-    port = int(general.get("emulator_port", 5555) or 5555)
-    serial = f"127.0.0.1:{port}"
-    adb_path = _adb_executable()
+    selected_emulator, configured_port = _resolve_emulator_settings(general, emulator=emulator, port=port)
+    previous_port = int(general.get("emulator_port", configured_port) or configured_port)
 
     checks = []
 
-    devices, devices_error = _list_adb_devices()
-    adb_ok = _is_serial_online(serial)
-    if not adb_ok:
-        connected, connect_message = _adb_connect(serial)
-        adb_ok = connected
-        if not adb_ok:
-            devices, devices_error = _list_adb_devices()
-    adb_detail = "Connected"
-    if not adb_ok:
-        device_hint = ", ".join(devices) if devices else "none"
-        adb_detail = (
-            f"{serial} not online using {adb_path or 'missing adb'}. "
-            f"Configured port {port}. Seen devices: {device_hint}."
-        )
-        if devices_error:
-            adb_detail += f" {devices_error}"
-        elif not adb_ok and connect_message:
-            adb_detail += f" {connect_message}"
+    adb_result = connect_emulator_adb(selected_emulator, configured_port)
+    adb_ok = bool(adb_result.get("ok"))
+    serial = str(adb_result.get("serial") or "")
+    connected_port = int(adb_result.get("port") or configured_port or 0)
+    if adb_ok and persist_port and connected_port:
+        _persist_discovered_port(selected_emulator, connected_port, previous_port)
+
+    adb_label = f"ADB device {serial or f'127.0.0.1:{configured_port}'}"
     checks.append(_check_item(
         "adb",
-        f"ADB device {serial}",
+        adb_label,
         adb_ok,
-        adb_detail,
+        adb_result.get("detail") if adb_ok else adb_result.get("detail", "ADB check failed"),
         "required",
     ))
 
-    process_hint = "dnplayer" if emulator.lower() == "ldplayer" else "MuMu"
-    process_ok = False
-    if shutil.which("tasklist"):
-        try:
-            result = subprocess.run(
-                ["tasklist", "/FI", f"IMAGENAME eq {process_hint}*"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            )
-            process_ok = process_hint.lower() in (result.stdout or "").lower()
-        except (OSError, subprocess.TimeoutExpired):
-            process_ok = False
+    process_ok, process_detail = detect_emulator_process(selected_emulator)
     checks.append(_check_item(
         "emulator",
-        f"{emulator} process",
+        f"{selected_emulator} process",
         process_ok,
-        "Detected" if process_ok else f"No {process_hint} process found",
-        "required",
+        process_detail,
+        "recommended",
     ))
 
     package = str(general.get("brawl_stars_package", "com.supercell.brawlstars"))
     foreground_ok = False
-    if adb_ok:
+    if adb_ok and serial:
         output, _ = _run_adb(["shell", "dumpsys", "window", "windows"], serial=serial)
         if output:
             foreground_ok = package in output
@@ -196,7 +164,7 @@ def run_preflight_checks(correct_zoom=True):
 
     resolution_ok = False
     resolution_detail = "Use 1920x1080 emulator resolution for best accuracy"
-    if adb_ok:
+    if adb_ok and serial:
         size_output, size_error = _run_adb(["shell", "wm", "size"], serial=serial)
         physical_size, override_size = _parse_wm_sizes(size_output or "")
         chosen = physical_size or override_size
@@ -222,11 +190,17 @@ def run_preflight_checks(correct_zoom=True):
     ))
 
     ready = all(item["ok"] for item in checks if item["severity"] == "required")
-    return {"ready": ready, "checks": checks}
+    return {
+        "ready": ready,
+        "checks": checks,
+        "emulator": selected_emulator,
+        "port": connected_port if adb_ok else configured_port,
+        "serial": serial,
+    }
 
 
-def test_emulator_connection():
-    result = run_preflight_checks()
+def test_emulator_connection(emulator=None, port=None):
+    result = run_preflight_checks(emulator=emulator, port=port, persist_port=False)
     adb = next((item for item in result["checks"] if item["id"] == "adb"), None)
     if adb and adb["ok"]:
         return True, adb["detail"]

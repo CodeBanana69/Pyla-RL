@@ -35,6 +35,9 @@ Pauses PylaAi-XXZ movement and actions.
 Shows whether the bot is running or paused.
 It also shows useful live details like current detected state, IPS, feed FPS, emulator, ADB device, brawler, and target.
 
+/stats
+Shows current session stats: wins, losses, draws, win rate, matches played, and uptime.
+
 /screenshot
 Sends a current emulator screenshot to Discord.
 Use this to check what the bot is seeing without opening the PC.
@@ -63,6 +66,34 @@ Examples:
 /press q
 /press e
 /press back
+
+/queue
+Shows the current farm plan with the active brawler marked.
+Replies use formatted embed cards for easier reading.
+
+/push <brawler> [target]
+Prioritizes a brawler at the front of the farm plan.
+The brawler you were already playing moves down one slot instead of being replaced.
+Example: if you are playing Nita and run /push colt, the order becomes Colt, Nita, ...
+Optional target sets push_until for the new active brawler.
+
+/skip
+Moves the current brawler down one slot and plays the next brawler in the farm plan.
+
+/remove <brawler>
+Removes a brawler from the farm plan.
+If you remove the active brawler, the next brawler becomes active.
+
+/target <trophies>
+Updates the trophy target for the currently active brawler only.
+
+/help
+Lists all remote commands in a grouped embed card.
+
+Multi-instance mode:
+When multi-instance is enabled in the Hub, use the optional instance argument on Discord commands.
+Example: /status instance:default or /push colt 750 instance:ld-2
+If only one instance is running, the instance argument is optional.
 
 
 Setup step 1: create the Discord bot

@@ -51,10 +51,12 @@ class DiscordNotifierTest(unittest.TestCase):
 
         self.assertEqual(description, "Configured target reached.")
 
-    def test_match_summary_does_not_show_potentially_stale_brawler_name(self):
-        _, description = _title_and_description("match", {"result": "4th", "brawler": "amber"})
+    def test_match_summary_shows_brawler_and_result(self):
+        _, description = _title_and_description("match", {"result": "4th", "brawler": "amber", "trophy_delta": 8})
 
-        self.assertNotIn("Amber", description)
+        self.assertIn("Amber", description)
+        self.assertIn("4th Place", description)
+        self.assertIn("+8", description)
 
     def test_match_fields_hide_potentially_stale_brawler_name(self):
         embed = discord.Embed(title="test")

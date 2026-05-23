@@ -7,7 +7,6 @@ import math
 import os
 import re
 import subprocess
-import socket
 import threading
 import time
 import cv2
@@ -18,9 +17,14 @@ import scrcpy
 from adbutils import adb
 
 from utils import load_toml_as_dict
-
-# --- Configuration ---
-brawl_stars_width, brawl_stars_height = 1920, 1080
+from gui.emulator_adb import (
+    EMULATOR_PORTS,
+    ADB_SERVER_PORT,
+    is_port_open as _is_port_open,
+    is_local_adb_serial as _is_local_adb_serial,
+    ports_for_emulator,
+    serial_port as _serial_port,
+)
 
 key_coords_dict = {
     "H": (1400, 990),
@@ -38,14 +42,10 @@ directions_xy_deltas_dict = {
     "d": (150, 0),
 }
 
+# --- Configuration ---
+brawl_stars_width, brawl_stars_height = 1920, 1080
+
 BRAWL_STARS_PACKAGE = load_toml_as_dict("cfg/general_config.toml")["brawl_stars_package"]
-
-EMULATOR_PORTS = {
-    "LDPlayer": [5555, 5557, 5559, 5554],
-    "MuMu": [16384, 16416, 16448, 7555, 5558, 5557, 5556, 5555, 5554],
-}
-
-SUPPORTED_EMULATORS = tuple(EMULATOR_PORTS.keys())
 
 COMMON_LDPLAYER_CONSOLES = [
     r"C:\LDPlayer\LDPlayer9\dnconsole.exe",
@@ -64,7 +64,6 @@ COMMON_MUMU_MANAGERS = [
 LOCAL_ADB_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adb.exe")
 _ADB_ONLINE_CACHE = {}
 _ADB_ONLINE_CACHE_TTL = 1.0
-ADB_SERVER_PORT = 5037
 
 
 def _infer_supported_emulator(configured_port):
@@ -105,37 +104,6 @@ def _unique_ports(ports):
         if port not in unique:
             unique.append(port)
     return unique
-
-
-def _is_port_open(host, port, timeout=0.05):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(timeout)
-            return sock.connect_ex((host, port)) == 0
-    except OSError:
-        return False
-
-
-def _serial_port(serial):
-    if serial.startswith("emulator-"):
-        try:
-            return int(serial.rsplit("-", 1)[1])
-        except ValueError:
-            return None
-    if ":" in serial:
-        try:
-            return int(serial.rsplit(":", 1)[1])
-        except ValueError:
-            return None
-    return None
-
-
-def _is_local_adb_serial(serial):
-    return (
-        str(serial or "").startswith("127.0.0.1:")
-        or str(serial or "").startswith("localhost:")
-        or str(serial or "").startswith("emulator-")
-    )
 
 
 def _find_existing_path(paths):
@@ -380,6 +348,20 @@ def _stop_android_app(serial, package, timeout=8):
         return False
 
 
+def _kill_scrcpy_server_on_device(serial, timeout=5):
+    for args in (
+        ["shell", "pkill", "-f", "com.genymobile.scrcpy.Server"],
+        ["shell", "pkill", "-f", "scrcpy.Server"],
+    ):
+        try:
+            completed = _run_adb(serial, args, timeout=timeout)
+            if completed.returncode == 0:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _wake_android_display(serial, timeout=4):
     for args in (
         ["shell", "input", "keyevent", "KEYCODE_WAKEUP"],
@@ -515,6 +497,18 @@ class WindowController:
         self.emulator_restart_cooldown = float(
             load_toml_as_dict("cfg/time_tresholds.toml").get("emulator_restart_cooldown", 180)
         )
+        self.last_display_app_restart_time = 0.0
+        self.display_app_restart_cooldown = float(
+            load_toml_as_dict("cfg/time_tresholds.toml").get("display_app_restart_cooldown", 60)
+        )
+        self.last_known_display_id = 0
+        self.recovery_logger = None
+        self.scrcpy_restart_count = 0
+        self.display_repair_count = 0
+        self.app_restart_count = 0
+        self.emulator_restart_count = 0
+        self.scrcpy_restart_window = []
+        self._SCRCPY_STOP_TIMEOUT = 5.0
 
         # --- 2. ADB & Scrcpy Connection ---
         print("Connecting to ADB...")
@@ -612,21 +606,12 @@ class WindowController:
             ).strip().lower() == "auto"
             self.emulator_profile_index = self._resolve_emulator_profile_index(general_config)
             self.emulator_launch_command = self._resolve_emulator_launch_command(general_config)
-            all_supported_ports = []
-            for emulator_name in SUPPORTED_EMULATORS:
-                all_supported_ports.extend(EMULATOR_PORTS[emulator_name])
-            candidate_ports = _unique_ports(
-                [configured_port]
-                + EMULATOR_PORTS[selected_emulator]
-                + all_supported_ports
-                + list(range(5565, 5756, 10))
-            )
+            candidate_ports = _unique_ports(ports_for_emulator(selected_emulator, configured_port))
 
             device_list = list_online_devices()
             preferred_devices = prefer_selected_devices(device_list, selected_emulator, configured_port)
 
-            # Probe selected/common emulator ports quickly before calling adb.connect.
-            # Port 5037 is filtered out by _unique_ports because it is the ADB server port.
+            # Probe selected emulator ports only before calling adb.connect.
             if not preferred_devices:
                 ports_to_try = [port for port in candidate_ports if _is_port_open("127.0.0.1", port)]
                 if not ports_to_try and not device_list:
@@ -647,20 +632,38 @@ class WindowController:
 
             if not device_list:
                 tried_ports = ", ".join(str(port) for port in candidate_ports)
-                raise ConnectionError(f"No online ADB devices found. Tried ports: {tried_ports}")
+                raise ConnectionError(
+                    f"No online {selected_emulator} ADB devices found. Tried ports: {tried_ports}. "
+                    f"Other emulators were not probed."
+                )
+
+            allowed_ports = set(candidate_ports)
+            matching_devices = [
+                dev for dev in device_list
+                if _is_local_adb_serial(dev.serial) and _serial_port(dev.serial) in allowed_ports
+            ]
+            if not matching_devices:
+                tried_ports = ", ".join(str(port) for port in candidate_ports)
+                seen = ", ".join(dev.serial for dev in device_list) or "none"
+                raise ConnectionError(
+                    f"No {selected_emulator} ADB device on ports {tried_ports}. "
+                    f"Seen devices: {seen}. Other emulators were not used."
+                )
+            device_list = matching_devices
+            preferred_devices = [dev for dev in preferred_devices if dev in matching_devices]
 
             self.device, opened_package = choose_best_device(device_list, selected_emulator, configured_port)
             if self.device is None:
                 raise ConnectionError(
-                    f"No matching ADB device found on port {configured_port}."
+                    f"No matching {selected_emulator} ADB device found on port {configured_port}."
                 )
             selected_is_preferred = self.device in preferred_devices
             if opened_package == self.brawl_stars_package:
                 print(f"Selected ADB device with Brawl Stars in foreground: {self.device.serial}")
             if not selected_is_preferred:
                 print(
-                    f"Could not identify a {selected_emulator} device by port; "
-                    f"using the best online LDPlayer/MuMu ADB device instead."
+                    f"Could not identify a {selected_emulator} device on the configured port; "
+                    f"using another {selected_emulator} ADB device instead."
                 )
             print(f"Connected to {selected_emulator}: {self.device.serial}")
             self.connected_serial = self.device.serial
@@ -931,9 +934,18 @@ class WindowController:
         if now - self.last_emulator_restart_time < self.emulator_restart_cooldown:
             remaining = self.emulator_restart_cooldown - (now - self.last_emulator_restart_time)
             print(f"Skipping emulator restart; last restart was too recent ({remaining:.0f}s cooldown left).")
+            self._log_recovery(
+                "emulator_restart",
+                f"cooldown_skipped=true emulator={getattr(self, 'selected_emulator', 'unknown')}",
+            )
             return False
         self.last_emulator_restart_time = now
-        print(f"{self.selected_emulator} appears to be down; restarting the saved emulator profile.")
+        self.emulator_restart_count = getattr(self, "emulator_restart_count", 0) + 1
+        print(f"{getattr(self, 'selected_emulator', 'Emulator')} appears to be down; restarting the saved emulator profile.")
+        self._log_recovery(
+            "emulator_restart",
+            f"cooldown_skipped=false emulator={getattr(self, 'selected_emulator', 'unknown')}",
+        )
         try:
             self.keys_up(list("wasd"))
         except Exception:
@@ -953,7 +965,8 @@ class WindowController:
                     "If Windows says elevation is required, run the emulator once normally or install it without admin-only permissions."
                 )
                 return False
-        time.sleep(3)
+        settle_seconds = 5 if self.selected_emulator == "MuMu" else 3
+        time.sleep(settle_seconds)
         try:
             self.start_scrcpy_client()
         except Exception as e:
@@ -1016,6 +1029,7 @@ class WindowController:
                 except Exception:
                     pass
                 self.scrcpy_client = None
+                _kill_scrcpy_server_on_device(self.connected_serial)
                 time.sleep(2)
         raise last_error
 
@@ -1027,6 +1041,7 @@ class WindowController:
         old_client = self.scrcpy_client
         self.scrcpy_client = None
         self.scrcpy_generation += 1
+        clean_stop = True
         if old_client is not None:
             def stop_old_client():
                 try:
@@ -1036,10 +1051,19 @@ class WindowController:
 
             stop_thread = threading.Thread(target=stop_old_client, daemon=True)
             stop_thread.start()
-            stop_thread.join(timeout=2)
+            stop_thread.join(timeout=self._SCRCPY_STOP_TIMEOUT)
             if stop_thread.is_alive():
-                print("Old scrcpy client did not stop within 2s; starting a new client anyway.")
-        time.sleep(0.4)
+                clean_stop = False
+                print(
+                    f"Old scrcpy client did not stop within {self._SCRCPY_STOP_TIMEOUT:.0f}s; "
+                    "killing device scrcpy server."
+                )
+                _kill_scrcpy_server_on_device(self.connected_serial)
+        if not clean_stop:
+            time.sleep(0.4)
+        else:
+            time.sleep(0.4)
+        self._record_scrcpy_restart(clean_stop)
         try:
             self.start_scrcpy_client()
             if not self.wait_for_fresh_frame(timeout=6.0):
@@ -1074,12 +1098,48 @@ class WindowController:
         with self.frame_lock:
             return self.frame_id
 
-    def ensure_brawl_stars_on_primary_display(self, log_only=False, allow_app_restart=False):
+    def _log_recovery(self, event_type, detail=""):
+        logger = getattr(self, "recovery_logger", None)
+        if callable(logger):
+            logger(event_type, detail)
+
+    def _log_display_repair(self, old_display_id, new_display_id, action):
+        self.display_repair_count = getattr(self, "display_repair_count", 0) + 1
+        self._log_recovery(
+            "display_repair",
+            f"displayId={old_display_id}->{new_display_id} action={action}",
+        )
+
+    def check_display_passive(self):
+        return self.ensure_brawl_stars_on_primary_display(passive=True)
+
+    def repair_display_after_match(self):
+        return self.ensure_brawl_stars_on_primary_display(allow_app_restart=True, passive=False)
+
+    def _record_scrcpy_restart(self, clean_stop):
+        self.scrcpy_restart_count = getattr(self, "scrcpy_restart_count", 0) + 1
+        now = time.time()
+        window = [stamp for stamp in getattr(self, "scrcpy_restart_window", []) if now - stamp <= 600]
+        window.append(now)
+        self.scrcpy_restart_window = window
+        self._log_recovery(
+            "scrcpy_restart",
+            f"generation={self.scrcpy_generation} clean_stop={'true' if clean_stop else 'false'}",
+        )
+        if len(window) >= 5:
+            print(
+                "WARNING: 5+ scrcpy restarts in 10 minutes; "
+                "consider restarting the emulator profile if MuMu lags or black-screens."
+            )
+
+    def ensure_brawl_stars_on_primary_display(self, log_only=False, allow_app_restart=False, passive=False):
         task_id, display_id = _get_package_task_display(
             self.connected_serial,
             self.brawl_stars_package,
             timeout=4,
         )
+        if display_id is not None:
+            self.last_known_display_id = display_id
         if display_id is None:
             return True
         if display_id == 0:
@@ -1093,7 +1153,7 @@ class WindowController:
 
         for attempt in range(1, 3):
             moved = _move_android_task_to_display(self.connected_serial, task_id, 0)
-            if not moved:
+            if not moved and not passive:
                 _start_android_app_on_display(
                     self.connected_serial,
                     self.brawl_stars_package,
@@ -1105,7 +1165,10 @@ class WindowController:
                 self.brawl_stars_package,
                 timeout=4,
             )
+            if new_display_id is not None:
+                self.last_known_display_id = new_display_id
             if new_display_id == 0:
+                self._log_display_repair(display_id, 0, "move")
                 return True
             if new_display_id is not None:
                 print(
@@ -1113,11 +1176,26 @@ class WindowController:
                     f"on displayId={new_display_id}."
                 )
 
+        if passive:
+            self._log_display_repair(display_id, display_id, "skipped_passive")
+            print("Passive display repair could not move Brawl Stars to displayId=0.")
+            return False
         if log_only:
             print("Could not verify Brawl Stars on displayId=0 yet; continuing startup.")
+            self._log_display_repair(display_id, display_id, "skipped_log_only")
             return False
         if not allow_app_restart:
             print("Could not verify Brawl Stars on displayId=0 yet.")
+            self._log_display_repair(display_id, display_id, "skipped_no_restart")
+            return False
+
+        now = time.time()
+        if now - self.last_display_app_restart_time < self.display_app_restart_cooldown:
+            remaining = self.display_app_restart_cooldown - (now - self.last_display_app_restart_time)
+            print(
+                f"Skipping display repair app restart; cooldown active ({remaining:.0f}s left)."
+            )
+            self._log_display_repair(display_id, display_id, "skipped_cooldown")
             return False
 
         print("Brawl Stars did not move to displayId=0; restarting the app on displayId=0.")
@@ -1126,6 +1204,8 @@ class WindowController:
         except Exception:
             pass
         time.sleep(0.5)
+        self.last_display_app_restart_time = now
+        self.app_restart_count = getattr(self, "app_restart_count", 0) + 1
         started = _start_android_app_on_display(
             self.connected_serial,
             self.brawl_stars_package,
@@ -1138,13 +1218,16 @@ class WindowController:
             timeout=4,
         )
         if new_display_id == 0:
+            self._log_display_repair(display_id, 0, "app_restart")
             return True
         if new_display_id is None:
+            self._log_display_repair(display_id, None, "app_restart")
             return started
         print(
             f"Brawl Stars relaunched but Android still reports displayId={new_display_id}; "
             "scrcpy may keep receiving stale frames."
         )
+        self._log_display_repair(display_id, new_display_id, "app_restart")
         return False
 
     def restart_brawl_stars(self):
@@ -1274,7 +1357,7 @@ class WindowController:
                 self.ensure_brawl_stars_on_primary_display(allow_app_restart=True)
                 self.time_since_checked_if_brawl_stars_crashed = time.time()
             else:
-                self.ensure_brawl_stars_on_primary_display(allow_app_restart=True)
+                self.check_display_passive()
                 self.foreground_check_failures = 0
                 self.time_since_checked_if_brawl_stars_crashed = c_time
         frame, frame_time = self.get_latest_frame()

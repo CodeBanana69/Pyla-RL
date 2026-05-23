@@ -45,6 +45,13 @@ For normal users, you only need `setup.exe`.
 8. Double-click the generated `Run Pyla-RL.bat` file or run `python main.py`.
 9. In the hub, choose your emulator, select your brawler setup, then press Start.
 
+Emulator and ADB troubleshooting:
+- After setup, use **`Run Pyla-RL.bat`** only (older `Run PylaAi-XXZ.bat` launchers are removed automatically).
+- On the Hub **Overview** tab, pick **LDPlayer** or **MuMu** first, then click **Run Checks**.
+- **LDPlayer:** enable ADB in Settings → Other settings → ADB debugging, then restart the emulator. Default port is `5555` (instance 1 uses `5557`, instance 2 uses `5559`).
+- **MuMu:** confirm ADB is enabled in emulator settings. Default port is `16384` (instance 1 uses `16416`).
+- START is allowed once the **ADB device** check passes. Emulator process, Brawl Stars foreground, and resolution rows are warnings only.
+
 Manual developer setup:
 - Install Python 3.11 and Git.
 - Run `python setup.py --pyla-install`.
@@ -76,11 +83,19 @@ Recovery features :
 - If the scrcpy video feed freezes, the bot restarts the scrcpy feed instead of repeatedly restarting Brawl Stars.
 - While the bot is running, a small `Pyla-RL Control` window lets you pause and resume movement safely.
 
+Multi-instance mode (LDPlayer + MuMu):
+- Enable **Multi-Instance** in the Hub **Instances** tab, then restart the Hub so the shared Discord/Telegram router starts.
+- Each instance profile gets its own emulator port, farm plan (`instances/<id>/latest_brawler_data.json`), and worker process.
+- Supported emulators: **LDPlayer** (5555/5557/5559) and **MuMu** (16384/16416/16448). Each running instance must use a unique ADB port.
+- Use the Instances dashboard to start/stop workers while the Hub stays open.
+- Discord/Telegram commands accept an optional `instance` argument (for example `/status instance:ld-1`). If only one instance is running, the argument is optional.
+- With multi-instance disabled, Pyla-RL keeps the original single-process launch flow unchanged.
+
 Discord webhook and remote control :
 - Open `cfg/discord_config.toml`.
 - Webhook notifications only need `webhook_url`.
 - Discord `/pause`, `/start`, and `/status` need a Discord bot token, because normal webhooks cannot receive commands.
-- Slash commands: `/pause` (pause), `/start` (resume), `/stop_all` (exit bot), `/status`, `/screenshot`, `/push`, `/pause_menu`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`. `/stop` still pauses but is deprecated — use `/pause` instead.
+- Slash commands: `/pause`, `/start`, `/stop_all`, `/status`, `/stats`, `/queue`, `/screenshot`, `/push`, `/skip`, `/remove`, `/target`, `/pause_menu`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`, `/help`. `/stop` still pauses but is deprecated — use `/pause` instead. Command replies use formatted Discord embed cards.
 - Create a bot token:
   1. Go to https://discord.com/developers/applications
   2. Click `New Application`.
@@ -117,7 +132,7 @@ Telegram notifications and remote control :
 - Set `enabled = true`.
 - Open the Telegram bot on your phone and send `/setup` or `/help` once. That chat is remembered for notifications.
 - Commands:
-  `/status`, `/pause`, `/resume`, `/quit`, `/push`, `/pause_menu`, `/screenshot`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`, `/help`.
+  `/status`, `/stats`, `/pause`, `/resume`, `/quit`, `/queue`, `/push`, `/skip`, `/remove`, `/target`, `/pause_menu`, `/screenshot`, `/restart_game`, `/restart_scrcpy`, `/restart_emulator`, `/back`, `/press`, `/help`.
 - Restart Pyla-RL after changing the Telegram token or remote-control settings.
 
 Performance troubleshooting :
@@ -128,6 +143,7 @@ Performance troubleshooting :
 - If DirectML is active but still very slow, try `directml_device_id = "1"` in `cfg/general_config.toml`, then restart the bot.
 - Turn off Windows Efficiency mode for the emulator if Task Manager shows it. Efficiency mode can cap emulator frame delivery and make the bot look stuck at 2-5 IPS.
 - For LDPlayer or MuMu, select the matching emulator in the hub or set `current_emulator = "LDPlayer"` / `"MuMu"` in `cfg/general_config.toml`, use 1920x1080 landscape, set emulator FPS to 60, and disable any low-FPS/eco mode.
+- If MuMu black-screens or lags after a few matches, open `logs/recovery_events.jsonl` and look for repeated `display_repair` or `scrcpy_restart` events. Also check console lines containing `displayId=`. Lower `scrcpy_max_fps` to 30 and `scrcpy_max_width` to 720 if the emulator video pipeline is struggling.
 - Keep some free RAM. If memory is above about 85%, close Discord/browser/other games before running the bot.
 - Enable `Debug Screen` in Additional Settings to open a live vision overlay while the bot runs. It shows player, teammate, enemy, wall, fog, and range overlays.
 

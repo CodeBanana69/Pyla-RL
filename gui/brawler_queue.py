@@ -13,6 +13,17 @@ QUEUE_PATH = Path("latest_brawler_data.json")
 PUSH_ORDER_PATH = Path("cfg/push_order.json")
 
 
+def _active_queue_path(path=None):
+    if path is not None:
+        return Path(path)
+    try:
+        from gui.instance_config import get_queue_path
+
+        return get_queue_path()
+    except Exception:
+        return QUEUE_PATH
+
+
 def normalize_queue_row(row):
     if not isinstance(row, dict):
         return {}
@@ -43,7 +54,7 @@ def normalize_queue(queue):
 
 
 def load_queue(path=None):
-    queue_path = Path(path or QUEUE_PATH)
+    queue_path = _active_queue_path(path)
     if not queue_path.exists():
         return []
     try:
@@ -54,7 +65,7 @@ def load_queue(path=None):
 
 
 def save_queue(data, path=None):
-    queue_path = Path(path or QUEUE_PATH)
+    queue_path = _active_queue_path(path)
     queue_path.parent.mkdir(parents=True, exist_ok=True)
     normalized = normalize_queue(data if isinstance(data, list) else [])
     queue_path.write_text(json.dumps(normalized, indent=2), encoding="utf-8")

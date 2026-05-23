@@ -252,23 +252,6 @@ def install_vc_redist():
         print(f"Installer exit code: {result.returncode}")
 
 
-def create_run_file(project_dir, python_command):
-    python_invocation = " ".join(f'"{part}"' if " " in part else part for part in python_command)
-    run_bat = project_dir / "Run Pyla-RL.bat"
-    run_bat.write_text(
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "set OMP_NUM_THREADS=2\n"
-        "set OPENBLAS_NUM_THREADS=2\n"
-        "set MKL_NUM_THREADS=2\n"
-        "set NUMEXPR_NUM_THREADS=2\n"
-        f"{python_invocation} main.py\n"
-        "pause\n",
-        encoding="ascii",
-    )
-    print(f"Created {run_bat.name}")
-
-
 def main():
     if not ensure_supported_windows():
         return 1
@@ -315,7 +298,9 @@ def main():
     if progress_window:
         progress_window.update("Installing Pyla-RL dependencies...")
     run(python_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
-    create_run_file(project_dir, python_command)
+    from tools.launcher_bat import create_run_file
+
+    create_run_file(project_dir, python_command=python_command)
 
     print("")
     print("Pyla-RL setup completed.")
