@@ -261,8 +261,12 @@ class QmlHub:
 
             def _run_action_json(self, action, payload_json):
                 try:
-                    message = self._run_action(action, payload_json)
-                    return json.dumps({"ok": True, "message": message, "state": self._ui_state()})
+                    result = self._run_action(action, payload_json)
+                    if isinstance(result, dict):
+                        payload = {"ok": True, "state": self._ui_state(), **result}
+                        payload.setdefault("message", "")
+                        return json.dumps(payload)
+                    return json.dumps({"ok": True, "message": result, "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -499,6 +503,17 @@ class QmlHub:
                 if action == "complete-wizard":
                     self._store.update_config("settings", "first_run_wizard", "no")
                     return "First-run wizard dismissed."
+                if action == "show-wizard":
+                    return {
+                        "message": "Setup wizard reopened.",
+                        "showWizard": True,
+                    }
+                if action == "reset-setup-wizard":
+                    self._store.update_config("settings", "first_run_wizard", "yes")
+                    return {
+                        "message": "Setup wizard will show again on next launch. Opening it now.",
+                        "showWizard": True,
+                    }
                 if action == "accept-license":
                     self._store.update_config("settings", "license_accepted", "yes")
                     return "License accepted. Pyla-RL is free and must not be sold."
@@ -591,6 +606,22 @@ class QmlHub:
                 self.closeRequested.emit()
                 return json.dumps({"ok": True, "message": "Starting Pyla-RL...", "state": self._ui_state()})
 
+            @Slot(result=str)
+            def tutorialTopicsJson(self):
+                from gui.hub_tutorials import tutorial_topics
+
+                return json.dumps(tutorial_topics())
+
+            @Slot(str, result=str)
+            def openTutorialDoc(self, doc_path):
+                try:
+                    from gui.hub_tutorials import open_tutorial_doc
+
+                    path = open_tutorial_doc(doc_path)
+                    return json.dumps({"ok": True, "message": f"Opened {Path(path).name}"})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc)})
+
             @Slot()
             def openOfficialRepo(self):
                 import webbrowser
@@ -668,7 +699,10 @@ class QmlHub:
             from gui.instance_config import ensure_multi_instance_profiles, is_multi_instance_enabled
 
             if is_multi_instance_enabled():
-                ensure_multi_instance_profiles()
+                try:
+                    ensure_multi_instance_profiles()
+                except Exception as exc:
+                    print(f"Warning: could not auto-repair instance profiles: {exc}")
                 _start_multi_instance_service()
         if not settings_only:
             self._bridge.closeRequested.connect(self._mark_started_and_close)

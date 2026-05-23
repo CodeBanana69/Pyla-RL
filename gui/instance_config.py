@@ -228,6 +228,41 @@ def find_port_collision(instance_id: str, port: int) -> str | None:
     return None
 
 
+def used_emulator_ports(instance_id: str | None = None) -> set[int]:
+    skip = _slugify(instance_id or "")
+    ports: set[int] = set()
+    for profile in list_instance_profiles():
+        if profile["id"] == skip:
+            continue
+        ports.add(int(profile.get("emulator_port", 0) or 0))
+    ports.discard(0)
+    return ports
+
+
+def next_free_emulator_port(emulator: str, instance_id: str | None = None) -> int:
+    from gui.emulator_adb import ports_for_emulator
+
+    used = used_emulator_ports(instance_id)
+    for port in ports_for_emulator(emulator_display_name(emulator)):
+        if port not in used:
+            return port
+    raise ValueError(f"No free ADB port available for {emulator_display_name(emulator)}.")
+
+
+def _repoint_default_instance_if_missing(data: dict[str, Any]) -> dict[str, Any]:
+    default_id = _slugify(str(data.get("multi_instance", {}).get("default_instance", "") or ""))
+    instances = data.get("instances") or {}
+    if not default_id or default_id in instances:
+        return data
+    profiles = list_instance_profiles()
+    if not profiles:
+        return data
+    data = load_instances_config()
+    data["multi_instance"]["default_instance"] = profiles[0]["id"]
+    save_instances_config(data)
+    return load_instances_config()
+
+
 def apply_instance_overrides(instance_id: str | None = None) -> dict[str, Any] | None:
     instance_id = instance_id or get_active_instance_id()
     profile = get_instance_profile(instance_id)
@@ -290,13 +325,27 @@ def ensure_multi_instance_profiles() -> dict[str, Any]:
             general.get("emulator_port", default_port_for_emulator(emulator))
             or default_port_for_emulator(emulator)
         )
-        upsert_instance_profile(default_id, {
-            "name": "Default Instance" if default_id == "default" else default_id.replace("-", " ").title(),
-            "enabled": True,
-            "emulator": emulator,
-            "emulator_port": port,
-            "emulator_profile_index": general.get("emulator_profile_index", infer_profile_index(emulator, port)),
-        })
+        if find_port_collision(default_id, port):
+            try:
+                port = next_free_emulator_port(emulator, instance_id=default_id)
+            except ValueError:
+                return _repoint_default_instance_if_missing(data)
+        try:
+            upsert_instance_profile(default_id, {
+                "name": "Default Instance" if default_id == "default" else default_id.replace("-", " ").title(),
+                "enabled": True,
+                "emulator": emulator,
+                "emulator_port": port,
+                "emulator_profile_index": general.get(
+                    "emulator_profile_index",
+                    infer_profile_index(emulator, port),
+                ),
+            })
+        except ValueError:
+            return _repoint_default_instance_if_missing(data)
+        data = load_instances_config()
+        data["multi_instance"]["default_instance"] = default_id
+        save_instances_config(data)
         return load_instances_config()
     return data
 

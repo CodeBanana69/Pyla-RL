@@ -31,14 +31,15 @@ ApplicationWindow {
     readonly property bool licenseAccepted: !!(hubState.meta && hubState.meta.licenseAccepted)
     property string pushAllTarget: "1000"
     property bool showBrawlerPicker: false
-    property bool showFarmPlanTutorial: false
+    property string activeTutorialId: ""
+    property string helpFilter: ""
     property string pickerFilter: ""
     property string pickerBrawler: ""
     property string pickerTarget: "1000"
     property string pickerType: "trophies"
     property string historySort: "games"
     readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
-    readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
+    readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
         const needle = pickerFilter.trim().toLowerCase()
@@ -120,7 +121,53 @@ ApplicationWindow {
                 statusToastTimer.restart()
             }
         }
+        if (result.showWizard) {
+            root.showWizard = true
+            root.wizardStep = root.licenseAccepted ? 1 : 0
+        }
         return result
+    }
+
+    function tutorialTopic(id) {
+        const topics = (hubState.meta && hubState.meta.tutorials) ? hubState.meta.tutorials : []
+        for (var i = 0; i < topics.length; i++) {
+            if (topics[i].id === id) {
+                return topics[i]
+            }
+        }
+        return null
+    }
+
+    function openTutorial(id) {
+        root.activeTutorialId = String(id || "")
+    }
+
+    function closeTutorial() {
+        root.activeTutorialId = ""
+    }
+
+    function openTutorialDoc(docPath) {
+        if (!docPath) {
+            return
+        }
+        const result = JSON.parse(hubBridge.openTutorialDoc(docPath))
+        if (result.message) {
+            statusText = result.message
+            statusOk = !!result.ok
+        }
+    }
+
+    function filteredHelpTopics() {
+        const topics = (hubState.meta && hubState.meta.tutorials) ? hubState.meta.tutorials : []
+        const query = helpFilter.trim().toLowerCase()
+        if (!query) {
+            return topics
+        }
+        return topics.filter(function(topic) {
+            return topic.title.toLowerCase().indexOf(query) >= 0
+                || String(topic.tab || "").toLowerCase().indexOf(query) >= 0
+                || String(topic.id || "").toLowerCase().indexOf(query) >= 0
+        })
     }
 
     function saveNewInstance() {
@@ -938,6 +985,7 @@ ApplicationWindow {
     component FormPanel: Rectangle {
         id: panel
         property string title: ""
+        property string tutorialId: ""
         default property alias content: body.data
 
         Layout.fillWidth: true
@@ -965,7 +1013,18 @@ ApplicationWindow {
             width: parent.width - 32
             spacing: 8
 
-            SectionTitle { title: panel.title }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                SectionTitle {
+                    Layout.fillWidth: true
+                    title: panel.title
+                }
+                TutorialHelpButton {
+                    visible: panel.tutorialId !== ""
+                    tutorialId: panel.tutorialId
+                }
+            }
         }
     }
 
@@ -985,6 +1044,101 @@ ApplicationWindow {
             x: Math.max(12, (page.availableWidth - width) / 2)
             y: 20
             spacing: 12
+        }
+    }
+
+    component TutorialHelpButton: Rectangle {
+        property string tutorialId: ""
+
+        width: 28
+        height: 28
+        radius: 6
+        color: helpMouse.containsMouse ? theme.panel3 : theme.panel2
+        border.width: 1
+        border.color: theme.borderSoft
+
+        Text {
+            anchors.centerIn: parent
+            text: "?"
+            color: theme.muted
+            font.pixelSize: 13
+            font.weight: Font.Bold
+        }
+
+        MouseArea {
+            id: helpMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.openTutorial(tutorialId)
+        }
+    }
+
+    component TutorialOverlay: Rectangle {
+        anchors.fill: parent
+        visible: root.activeTutorialId !== ""
+        color: "#cc000000"
+        z: 99
+
+        readonly property var topic: root.tutorialTopic(root.activeTutorialId)
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeTutorial()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(520, root.width - 48)
+            radius: 12
+            color: theme.panel
+            border.width: 1
+            border.color: theme.borderSoft
+            implicitHeight: tutorialOverlayColumn.implicitHeight + 32
+
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            ColumnLayout {
+                id: tutorialOverlayColumn
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+
+                Text {
+                    text: topic ? topic.title : "Guide"
+                    color: theme.text
+                    font.pixelSize: 16
+                    font.weight: Font.Bold
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: topic ? topic.summary : ""
+                    color: theme.muted
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.25
+                }
+                RowLayout {
+                    spacing: 8
+                    Item { Layout.fillWidth: true }
+                    HubButton {
+                        label: "Open full guide"
+                        secondary: true
+                        visible: !!(topic && topic.doc)
+                        onClicked: {
+                            root.openTutorialDoc(topic.doc)
+                            root.closeTutorial()
+                        }
+                    }
+                    HubButton {
+                        label: "Close"
+                        secondary: true
+                        onClicked: root.closeTutorial()
+                    }
+                }
+            }
         }
     }
 
@@ -1355,11 +1509,23 @@ ApplicationWindow {
                     anchors.margins: 12
                     spacing: 8
 
-                    Text {
-                        text: "PUSH ALL"
-                        color: theme.text
-                        font.pixelSize: 12
-                        font.weight: Font.Bold
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: "PUSH ALL"
+                            color: theme.text
+                            font.pixelSize: 12
+                            font.weight: Font.Bold
+                        }
+                        Item { Layout.fillWidth: true }
+                        TutorialHelpButton { tutorialId: "farm-plan" }
+                        HubButton {
+                            label: "Tutorial"
+                            secondary: true
+                            compact: true
+                            onClicked: root.openTutorial("farm-plan")
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -1646,6 +1812,7 @@ ApplicationWindow {
 
                     FormPanel {
                         title: "MULTI-INSTANCE MODE"
+                        tutorialId: "multi-instance"
                         Text {
                             Layout.fillWidth: true
                             text: "Run multiple LDPlayer or MuMu bots in parallel. Each instance needs its own emulator port and farm plan."
@@ -1840,6 +2007,7 @@ ApplicationWindow {
 
                     FormPanel {
                         title: "PRE-FLIGHT CHECKS"
+                        tutorialId: "overview"
                         Text {
                             Layout.fillWidth: true
                             text: "Verify emulator and ADB before START. Use 1920x1080 and 100% Windows scaling."
@@ -1981,6 +2149,7 @@ ApplicationWindow {
 
                     FormPanel {
                         title: "HUB"
+                        tutorialId: "settings"
                         FieldRow {
                             label: "Search Settings"
                             pinnedInSettingsSearch: true
@@ -1993,6 +2162,11 @@ ApplicationWindow {
                         }
                         ActionRow {
                             HubButton { label: "Open cfg Folder"; secondary: true; onClicked: root.runAction("open-config-folder") }
+                            HubButton {
+                                label: "Show Setup Wizard Again"
+                                secondary: true
+                                onClicked: root.runAction("reset-setup-wizard")
+                            }
                         }
                     }
 
@@ -2250,6 +2424,7 @@ ApplicationWindow {
                     visible: root.activeTab === "Discord"
                     FormPanel {
                         title: "DISCORD NOTIFICATIONS"
+                        tutorialId: "discord"
                         FieldRow { label: "Webhook URL"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "webhook_url")); secret: true; onSaved: function(value) { root.saveValue("discord", "webhook_url", value) } } }
                         FieldRow { label: "Discord ID"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_id")); onSaved: function(value) { root.saveValue("discord", "discord_id", value) } } }
                         FieldRow { label: "Webhook Name"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "username")); onSaved: function(value) { root.saveValue("discord", "username", value) } } }
@@ -2282,6 +2457,7 @@ ApplicationWindow {
                     visible: root.activeTab === "Telegram"
                     FormPanel {
                         title: "TELEGRAM BOT"
+                        tutorialId: "telegram"
                         FieldRow { label: "Enable Telegram"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "enabled"); onToggled: function(value) { root.saveValue("telegram", "enabled", value) } } } }
                         FieldRow { label: "Bot Token"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "bot_token")); secret: true; onSaved: function(value) { root.saveValue("telegram", "bot_token", value) } } }
                         FieldRow { label: "Notification Chat IDs"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "notification_chat_ids")); onSaved: function(value) { root.saveValue("telegram", "notification_chat_ids", value) } } }
@@ -2305,6 +2481,7 @@ ApplicationWindow {
                     visible: root.activeTab === "API"
                     FormPanel {
                         title: "BRAWL STARS API"
+                        tutorialId: "api"
                         FieldRow { label: "Player Tag"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "player_tag")); onSaved: function(value) { root.saveValue("api", "player_tag", value) } } }
                         FieldRow { label: "Auto Refresh Token"; CenterRow { ToggleSwitch { checked: root.boolValue("api", "auto_refresh_token"); onToggled: function(value) { root.saveValue("api", "auto_refresh_token", value) } } } }
                         FieldRow { label: "Developer Email"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "developer_email")); onSaved: function(value) { root.saveValue("api", "developer_email", value) } } }
@@ -2327,6 +2504,7 @@ ApplicationWindow {
                     visible: root.activeTab === "Timers"
                     FormPanel {
                         title: "TIMERS"
+                        tutorialId: "timers"
                         FieldRow { label: "Super Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "super")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "super", value) } } }
                         FieldRow { label: "Hypercharge Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "hypercharge")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "hypercharge", value) } } }
                         FieldRow { label: "Gadget Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "gadget")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "gadget", value) } } }
@@ -2348,10 +2526,15 @@ ApplicationWindow {
 
                 TabPage {
                     visible: root.activeTab === "Match History"
-                    ActionRow {
-                        HubButton { label: "Export CSV"; secondary: true; onClicked: root.runAction("export-history") }
-                        HubButton { label: "Reset Stats"; secondary: true; onClicked: root.runAction("reset-history") }
-                        HubButton { label: "Refresh"; secondary: true; onClicked: root.runAction("refresh-history") }
+
+                    FormPanel {
+                        title: "MATCH HISTORY"
+                        tutorialId: "match-history"
+                        ActionRow {
+                            HubButton { label: "Export CSV"; secondary: true; onClicked: root.runAction("export-history") }
+                            HubButton { label: "Reset Stats"; secondary: true; onClicked: root.runAction("reset-history") }
+                            HubButton { label: "Refresh"; secondary: true; onClicked: root.runAction("refresh-history") }
+                        }
                     }
                     Rectangle {
                         Layout.fillWidth: true
@@ -2474,6 +2657,106 @@ ApplicationWindow {
                         text: "No match history yet."
                         color: theme.faint
                         font.pixelSize: 12
+                    }
+                }
+
+                TabPage {
+                    visible: root.activeTab === "Help"
+
+                    FormPanel {
+                        title: "FEATURE GUIDES"
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Quick guides for every Hub tab. Click Open guide for a summary, or Open full guide for the markdown tutorial."
+                            color: theme.faint
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+                        FieldRow {
+                            label: "Search Guides"
+                            ConfigInput {
+                                anchors.fill: parent
+                                live: true
+                                value: root.helpFilter
+                                onSaved: function(value) { root.helpFilter = value }
+                            }
+                        }
+                        ActionRow {
+                            HubButton {
+                                label: "Open Tutorial Index"
+                                secondary: true
+                                onClicked: root.openTutorialDoc("docs/TUTORIAL.md")
+                            }
+                            HubButton {
+                                label: "Show Setup Wizard Again"
+                                secondary: true
+                                onClicked: root.runAction("reset-setup-wizard")
+                            }
+                        }
+                    }
+
+                    Repeater {
+                        model: root.filteredHelpTopics()
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            radius: 10
+                            color: theme.panel
+                            border.width: 1
+                            border.color: theme.borderSoft
+                            implicitHeight: helpTopicColumn.implicitHeight + 20
+
+                            ColumnLayout {
+                                id: helpTopicColumn
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 6
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.title
+                                        color: theme.text
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                    }
+                                    Text {
+                                        text: modelData.tab || "Help"
+                                        color: theme.faint
+                                        font.pixelSize: 10
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: {
+                                        const summary = String(modelData.summary || "")
+                                        const firstLine = summary.split("\n")[0] || summary
+                                        return firstLine
+                                    }
+                                    color: theme.muted
+                                    font.pixelSize: 11
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                                RowLayout {
+                                    spacing: 8
+                                    HubButton {
+                                        label: "Open guide"
+                                        compact: true
+                                        onClicked: root.openTutorial(modelData.id)
+                                    }
+                                    HubButton {
+                                        label: "Full doc"
+                                        secondary: true
+                                        compact: true
+                                        visible: !!modelData.doc
+                                        onClicked: root.openTutorialDoc(modelData.doc)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2642,10 +2925,10 @@ ApplicationWindow {
                     text: root.wizardStep === 0
                         ? ((hubBrand ? hubBrand.productName : "Pyla-RL") + " is free and open source under CC BY-NC 4.0. You may use and modify it, but you must not sell or resell it.")
                         : (root.wizardStep === 1
-                            ? "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview."
+                            ? "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview. Full guides for every feature are in the Help tab."
                             : (root.wizardStep === 2
-                                ? "Optional: configure Discord, Telegram, or API tabs for notifications and remote control."
-                                : "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty."))
+                                ? "Optional: configure Discord, Telegram, or API tabs for notifications and remote control. See the Help tab for setup tutorials."
+                                : "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty. Open Help anytime for full guides."))
                     color: theme.muted
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -2722,6 +3005,15 @@ ApplicationWindow {
                         visible: root.wizardStep === 1
                         onClicked: root.runAction("preflight-check")
                     }
+                    HubButton {
+                        label: "Open Help"
+                        secondary: true
+                        visible: root.wizardStep >= 2
+                        onClicked: {
+                            root.showWizard = false
+                            root.activeTab = "Help"
+                        }
+                    }
                     Item { Layout.fillWidth: true }
                     HubButton {
                         label: root.wizardStep < 3 ? "Next" : "Finish"
@@ -2749,73 +3041,7 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        visible: root.showFarmPlanTutorial
-        color: "#cc000000"
-        z: 99
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.showFarmPlanTutorial = false
-        }
-
-        Rectangle {
-            anchors.centerIn: parent
-            width: Math.min(520, root.width - 48)
-            radius: 12
-            color: theme.panel
-            border.width: 1
-            border.color: theme.borderSoft
-            implicitHeight: farmTutorialColumn.implicitHeight + 32
-
-            MouseArea {
-                anchors.fill: parent
-            }
-
-            ColumnLayout {
-                id: farmTutorialColumn
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
-
-                Text {
-                    text: "Farm Plan Tutorial"
-                    color: theme.text
-                    font.pixelSize: 16
-                    font.weight: Font.Bold
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: "Quick start:\n"
-                        + "1. Fill the API tab (player tag + token) for Push All.\n"
-                        + "2. Pick a trophy target and click Build Queue.\n"
-                        + "3. Drag the grip to reorder brawlers. The first brawler is active.\n"
-                        + "4. Press START on Overview. Restart the bot after changing the plan.\n\n"
-                        + "Manual add:\n"
-                        + "• Click Add Brawler, search the grid, set target trophies, then add.\n"
-                        + "• Click a queue row target to change push-until after adding.\n\n"
-                        + "Tips:\n"
-                        + "• Push All only includes brawlers below your target from the API.\n"
-                        + "• Export/Import saves farm_plan.json for backup.\n"
-                        + "• Leave the queue empty to use the legacy picker after START."
-                    color: theme.muted
-                    font.pixelSize: 12
-                    wrapMode: Text.WordWrap
-                    lineHeight: 1.25
-                }
-                RowLayout {
-                    spacing: 8
-                    Item { Layout.fillWidth: true }
-                    HubButton {
-                        label: "Close"
-                        secondary: true
-                        onClicked: root.showFarmPlanTutorial = false
-                    }
-                }
-            }
-        }
-    }
+    TutorialOverlay {}
 
     Rectangle {
         anchors.fill: parent

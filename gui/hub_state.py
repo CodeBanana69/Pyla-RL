@@ -315,6 +315,8 @@ class HubStateStore:
         from gui.official_source import read_build_info, verify_official_source
         from utils import get_brawler_list
 
+        from gui.hub_tutorials import tutorial_topics
+
         brawler_names = get_brawler_list()
         source_status = verify_official_source()
         build_info = read_build_info()
@@ -347,6 +349,7 @@ class HubStateStore:
                     {"name": name, "icon": brawler_icon_uri(name)}
                     for name in brawler_names
                 ],
+                "tutorials": tutorial_topics(),
             },
         })
         return state

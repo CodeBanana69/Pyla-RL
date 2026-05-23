@@ -30,6 +30,8 @@ Pyla-RL is **free and open source**. Do not pay for copies, repacks, or "premium
 
 See [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md) for what is prohibited and how to report resellers.
 
+See [docs/TUTORIAL.md](docs/TUTORIAL.md) for step-by-step guides for every feature.
+
 For normal users, you only need `setup.exe`.
 
 1. Download or clone this repository.

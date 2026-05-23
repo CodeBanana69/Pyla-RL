@@ -255,22 +255,40 @@ class QmlHubStateTests(unittest.TestCase):
     def test_qml_farm_plan_has_tutorial_and_picker_grid(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 
-        self.assertIn("showFarmPlanTutorial", qml)
-        self.assertIn("Farm Plan Tutorial", qml)
+        self.assertIn("activeTutorialId", qml)
+        self.assertIn("component TutorialOverlay", qml)
+        self.assertIn('openTutorial("farm-plan")', qml)
+        self.assertIn('label: "Tutorial"', qml)
         self.assertIn("component BrawlerPickTile", qml)
         self.assertIn("filteredPickerOptions", qml)
-        self.assertIn("label: \"Refresh\"", qml)
+        self.assertIn('label: "Refresh"', qml)
         self.assertIn("compact: true", qml)
 
         self.assertIn("import QtQuick.Dialogs", qml)
         self.assertIn("id: importQueueDialog", qml)
         self.assertIn("id: exportQueueDialog", qml)
 
+    def test_qml_help_tab_and_tutorial_contract(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+
+        self.assertIn('"Help"', qml)
+        self.assertIn('visible: root.activeTab === "Help"', qml)
+        self.assertIn("function openTutorial(id)", qml)
+        self.assertIn("function filteredHelpTopics()", qml)
+        self.assertIn("component TutorialHelpButton", qml)
+        self.assertIn("TutorialOverlay {}", qml)
+        self.assertIn("reset-setup-wizard", qml)
+        self.assertIn("result.showWizard", qml)
+        self.assertIn("def tutorialTopicsJson(self):", bridge)
+        self.assertIn("def openTutorialDoc(self, doc_path):", bridge)
+        self.assertIn('"tutorials": tutorial_topics()', Path("gui/hub_state.py").read_text(encoding="utf-8"))
+
     def test_qml_instances_tab_is_always_available(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 
         self.assertIn(
-            'readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]',
+            'readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]',
             qml,
         )
         self.assertIn("setMultiInstanceEnabled", qml)
