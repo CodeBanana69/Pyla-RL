@@ -95,6 +95,10 @@ def setup_pyla():
     ]
     force_install(base_reqs)
     force_install(["easyocr"], no_deps=True)
+    # EasyOCR is installed without pip deps to avoid opencv-python-headless conflicts.
+    force_install([
+        "scikit-image", "ninja", "pyclipper", "python-bidi", "Shapely",
+    ])
 
     target, ver, name = get_gpu_data()
     status_pytorch, status_accel = "CPU Edition", "N/A"

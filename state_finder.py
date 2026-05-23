@@ -139,12 +139,13 @@ def find_game_result(screenshot):
 def get_in_game_state(image):
     game_result = is_in_end_of_a_match(image)
     if game_result: return f"end_{game_result}"
+    # Brawler picker also shows the powerpoint icon, so detect it before shop.
+    if is_in_brawler_selection(image):
+        return "brawler_selection"
     if is_in_shop(image): return "shop"
     if is_in_offer_popup(image): return "popup"
     if is_in_match_making(image): return "match_making"
     if is_in_lobby(image): return "lobby"
-    if is_in_brawler_selection(image):
-        return "brawler_selection"
 
     if is_in_brawl_pass(image) or is_in_star_road(image):
         return "shop"
@@ -174,8 +175,24 @@ def is_in_shop(image) -> bool:
     return is_template_in_region(image, states_path + 'powerpoint.png', region_data["powerpoint"])
 
 
+def brawler_menu_task_score(image) -> float:
+    template_path = states_path + "brawler_menu_task.png"
+    if not os.path.exists(template_path):
+        return 0.0
+    return template_match_score_in_region(image, template_path, region_data["brawler_menu_task"])
+
+
 def is_in_brawler_selection(image) -> bool:
-    return is_template_in_region(image, states_path + 'brawler_menu_task.png', region_data["brawler_menu_task"])
+    if is_in_lobby(image):
+        return False
+    task_score = brawler_menu_task_score(image)
+    if task_score >= 0.42:
+        return True
+    return is_template_in_region(
+        image,
+        states_path + "brawler_menu_task.png",
+        region_data["brawler_menu_task"],
+    )
 
 
 def is_in_offer_popup(image) -> bool:

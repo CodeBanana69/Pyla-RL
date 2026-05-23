@@ -1250,6 +1250,12 @@ def pyla_main(data):
                 prestige_reward_allowed=self.Stage_manager.can_handle_prestige_reward_screen(),
                 exact_star_drop_after_match=detected_state in STAR_DROP_STATES,
             )
+            if (
+                previous_state == "match"
+                and detected_state in {"brawler_selection", "shop"}
+                and state == detected_state
+            ):
+                return "match"
             if detected_state != "lobby":
                 self.pending_lobby_since = None
 
@@ -1356,7 +1362,7 @@ def pyla_main(data):
                 self.lobby_automator.check_for_idle(frame)
 
         def try_promote_match_start(self, frame):
-            if self.state not in {"match_making", "lobby"}:
+            if self.state not in {None, "match_making", "lobby", "shop", "brawler_selection"}:
                 return False
             now = time.time()
             if now - self.last_match_start_fast_check < self.match_start_fast_check_interval:

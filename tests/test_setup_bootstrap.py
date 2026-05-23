@@ -114,6 +114,7 @@ class SetupBootstrapTests(unittest.TestCase):
         core_block = source[core_start:core_end]
         self.assertNotIn("easyocr", core_block)
         self.assertIn('force_install(["easyocr"], no_deps=True)', source)
+        self.assertIn('"scikit-image"', source)
 
 
 if __name__ == "__main__":

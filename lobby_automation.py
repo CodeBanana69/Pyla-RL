@@ -4,7 +4,12 @@ import time
 import cv2
 import numpy as np
 
-from state_finder import get_state, is_starr_nova_hub_screen, get_starr_nova_hub_back_button_center
+from state_finder import (
+    get_state,
+    get_starr_nova_hub_back_button_center,
+    is_in_brawler_selection,
+    is_starr_nova_hub_screen,
+)
 from utils import (
     extract_text_and_positions,
     extract_all_text_boxes,
@@ -17,6 +22,8 @@ from utils import (
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 gray_pixels_treshold = load_toml_as_dict("./cfg/bot_config.toml")['idle_pixels_minimum']
+
+
 class LobbyAutomation:
 
     def __init__(self, window_controller):
@@ -34,6 +41,21 @@ class LobbyAutomation:
             if debug:
                 print(f"Could not read state while opening brawler menu: {e}")
             return None
+
+    def _screenshot_bgr(self, screenshot=None):
+        if screenshot is None:
+            screenshot = self.window_controller.screenshot()
+        if screenshot is None:
+            return None
+        return cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+
+    def _confirm_brawler_menu_open(self, screenshot=None):
+        screenshot_bgr = self._screenshot_bgr(screenshot)
+        if screenshot_bgr is None:
+            return False
+        if is_starr_nova_hub_screen(screenshot_bgr):
+            return False
+        return is_in_brawler_selection(screenshot_bgr)
 
     def _dismiss_starr_nova_hub_if_present(self, max_attempts=3):
         dismissed = False
@@ -84,7 +106,7 @@ class LobbyAutomation:
         self._dismiss_starr_nova_hub_if_present()
 
         state = self._read_state()
-        if state == "brawler_selection":
+        if state == "brawler_selection" or self._confirm_brawler_menu_open():
             return True
         if state == "shop" and self.is_probably_brawler_selection_screen():
             return True
@@ -99,48 +121,37 @@ class LobbyAutomation:
                 return True
 
         for attempt in range(attempts):
-            if state == "shop":
-                if self.is_probably_brawler_selection_screen():
-                    return True
-                print("Brawler menu click opened a lobby panel; backing out and retrying Brawlers.")
-                self.press_back()
-                time.sleep(0.8)
-                state = self._read_state()
-                if state == "brawler_selection":
-                    return True
-                if state == "shop" and self.is_probably_brawler_selection_screen():
-                    return True
-                if state == "lobby" and self.click_visible_brawler_menu_button():
-                    time.sleep(0.8)
-                    state = self._read_state()
-                    if state == "brawler_selection":
-                        return True
-                    if state == "shop" and self.is_probably_brawler_selection_screen():
-                        return True
-
             x, y = brawler_button_points[min(attempt, len(brawler_button_points) - 1)]
             self.window_controller.click(int(x * wr), int(y * hr))
             time.sleep(0.8)
 
             state = self._read_state()
             screenshot = self.window_controller.screenshot()
-            nova_hub = False
-            if screenshot is not None:
-                nova_hub = is_starr_nova_hub_screen(cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
+            screenshot_bgr = self._screenshot_bgr(screenshot)
+            nova_hub = screenshot_bgr is not None and is_starr_nova_hub_screen(screenshot_bgr)
+            brawler_open = self._confirm_brawler_menu_open(screenshot)
+            probably_brawler = self.is_probably_brawler_selection_screen(screenshot)
             if nova_hub:
                 self._dismiss_starr_nova_hub_if_present()
                 state = self._read_state()
                 continue
-            if state == "brawler_selection":
+            if brawler_open or state == "brawler_selection":
                 return True
-            if state == "shop" and self.is_probably_brawler_selection_screen():
+            if state == "shop" and probably_brawler:
                 return True
             if state == "shop":
+                time.sleep(0.4)
+                if self._confirm_brawler_menu_open():
+                    return True
+                if self.is_probably_brawler_selection_screen():
+                    return True
+                print("Brawler menu click opened a lobby panel; backing out and retrying Brawlers.")
+                self.press_back()
+                time.sleep(0.8)
+                state = self._read_state()
                 continue
             if state is None:
-                # Some tests/controllers cannot provide a state image here. Let
-                # the OCR loop continue instead of failing selection up front.
-                return True
+                continue
 
         return False
 
