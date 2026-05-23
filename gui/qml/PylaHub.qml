@@ -2369,7 +2369,7 @@ ApplicationWindow {
                         }
                         FieldRow {
                             label: "Status Summary Seconds"
-                            ConfigInput { anchors.fill: parent; value: String(root.value("settings", "terminal_summary_seconds")); onSaved: function(value) { root.saveValue("settings", "terminal_summary_seconds", value) } } }
+                            ConfigInput { anchors.fill: parent; value: String(root.value("settings", "terminal_summary_seconds")); onSaved: function(value) { root.saveValue("settings", "terminal_summary_seconds", value) } }
                         }
                         FieldRow {
                             label: "Pause Graph Samples"
