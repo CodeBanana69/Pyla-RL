@@ -59,6 +59,7 @@ class QmlHub:
             iconsUpdated = Signal(str)
             queueChanged = Signal()
             closeRequested = Signal()
+            instancesUpdated = Signal()
 
             def __init__(self, store, correct_zoom=True, settings_only=False):
                 super().__init__()
@@ -67,6 +68,7 @@ class QmlHub:
                 self._settings_only = settings_only
                 self._preflight_cache = {"ready": False, "checks": []}
                 self._icon_download_started = False
+                self._multi_instance_service = None
                 state = store.initial_state()
                 self._mode = state["mode"]
                 self._emulator = state["emulator"]
@@ -83,6 +85,67 @@ class QmlHub:
                 else:
                     self._queue_watcher.addPath(str(queue_path.parent.resolve()))
                 self._queue_watcher.fileChanged.connect(self._on_queue_file_changed)
+                self._instances_timer = QTimer()
+                self._instances_timer.setInterval(2000)
+                self._instances_timer.timeout.connect(self.instancesUpdated.emit)
+
+            def set_multi_instance_service(self, service):
+                self._multi_instance_service = service
+                if service is not None:
+                    self._instances_timer.start()
+                else:
+                    self._instances_timer.stop()
+
+            @Slot(result=bool)
+            def multiInstanceEnabled(self):
+                from gui.instance_config import is_multi_instance_enabled
+
+                return is_multi_instance_enabled()
+
+            @Slot(bool, result=str)
+            def setMultiInstanceEnabled(self, enabled):
+                try:
+                    self._store.set_multi_instance_enabled(bool(enabled))
+                    return json.dumps({"ok": True, "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def startInstance(self, instance_id):
+                if self._multi_instance_service is None:
+                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                ok, message = self._multi_instance_service.start_instance(instance_id)
+                return json.dumps({"ok": ok, "message": message, "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def stopInstance(self, instance_id):
+                if self._multi_instance_service is None:
+                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                ok, message = self._multi_instance_service.stop_instance(instance_id)
+                return json.dumps({"ok": ok, "message": message, "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def saveInstanceProfile(self, payload_json):
+                try:
+                    payload = json.loads(payload_json or "{}")
+                    profile = self._store.save_instance_profile(payload.get("id", ""), payload)
+                    return json.dumps({"ok": True, "message": f"Saved instance '{profile['id']}'.", "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def deleteInstanceProfile(self, instance_id):
+                try:
+                    deleted = self._store.delete_instance_profile(instance_id)
+                    if not deleted:
+                        return json.dumps({"ok": False, "message": f"Unknown instance '{instance_id}'.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": f"Deleted instance '{instance_id}'.", "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(result=str)
+            def refreshInstances(self):
+                return self.stateJson()
 
             def _ui_state(self, preflight=None):
                 if preflight is None:
@@ -112,6 +175,27 @@ class QmlHub:
             @Slot(result=str)
             def emulator(self):
                 return self._emulator
+
+            def _preflight_emulator_args(self):
+                self._store.apply_state({
+                    "mode": self._mode,
+                    "emulator": self._emulator,
+                })
+                general = self._store.general_config
+                emulator = "mumu" if str(self._emulator).lower() == "mumu" else "ldplayer"
+                port = int(general.get("emulator_port", 5555 if emulator == "ldplayer" else 16384) or (5555 if emulator == "ldplayer" else 16384))
+                return emulator, port
+
+            def _run_preflight(self):
+                from gui.preflight import run_preflight_checks
+
+                emulator, port = self._preflight_emulator_args()
+                self._preflight_cache = run_preflight_checks(
+                    correct_zoom=self._correct_zoom,
+                    emulator=emulator,
+                    port=port,
+                )
+                return self._preflight_cache
 
             @Slot(str, str)
             def updateSetting(self, key, value):
@@ -246,10 +330,7 @@ class QmlHub:
                     self._store.bot_config.update(result["bot_config"])
                     return f"Applied {result['profile']} profile. Restart the bot to use it."
                 if action == "preflight-check":
-                    from gui.preflight import run_preflight_checks
-
-                    self._preflight_cache = run_preflight_checks(correct_zoom=self._correct_zoom)
-                    result = self._preflight_cache
+                    result = self._run_preflight()
                     lines = []
                     for check in result["checks"]:
                         prefix = "OK" if check["ok"] else "WARN"
@@ -259,7 +340,8 @@ class QmlHub:
                 if action == "test-emulator":
                     from gui.preflight import test_emulator_connection
 
-                    ok, message = test_emulator_connection()
+                    emulator, port = self._preflight_emulator_args()
+                    ok, message = test_emulator_connection(emulator=emulator, port=port)
                     if ok:
                         return f"Emulator connection OK: {message}"
                     raise ValueError(f"Emulator connection failed: {message}")
@@ -445,8 +527,16 @@ class QmlHub:
                         "message": "START is disabled while the bot is running. Close this window when finished editing settings.",
                         "state": self._ui_state(),
                     })
+                from gui.instance_config import is_multi_instance_enabled
+
+                if is_multi_instance_enabled():
+                    return json.dumps({
+                        "ok": True,
+                        "message": "Multi-instance mode is enabled. Start bots from the Instances tab.",
+                        "state": self._ui_state(),
+                        "multiInstance": True,
+                    })
                 from gui.hub_state import _to_bool
-                from gui.preflight import run_preflight_checks
 
                 if not _to_bool(self._store.general_config.get("license_accepted", "no")):
                     return json.dumps({
@@ -454,7 +544,7 @@ class QmlHub:
                         "message": "Accept the free-use license in the hub wizard or Settings → About before START.",
                         "state": self._ui_state(),
                     })
-                self._preflight_cache = run_preflight_checks(correct_zoom=self._correct_zoom)
+                self._preflight_cache = self._run_preflight()
                 if not self._preflight_cache.get("ready"):
                     return json.dumps({
                         "ok": False,
@@ -516,6 +606,16 @@ class QmlHub:
         self._store = HubStateStore()
         self._bridge = HubBridge(self._store, correct_zoom=correct_zoom, settings_only=settings_only)
         self._bridge._app = app
+        self._multi_instance_service = None
+        if not settings_only:
+            from gui.instance_config import is_multi_instance_enabled
+
+            if is_multi_instance_enabled():
+                from gui.multi_instance_service import MultiInstanceService
+
+                self._multi_instance_service = MultiInstanceService()
+                self._multi_instance_service.start()
+                self._bridge.set_multi_instance_service(self._multi_instance_service)
         if not settings_only:
             self._bridge.closeRequested.connect(self._mark_started_and_close)
 
@@ -542,6 +642,9 @@ class QmlHub:
         self._app = app
         self._engine = engine
         app.exec()
+
+        if self._multi_instance_service is not None:
+            self._multi_instance_service.close()
 
         if self.started and callable(self.on_close_callback):
             self.on_close_callback()

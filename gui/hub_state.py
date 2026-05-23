@@ -330,6 +330,7 @@ class HubStateStore:
             "history": self._history_state(),
             "preflight": preflight,
             "queue": queue_state_items(load_queue()),
+            "multiInstance": self._multi_instance_state(),
             "meta": {
                 "profileDescriptions": {
                     key: profile.get("description", "")
@@ -349,6 +350,34 @@ class HubStateStore:
             },
         })
         return state
+
+    def _multi_instance_state(self):
+        from gui.instance_config import is_multi_instance_enabled, load_instances_config
+        from gui.instance_registry import list_instances
+
+        config = load_instances_config()
+        return {
+            "enabled": is_multi_instance_enabled(),
+            "defaultInstance": str(config.get("multi_instance", {}).get("default_instance", "") or ""),
+            "instances": list_instances(),
+        }
+
+    def set_multi_instance_enabled(self, enabled: bool):
+        from gui.instance_config import migrate_single_instance_to_default, set_multi_instance_enabled
+
+        if enabled:
+            migrate_single_instance_to_default()
+        return set_multi_instance_enabled(enabled)
+
+    def save_instance_profile(self, instance_id: str, profile: dict):
+        from gui.instance_config import upsert_instance_profile
+
+        return upsert_instance_profile(instance_id, profile)
+
+    def delete_instance_profile(self, instance_id: str):
+        from gui.instance_config import delete_instance_profile
+
+        return delete_instance_profile(instance_id)
 
     def state_json(self, preflight=None, correct_zoom=True):
         return json.dumps(self.ui_state(preflight=preflight, correct_zoom=correct_zoom))

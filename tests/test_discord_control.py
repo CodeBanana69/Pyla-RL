@@ -68,8 +68,8 @@ class DiscordControlTest(unittest.TestCase):
 
         self.assertIn("Runtime: running", text)
         self.assertIn("State: match", text)
-        self.assertIn("Ips: 29.50", text)
-        self.assertIn("Feed Fps: 60.00", text)
+        self.assertIn("IPS: 29.50", text)
+        self.assertIn("Feed FPS: 60.00", text)
 
     def test_run_callback_runs_sync_callbacks_off_loop(self):
         async def runner():

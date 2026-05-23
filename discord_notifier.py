@@ -13,6 +13,13 @@ import numpy as np
 from discord import Webhook
 from PIL import Image
 
+from gui.remote_formatting import (
+    format_brawler_complete_description,
+    format_field_value,
+    format_match_description,
+    format_recovery_description,
+    format_result,
+)
 from utils import _config_bool, load_toml_as_dict
 
 
@@ -62,6 +69,7 @@ EVENT_COLORS = {
     "brawler_complete": 0xFF9F0A,
     "completed": 0x30D158,
     "bot_is_stuck": 0xFF453A,
+    "recovery_alert": 0xFF9F0A,
     "test": 0x8E8E93,
 }
 
@@ -70,6 +78,7 @@ EVENT_FOOTERS = {
     "brawler_complete": "Target Complete",
     "completed": "Queue Complete",
     "bot_is_stuck": "Needs Attention",
+    "recovery_alert": "Recovery Alert",
     "test": "Webhook Test",
 }
 
@@ -85,12 +94,17 @@ FIELD_LABELS = {
     "wins": "Wins",
     "win_streak": "Win Streak",
     "brawlers_left": "Brawlers Left",
+    "next_up": "Next Up",
+    "queue_preview": "Up Next",
     "ips": "IPS",
     "state": "State",
     "emulator": "Emulator",
     "adb_device": "ADB Device",
     "runtime": "Runtime",
     "source": "Source",
+    "event_type": "Event",
+    "detail": "Detail",
+    "notice": "Notice",
 }
 
 
@@ -176,35 +190,31 @@ def _ping_content(event_type: str, settings: dict[str, Any]) -> str:
 
 
 def _format_result(value: Any) -> str:
-    result = str(value or "finished").strip()
-    return RESULT_LABELS.get(result.lower(), result)
+    return format_result(value)
 
 
 def _title_and_description(event_type: str, details: dict[str, Any]) -> tuple[str, str]:
-    brawler = str(details.get("brawler") or "").title()
+    instance_name = str(details.get("instance_name") or "").strip()
+    instance_prefix = f"[{instance_name}] " if instance_name else ""
     if event_type == "match":
-        result = _format_result(details.get("result"))
-        delta = details.get("trophy_delta")
-        delta_text = ""
-        if delta not in (None, ""):
-            delta_value = _as_int(delta, 0)
-            if delta_value:
-                delta_text = f" ({delta_value:+d})"
-        return "Match Report", f"Result: **{result}**{delta_text}"
+        return f"{instance_prefix}Match Report", format_match_description(details)
     if event_type == "brawler_complete":
-        if brawler:
-            target = details.get("target")
-            suffix = f" at **{target}**" if target not in (None, "") else ""
-            return "Target Complete", f"**{brawler}** reached the target{suffix}."
-        return "Target Complete", "Configured target reached."
+        return "Target Complete", format_brawler_complete_description(details)
     if event_type == "completed":
         total = details.get("total_trophies")
+        session_wins = details.get("session_wins")
+        session_losses = details.get("session_losses")
+        session_text = ""
+        if session_wins not in (None, "") or session_losses not in (None, ""):
+            session_text = f" Session: **{session_wins or 0}W / {session_losses or 0}L**."
         if total not in (None, ""):
-            return "Queue Complete", f"All queued targets completed. Player trophies: **{total}**."
-        return "Queue Complete", "All queued targets completed."
+            return "Queue Complete", f"All queued targets completed. Player trophies: **{format_field_value('total_trophies', total)}**.{session_text}"
+        return "Queue Complete", f"All queued targets completed.{session_text}"
     if event_type == "bot_is_stuck":
         reason = str(details.get("reason") or "Pyla-RL could not recover automatically.")
         return "Attention Required", reason
+    if event_type == "recovery_alert":
+        return "Recovery Alert", format_recovery_description(details)
     if event_type == "test":
         return "Webhook Test", "Connection verified."
     return "Pyla Update", str(details.get("message") or "Bot event received.")
@@ -215,21 +225,7 @@ def _format_field_name(key: str) -> str:
 
 
 def _format_field_value(key: str, value: Any) -> str:
-    if key == "result":
-        return _format_result(value)
-    if key == "brawler":
-        return str(value).title()
-    if key == "trophy_delta":
-        delta = _as_int(value, 0)
-        return f"{delta:+d}" if delta else "0"
-    if key in {"trophies", "started_trophies", "total_trophies", "target", "wins", "win_streak", "brawlers_left"}:
-        try:
-            return f"{int(value):,}".replace(",", ".")
-        except (TypeError, ValueError):
-            return str(value)
-    if key == "state":
-        return str(value).replace("_", " ").strip().title()
-    return str(value)
+    return format_field_value(key, value)
 
 
 def _add_fields(embed: discord.Embed, details: dict[str, Any]) -> None:
@@ -247,6 +243,11 @@ def _add_fields(embed: discord.Embed, details: dict[str, Any]) -> None:
         "wins",
         "win_streak",
         "brawlers_left",
+        "next_up",
+        "queue_preview",
+        "event_type",
+        "notice",
+        "detail",
         "ips",
         "state",
         "emulator",

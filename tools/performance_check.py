@@ -35,6 +35,53 @@ def main():
     print(f"Configured scrcpy_bitrate: {cfg.get('scrcpy_bitrate', 'default')}")
     print("Tip: run `python tools/apply_performance_profile.py --profile balanced` to restore safe defaults.")
 
+    print("\nVisual debug check")
+    try:
+        from visual_debug_window import (
+            OPENCV_REPAIR_CMD,
+            opencv_highgui_available,
+            visual_debug_backend_name,
+        )
+
+        opencv_highgui_available()
+        backend = visual_debug_backend_name()
+        opencv_status = "ok" if backend == "opencv" else "headless"
+        print(f"OpenCV GUI: {opencv_status}")
+        print(f"Debug Screen backend: {backend}")
+        if backend == "unavailable":
+            print(f"WARNING: Debug Screen will not work. Fix: {OPENCV_REPAIR_CMD}")
+        elif backend == "win32":
+            print("WARNING: OpenCV GUI unavailable; Debug Screen will use the Win32 fallback window.")
+            print(f"Recommended fix: {OPENCV_REPAIR_CMD}")
+        else:
+            print("Debug Screen: OK")
+    except Exception as exc:
+        print(f"Visual debug check failed: {exc}")
+
+    print("\nRecovery log check")
+    recovery_path = ROOT / "logs" / "recovery_events.jsonl"
+    if recovery_path.exists():
+        try:
+            from recovery_events import read_recent_events
+
+            recent = read_recent_events(limit=5, path=str(recovery_path))
+            if recent:
+                print(f"Recent recovery events ({recovery_path.name}):")
+                for event in recent:
+                    print(
+                        f"  - {event.get('event_type')}: {event.get('detail') or event.get('notice')}"
+                    )
+                print(
+                    "If MuMu black-screens or lags, check whether display_repair or "
+                    "scrcpy_restart spiked right before the crash."
+                )
+            else:
+                print("Recovery log exists but has no readable events yet.")
+        except Exception as exc:
+            print(f"Recovery log check failed: {exc}")
+    else:
+        print("No recovery log yet. It is created after the first bot recovery event.")
+
     model_path = ROOT / "models" / "mainInGameModel.onnx"
     if not model_path.exists():
         print(f"Missing model: {model_path}")
@@ -119,7 +166,7 @@ def main():
             emulator = cfg.get("current_emulator", "LDPlayer")
             print(f"This causes 1-2 IPS with low Python CPU usage. Fix {emulator} settings first:")
             print("- Apply Pyla's balanced performance profile, then restart: python tools/apply_performance_profile.py --profile balanced")
-            print("- Use Python 3.11 64-bit via Run PylaAi-XXZ.bat, not 32-bit python.exe.")
+            print("- Use Python 3.11 64-bit via Run Pyla-RL.bat, not 32-bit python.exe.")
             print("- Set emulator resolution to 1920x1080 landscape.")
             print("- Set emulator FPS to 60 and disable low-FPS/eco/power-saving mode.")
             print(f"- Disable Windows Efficiency mode for {emulator} and Python.")

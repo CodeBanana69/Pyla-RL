@@ -47,7 +47,15 @@ def _normalize_session(session):
         normalized["trophies"] = None if trophies in (None, "") else int(trophies)
     except (TypeError, ValueError):
         normalized["trophies"] = None
-    for key in ("session_wins", "session_losses", "recovery_count_session"):
+    for key in (
+        "session_wins",
+        "session_losses",
+        "recovery_count_session",
+        "scrcpy_restarts",
+        "display_repairs",
+        "app_restarts",
+        "emulator_restarts",
+    ):
         try:
             normalized[key] = max(0, int(session.get(key, 0) or 0))
         except (TypeError, ValueError):

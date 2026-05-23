@@ -270,8 +270,10 @@ class StageManager:
         if not self.window_controller.restart_brawl_stars():
             print("Brawl Stars restart failed after target completion; falling back to normal lobby flow.")
             return False
-        if hasattr(self.window_controller, "restart_scrcpy_client"):
-            self.window_controller.restart_scrcpy_client()
+        frame, frame_time = self.window_controller.get_latest_frame()
+        if frame is None or (time.time() - frame_time) > self.window_controller.FRAME_STALE_TIMEOUT:
+            if hasattr(self.window_controller, "restart_scrcpy_client"):
+                self.window_controller.restart_scrcpy_client()
 
         lobby_screenshot = self.wait_for_lobby_after_reward(max_attempts=45)
         if lobby_screenshot is None:
@@ -292,10 +294,17 @@ class StageManager:
         return True
 
     def send_webhook_notification(self, event_type, screenshot=None, details=None):
+        payload = dict(details or {})
+        try:
+            from gui.instance_config import instance_context_for_notifications
+
+            payload.update(instance_context_for_notifications())
+        except Exception:
+            pass
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(async_notify_user(event_type, screenshot, details=details or {}))
+            loop.run_until_complete(async_notify_user(event_type, screenshot, details=payload))
         finally:
             loop.run_until_complete(asyncio.sleep(0.25))
             loop.run_until_complete(loop.shutdown_asyncgens())
@@ -327,6 +336,12 @@ class StageManager:
         trophy_delta = getattr(self, "last_match_trophy_delta", 0) or 0
         if trophy_delta:
             details["trophy_delta"] = trophy_delta
+        if len(self.brawlers_pick_data) > 1:
+            from gui.remote_formatting import format_queue_preview_names
+
+            preview = format_queue_preview_names(self.brawlers_pick_data[1:3])
+            if preview:
+                details["queue_preview"] = preview
         if extra:
             details.update(extra)
         return details
@@ -492,6 +507,10 @@ class StageManager:
             "win_streak": self.Trophy_observer.win_streak,
             "brawlers_left": max(0, len(self.brawlers_pick_data) - 1),
         }
+        if len(self.brawlers_pick_data) > 1:
+            next_up = str(self.brawlers_pick_data[1].get("brawler", "") or "").title()
+            if next_up:
+                details["next_up"] = next_up
         if extra:
             details.update(extra)
         self.send_webhook_notification("brawler_complete", screenshot, details)

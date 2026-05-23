@@ -38,6 +38,9 @@ ApplicationWindow {
     property string pickerType: "trophies"
     property string historySort: "games"
     readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
+    readonly property var navItems: (hubState.multiInstance && hubState.multiInstance.enabled)
+        ? ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
+        : ["Overview", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
         const needle = pickerFilter.trim().toLowerCase()
@@ -50,6 +53,21 @@ ApplicationWindow {
     }
     property int queueDragSource: -1
     property int queueDropTarget: -1
+
+    function reloadHubState() {
+        if (!hubBridge) {
+            return
+        }
+        hubState = JSON.parse(hubBridge.stateJson())
+        preflightChecks = (hubState.preflight && hubState.preflight.checks) ? hubState.preflight.checks : []
+    }
+
+    Connections {
+        target: hubBridge
+        function onInstancesUpdated() {
+            root.reloadHubState()
+        }
+    }
 
     function navLabel(tab) {
         if (tab === "Farm Plan") {
@@ -1575,7 +1593,7 @@ ApplicationWindow {
                             id: navRow
                             spacing: 2
                             Repeater {
-                                model: ["Overview", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History"]
+                                model: root.navItems
                                 delegate: NavButton {
                                     tabId: modelData
                                     label: root.navLabel(modelData)
@@ -1590,6 +1608,91 @@ ApplicationWindow {
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+
+                TabPage {
+                    visible: root.activeTab === "Instances"
+
+                    FormPanel {
+                        title: "MULTI-INSTANCE MODE"
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Run multiple LDPlayer or MuMu bots in parallel. Each instance needs its own emulator port and farm plan."
+                            color: theme.faint
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+                        FieldRow {
+                            label: "Enable Multi-Instance"
+                            CenterRow {
+                                ToggleSwitch {
+                                    checked: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                                    onToggled: function(value) {
+                                        applyBridgeResult(hubBridge.setMultiInstanceEnabled(value))
+                                    }
+                                }
+                            }
+                        }
+                        HubButton {
+                            label: "Refresh Instances"
+                            secondary: true
+                            onClicked: applyBridgeResult(hubBridge.refreshInstances())
+                        }
+                    }
+
+                    FormPanel {
+                        title: "CONFIGURED INSTANCES"
+                        visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Repeater {
+                                model: (hubState.multiInstance && hubState.multiInstance.instances) ? hubState.multiInstance.instances : []
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: 10
+                                    color: theme.panel
+                                    border.color: theme.border
+                                    implicitHeight: instanceColumn.implicitHeight + 20
+                                    ColumnLayout {
+                                        id: instanceColumn
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 6
+                                        Text {
+                                            text: modelData.name + " (" + modelData.id + ")"
+                                            color: theme.text
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            text: String(modelData.emulator || "?").toUpperCase() + " · port " + modelData.emulator_port
+                                                + (modelData.running ? " · RUNNING" : " · stopped")
+                                                + (modelData.brawler ? " · " + modelData.brawler : "")
+                                            color: theme.muted
+                                            font.pixelSize: 11
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+                                        RowLayout {
+                                            spacing: 8
+                                            HubButton {
+                                                label: "Start"
+                                                visible: !modelData.running
+                                                onClicked: applyBridgeResult(hubBridge.startInstance(modelData.id))
+                                            }
+                                            HubButton {
+                                                label: "Stop"
+                                                secondary: true
+                                                visible: !!modelData.running
+                                                onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 TabPage {
                     visible: root.activeTab === "Overview"
@@ -1725,13 +1828,19 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 label: "LDPlayer"
                                 selected: root.emulator === "ldplayer"
-                                onClicked: hubBridge.updateSetting("emulator", "ldplayer")
+                                onClicked: {
+                                    hubBridge.updateSetting("emulator", "ldplayer")
+                                    root.runAction("preflight-check")
+                                }
                             }
                             OptionCard {
                                 Layout.fillWidth: true
                                 label: "MuMu"
                                 selected: root.emulator === "mumu"
-                                onClicked: hubBridge.updateSetting("emulator", "mumu")
+                                onClicked: {
+                                    hubBridge.updateSetting("emulator", "mumu")
+                                    root.runAction("preflight-check")
+                                }
                             }
                         }
                     }
@@ -1914,7 +2023,8 @@ ApplicationWindow {
                         }
                         FieldRow {
                             label: "Debug Screen"
-                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: function(value) { root.saveValue("settings", "visual_debug", value) } } }
+                            hint: "Restart bot to apply."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: function(value) { root.saveValue("settings", "visual_debug", value); statusText = "Restart bot to apply Debug Screen changes."; statusOk = true; statusToastTimer.restart() } } }
                         }
                         FieldRow {
                             label: "Advanced Visuals"

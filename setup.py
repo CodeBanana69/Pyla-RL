@@ -48,21 +48,6 @@ def save_gpu_runtime_config(variant, cards):
         f"directml_device_id={config.get('directml_device_id', 'auto')}"
     )
 
-def create_run_file():
-    run_bat = Path("Run Pyla-RL.bat")
-    run_bat.write_text(
-        "@echo off\n"
-        "cd /d %~dp0\n"
-        "set OMP_NUM_THREADS=2\n"
-        "set OPENBLAS_NUM_THREADS=2\n"
-        "set MKL_NUM_THREADS=2\n"
-        "set NUMEXPR_NUM_THREADS=2\n"
-        f"\"{sys.executable}\" main.py\n"
-        "pause\n",
-        encoding="ascii",
-    )
-    print(f"Created {run_bat.name}")
-
 def remove_onnxruntime_variants():
     subprocess.run([
         sys.executable, "-m", "pip", "uninstall", "-y",
@@ -196,8 +181,18 @@ def setup_pyla():
     force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
     force_install(["opencv-python==4.8.0.76"], no_deps=True)
-    create_run_file()
+    try:
+        from visual_debug_window import OPENCV_REPAIR_CMD, opencv_highgui_available, visual_debug_backend_name
 
+        opencv_highgui_available()
+        backend = visual_debug_backend_name()
+        if backend == "unavailable":
+            print("WARNING: OpenCV GUI is unavailable after setup. Debug Screen will not work until repaired.")
+            print(f"  Fix: {OPENCV_REPAIR_CMD}")
+        else:
+            print(f"Visual debug backend check: {backend}")
+    except Exception as exc:
+        print(f"WARNING: Could not verify visual debug backend: {exc}")
     # the setup completes
     os.system('cls')
     print("="*50)

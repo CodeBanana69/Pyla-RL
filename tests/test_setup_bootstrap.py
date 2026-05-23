@@ -53,12 +53,24 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertLess(numpy_repair_index, source.index("force_install(base_reqs)"))
         self.assertIn('"numpy<2.0.0"', source)
 
-    def test_direct_setup_creates_run_bat(self):
+    def test_direct_setup_does_not_create_run_bat(self):
         source = Path("setup.py").read_text(encoding="utf-8")
 
-        self.assertIn("def create_run_file", source)
-        self.assertIn('"Run Pyla-RL.bat"', source)
-        self.assertIn("create_run_file()", source)
+        self.assertNotIn("def create_run_file", source)
+        self.assertNotIn("create_run_file()", source)
+
+    def test_setup_bootstrap_uses_shared_launcher_helper(self):
+        source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("from tools.launcher_bat import create_run_file", source)
+        self.assertIn("create_run_file(project_dir", source)
+
+    def test_launcher_helper_removes_legacy_bat(self):
+        source = Path("tools/launcher_bat.py").read_text(encoding="utf-8")
+
+        self.assertIn("Run PylaAi-XXZ.bat", source)
+        self.assertIn("Run Pyla-RL.bat", source)
+        self.assertIn("legacy_path.unlink()", source)
 
     def test_main_repairs_numpy_before_importing_cv2(self):
         source = Path("main.py").read_text(encoding="utf-8")

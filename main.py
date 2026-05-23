@@ -193,11 +193,15 @@ def should_accept_lobby_after_match(pending_for, confirm_seconds):
 
 
 def pyla_main(data):
+    from gui.instance_config import get_active_instance_id, instance_context_for_notifications
 
     class Main:
 
         def __init__(self):
+            self.instance_id = get_active_instance_id()
+            self.last_manifest_heartbeat = 0.0
             self.window_controller = WindowController()
+            self.window_controller.recovery_logger = self.log_runtime_recovery
             self.Play = Play(*self.load_models(), self.window_controller)
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
@@ -272,6 +276,11 @@ def pyla_main(data):
             self.stale_feed_emulator_restart_after = int(
                 time_thresholds.get("stale_feed_emulator_restart_after", 3)
             )
+            if getattr(self.window_controller, "selected_emulator", "") == "MuMu":
+                self.stale_feed_emulator_restart_after = max(
+                    4,
+                    self.stale_feed_emulator_restart_after,
+                )
             self.last_global_freeze_check = 0.0
             self.last_global_freeze_sample = None
             self.global_freeze_recovery_attempts = 0
@@ -364,34 +373,60 @@ def pyla_main(data):
             print(
                 "Pause menu ready: F8 pause/resume, − minimize, × compact, □ expand full panel."
             )
-            self.discord_control = DiscordControlServer(
-                self.control_window.state_path,
-                screenshot_provider=self.window_controller.screenshot,
-                restart_game_callback=self.restart_brawl_stars,
-                restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
-                restart_emulator_callback=self.window_controller.restart_emulator_profile,
-                press_key_callback=self.discord_press_key,
-                back_callback=self.window_controller.android_back,
-                status_provider=self.telegram_status,
-                start_push_callback=self.discord_start_push,
-                stop_all_callback=self.discord_stop_all,
-                pause_menu_callback=self.control_window.show,
-            )
-            self.discord_control.start()
-            self.telegram_control = TelegramControlServer(
-                self.control_window.state_path,
-                screenshot_provider=self.window_controller.screenshot,
-                restart_game_callback=self.restart_brawl_stars,
-                restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
-                restart_emulator_callback=self.window_controller.restart_emulator_profile,
-                press_key_callback=self.discord_press_key,
-                back_callback=self.window_controller.android_back,
-                status_provider=self.telegram_status,
-                start_push_callback=self.discord_start_push,
-                stop_all_callback=self.discord_stop_all,
-                pause_menu_callback=self.control_window.show,
-            )
-            self.telegram_control.start()
+            self.remote_control_enabled = not self.instance_id
+            if self.remote_control_enabled:
+                self.discord_control = DiscordControlServer(
+                    self.control_window.state_path,
+                    screenshot_provider=self.window_controller.screenshot,
+                    restart_game_callback=self.restart_brawl_stars,
+                    restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
+                    restart_emulator_callback=self.window_controller.restart_emulator_profile,
+                    press_key_callback=self.discord_press_key,
+                    back_callback=self.window_controller.android_back,
+                    status_provider=self.telegram_status,
+                    stats_provider=self.remote_session_stats,
+                    start_push_callback=self.discord_start_push,
+                    skip_brawler_callback=self.remote_skip_brawler,
+                    remove_brawler_callback=self.remote_remove_brawler,
+                    set_target_callback=self.remote_set_target,
+                    stop_all_callback=self.discord_stop_all,
+                    pause_menu_callback=self.control_window.show,
+                )
+                self.discord_control.start()
+                self.telegram_control = TelegramControlServer(
+                    self.control_window.state_path,
+                    screenshot_provider=self.window_controller.screenshot,
+                    restart_game_callback=self.restart_brawl_stars,
+                    restart_scrcpy_callback=self.window_controller.restart_scrcpy_client,
+                    restart_emulator_callback=self.window_controller.restart_emulator_profile,
+                    press_key_callback=self.discord_press_key,
+                    back_callback=self.window_controller.android_back,
+                    status_provider=self.telegram_status,
+                    stats_provider=self.remote_session_stats,
+                    start_push_callback=self.discord_start_push,
+                    skip_brawler_callback=self.remote_skip_brawler,
+                    remove_brawler_callback=self.remote_remove_brawler,
+                    set_target_callback=self.remote_set_target,
+                    stop_all_callback=self.discord_stop_all,
+                    pause_menu_callback=self.control_window.show,
+                )
+                self.telegram_control.start()
+            else:
+                self.discord_control = None
+                self.telegram_control = None
+            if self.instance_id:
+                from gui.instance_registry import build_manifest, write_manifest
+
+                write_manifest(
+                    self.instance_id,
+                    build_manifest(
+                        self.instance_id,
+                        pid=os.getpid(),
+                        state_path=self.control_window.state_path,
+                        metrics_path=self.metrics_path,
+                        snapshot=self.build_runtime_snapshot(),
+                    ),
+                )
             self.was_paused = False
             self.pause_started_at = None
             self.pending_discord_brawler = None
@@ -431,6 +466,9 @@ def pyla_main(data):
                                 "notice": record.get("notice", ""),
                                 "event_type": event_type,
                                 "detail": detail,
+                                "emulator": getattr(self.window_controller, "selected_emulator", ""),
+                                "queue_preview": self.build_runtime_snapshot().get("queue_preview", ""),
+                                **instance_context_for_notifications(self.instance_id),
                             },
                         ))
                     finally:
@@ -502,12 +540,10 @@ def pyla_main(data):
                 last_match = f"{item.get('brawler', '')} {item.get('result', '')} ({item.get('delta', '')})"
             queue_preview = ""
             try:
-                from gui.brawler_queue import load_queue
+                from gui.remote_formatting import format_queue_preview_names
 
-                queue = load_queue()
-                if queue:
-                    names = [row.get("brawler", "") for row in queue[:3] if isinstance(row, dict)]
-                    queue_preview = ", ".join(name for name in names if name)
+                queue = self.Stage_manager.brawlers_pick_data or []
+                queue_preview = format_queue_preview_names(queue)
             except Exception:
                 queue_preview = ""
             snapshot = {
@@ -518,11 +554,16 @@ def pyla_main(data):
                 "trophies": trophies,
                 "session_wins": int(total.get("victory", 0) or 0) - int(start.get("victory", 0) or 0),
                 "session_losses": int(total.get("defeat", 0) or 0) - int(start.get("defeat", 0) or 0),
+                "session_draws": int(total.get("draw", 0) or 0) - int(start.get("draw", 0) or 0),
                 "notice": getattr(self, "runtime_notice", "Running"),
                 "last_match": last_match,
                 "queue_preview": queue_preview,
                 "last_recovery": (getattr(self, "last_recovery", None) or {}).get("event_type", ""),
                 "recovery_count_session": int(getattr(self, "recovery_count_session", 0) or 0),
+                "scrcpy_restarts": int(getattr(self.window_controller, "scrcpy_restart_count", 0) or 0),
+                "display_repairs": int(getattr(self.window_controller, "display_repair_count", 0) or 0),
+                "app_restarts": int(getattr(self.window_controller, "app_restart_count", 0) or 0),
+                "emulator_restarts": int(getattr(self.window_controller, "emulator_restart_count", 0) or 0),
             }
             return snapshot
 
@@ -543,6 +584,85 @@ def pyla_main(data):
             }
             return status
 
+        def remote_session_stats(self):
+            snapshot = self.build_runtime_snapshot()
+            from gui.remote_formatting import build_session_stats
+
+            stats = build_session_stats(snapshot)
+            if self.instance_id:
+                profile = instance_context_for_notifications(self.instance_id)
+                stats["instance_id"] = profile.get("instance_id", "")
+                stats["instance_name"] = profile.get("instance_name", "")
+            return stats
+
+        def handle_remote_command(self, command):
+            from gui.remote_command_router import encode_screenshot_reply
+            from runtime_control import write_remote_reply
+
+            action = str(command.get("action") or "").strip()
+            args = dict(command.get("args") or {})
+            reply_path = command.get("reply_path")
+            try:
+                if action == "screenshot":
+                    payload = encode_screenshot_reply(self.window_controller.screenshot())
+                elif action == "push":
+                    payload = {"ok": True, "result": self.discord_start_push(args.get("brawler", ""), args.get("target"))}
+                elif action == "skip":
+                    payload = {"ok": True, "result": self.remote_skip_brawler()}
+                elif action == "remove":
+                    payload = {"ok": True, "result": self.remote_remove_brawler(args.get("brawler", ""))}
+                elif action == "target":
+                    payload = {"ok": True, "result": self.remote_set_target(int(args.get("target", 0)))}
+                elif action == "restart_game":
+                    payload = {"ok": bool(self.restart_brawl_stars()), "result": "Brawl Stars restart finished."}
+                elif action == "restart_scrcpy":
+                    payload = {"ok": bool(self.window_controller.restart_scrcpy_client()), "result": "Scrcpy restart finished."}
+                elif action == "restart_emulator":
+                    payload = {"ok": bool(self.window_controller.restart_emulator_profile()), "result": "Emulator restart finished."}
+                elif action == "press":
+                    payload = {"ok": True, "result": self.discord_press_key(args.get("key", ""))}
+                elif action == "back":
+                    payload = {"ok": True, "result": self.window_controller.android_back()}
+                elif action == "stats":
+                    payload = {"ok": True, "result": self.remote_session_stats()}
+                elif action == "status":
+                    payload = {"ok": True, "result": self.telegram_status()}
+                elif action == "queue":
+                    from gui.brawler_queue import load_queue
+                    from gui.remote_formatting import format_queue_lines
+
+                    payload = {"ok": True, "result": format_queue_lines(load_queue())}
+                else:
+                    payload = {"ok": False, "error": f"Unknown remote action '{action}'."}
+                if payload.get("ok") is False:
+                    write_remote_reply(reply_path, payload)
+                else:
+                    write_remote_reply(reply_path, {"ok": True, "result": payload.get("result", payload)})
+            except Exception as exc:
+                write_remote_reply(reply_path, {"ok": False, "error": str(exc)})
+
+        def pump_instance_manifest(self):
+            if not self.instance_id:
+                return
+            now = time.time()
+            if now - self.last_manifest_heartbeat < 5.0:
+                return
+            self.last_manifest_heartbeat = now
+            from gui.instance_registry import update_manifest_heartbeat
+
+            update_manifest_heartbeat(
+                self.instance_id,
+                self.build_runtime_snapshot(),
+                state_path=self.control_window.state_path,
+                metrics_path=self.metrics_path,
+            )
+
+        def pump_remote_commands(self):
+            if self.instance_id:
+                from runtime_control import drain_remote_commands
+
+                drain_remote_commands(self.control_window.state_path, self.handle_remote_command)
+
         def discord_press_key(self, key):
             normalized = str(key or "").strip().upper()
             self.window_controller.press_key(normalized)
@@ -552,46 +672,87 @@ def pyla_main(data):
             self.graceful_shutdown("Stopping")
             return "PylaAi-XXZ is stopping. The bot process will exit shortly."
 
+        def _apply_remote_queue_change(self, new_queue, message: str):
+            from gui.brawler_queue import persist_queue, QUEUE_PATH
+            from gui.remote_formatting import format_command_result, format_queue_lines
+
+            persist_queue(new_queue)
+            self.Stage_manager.brawlers_pick_data = new_queue
+            try:
+                if Path(QUEUE_PATH).exists():
+                    self.Stage_manager._queue_file_mtime = os.path.getmtime(QUEUE_PATH)
+            except OSError:
+                pass
+            if new_queue and hasattr(self.Stage_manager, "_sync_observer_to_current_row"):
+                self.Stage_manager._sync_observer_to_current_row()
+            if new_queue:
+                self.Play.current_brawler = new_queue[0].get("brawler", "")
+            write_state(self.control_window.state_path, RUNNING)
+
+            active = new_queue[0].get("brawler", "") if new_queue else ""
+            reselect_now = self.state == "lobby" and active
+            reselect_note = ""
+            if reselect_now:
+                if self.lobby_automator.select_brawler(active):
+                    self.pending_discord_brawler = None
+                    reselect_note = " Brawler reselected in lobby."
+                else:
+                    self.pending_discord_brawler = active
+                    reselect_note = " Will retry brawler selection when lobby is detected."
+            elif active:
+                self.pending_discord_brawler = active
+                reselect_note = " Brawler will be reselected when the bot returns to lobby."
+
+            payload = format_command_result("Farm Plan Updated", message + reselect_note, new_queue)
+            payload["queue_text"] = format_queue_lines(new_queue)
+            return payload
+
         def discord_start_push(self, brawler: str, target: int | None = None):
             from discord_control import resolve_brawler_choice
+            from gui.brawler_queue import load_queue
+            from gui.remote_queue_commands import prioritize_brawler_in_queue
 
             resolved = resolve_brawler_choice(brawler)
             if not resolved:
                 return False
 
-            if not self.Stage_manager.brawlers_pick_data:
+            queue = self.Stage_manager.brawlers_pick_data or load_queue()
+            new_queue, message = prioritize_brawler_in_queue(queue, resolved, target)
+            return self._apply_remote_queue_change(new_queue, message)
+
+        def remote_skip_brawler(self):
+            from gui.brawler_queue import load_queue, normalize_queue
+            from gui.remote_queue_commands import skip_current_brawler
+
+            queue = self.Stage_manager.brawlers_pick_data or load_queue()
+            new_queue, message = skip_current_brawler(queue)
+            if normalize_queue(new_queue) == normalize_queue(queue):
+                return message
+            return self._apply_remote_queue_change(new_queue, message)
+
+        def remote_remove_brawler(self, brawler: str):
+            from discord_control import resolve_brawler_choice
+            from gui.brawler_queue import load_queue, normalize_queue
+            from gui.remote_queue_commands import remove_brawler_from_queue
+
+            resolved = resolve_brawler_choice(brawler)
+            if not resolved:
                 return False
+            queue = self.Stage_manager.brawlers_pick_data or load_queue()
+            new_queue, message = remove_brawler_from_queue(queue, resolved)
+            if normalize_queue(new_queue) == normalize_queue(queue):
+                return message
+            return self._apply_remote_queue_change(new_queue, message)
 
-            current = self.Stage_manager.brawlers_pick_data[0]
-            push_until = int(target) if target is not None else int(current.get("push_until", 1000) or 1000)
-            current["brawler"] = resolved
-            current["push_until"] = push_until
-            current["automatically_pick"] = True
-            if "type" not in current or not current.get("type"):
-                current["type"] = "trophies"
+        def remote_set_target(self, target: int):
+            from gui.brawler_queue import load_queue, normalize_queue
+            from gui.remote_queue_commands import set_active_target
 
-            self.Play.current_brawler = resolved
-            write_state(self.control_window.state_path, RUNNING)
-
-            reselect_now = self.state == "lobby"
-            if reselect_now:
-                if self.lobby_automator.select_brawler(resolved):
-                    self.pending_discord_brawler = None
-                    return (
-                        f"Pushing {resolved} (target {push_until}). "
-                        "Brawler reselected in lobby."
-                    )
-                self.pending_discord_brawler = resolved
-                return (
-                    f"Pushing {resolved} (target {push_until}). "
-                    "Could not reselect in lobby yet; will retry when lobby is detected."
-                )
-
-            self.pending_discord_brawler = resolved
-            return (
-                f"Pushing {resolved} (target {push_until}). "
-                "Brawler will be reselected when the bot returns to lobby."
-            )
+            queue = self.Stage_manager.brawlers_pick_data or load_queue()
+            new_queue, message = set_active_target(queue, int(target))
+            if normalize_queue(new_queue) == normalize_queue(queue):
+                return message
+            return self._apply_remote_queue_change(new_queue, message)
 
         @staticmethod
         def load_models():
@@ -865,6 +1026,15 @@ def pyla_main(data):
             if frozen_for < self.visual_freeze_restart_seconds:
                 return False
 
+            feed_fps = getattr(self, "perf_feed_fps", 0.0) or 0.0
+            if feed_fps >= 3.0:
+                print(
+                    f"Match image unchanged for {frozen_for:.1f}s but feed FPS is healthy "
+                    f"({feed_fps:.1f}); skipping app restart."
+                )
+                self.last_visual_change_time = now
+                return False
+
             print(
                 f"Match image did not change for {frozen_for:.1f}s "
                 f"(diff {diff:.3f}); restarting Brawl Stars and scrcpy."
@@ -1106,6 +1276,10 @@ def pyla_main(data):
                     self.Play.time_since_last_proceeding = time.time()
                 if previous_state == "match" and state != "match":
                     self.Play.reset_match_control_state()
+                    try:
+                        self.window_controller.repair_display_after_match()
+                    except Exception as exc:
+                        print(f"Post-match display repair failed: {exc}")
                 elif previous_state != "match" and state == "match":
                     self.Play.reset_match_control_state()
                     self.match_ready_at = time.time() + self.match_warmup_seconds
@@ -1119,8 +1293,6 @@ def pyla_main(data):
                         pending = self.pending_discord_brawler
                         if self.lobby_automator.select_brawler(pending):
                             self.Play.current_brawler = pending
-                            if self.Stage_manager.brawlers_pick_data:
-                                self.Stage_manager.brawlers_pick_data[0]["brawler"] = pending
                             print(f"Discord push: reselected brawler {pending} in lobby.")
                         self.pending_discord_brawler = None
                 self.handle_lobby_watchdog(state)
@@ -1331,6 +1503,8 @@ def pyla_main(data):
                     self.graceful_shutdown("Stopping")
                     break
 
+                self.pump_remote_commands()
+                self.pump_instance_manifest()
                 self.ensure_pause_menu_window()
 
                 if self.handle_pause_control():
@@ -1404,6 +1578,7 @@ def pyla_main(data):
                     continue
 
                 self.stale_feed_recovery_attempts = 0
+                self.Play.pump_visual_debug_display()
 
                 if self.handle_host_emulator_freeze():
                     continue
@@ -1473,12 +1648,33 @@ def pyla_main(data):
                     if work_time < target_period:
                         time.sleep(target_period - work_time)
 
-            self.discord_control.close()
-            self.telegram_control.close()
+            if self.discord_control is not None:
+                self.discord_control.close()
+            if self.telegram_control is not None:
+                self.telegram_control.close()
             self.control_window.close()
+            if self.instance_id:
+                from gui.instance_registry import remove_manifest
+
+                remove_manifest(self.instance_id)
 
     main = Main()
     main.main()
+
+
+def run_instance_worker(instance_id: str):
+    from gui.instance_config import apply_instance_overrides, set_active_instance
+    from gui.brawler_queue import load_queue
+
+    set_active_instance(instance_id)
+    profile = apply_instance_overrides(instance_id)
+    if not profile:
+        raise RuntimeError(f"Unknown instance profile '{instance_id}'.")
+    queue = load_queue()
+    if not queue:
+        raise RuntimeError(f"Instance '{instance_id}' has an empty farm plan.")
+    print(f"Starting Pyla-RL worker for instance '{instance_id}' on port {profile['emulator_port']}.")
+    pyla_main(queue)
 
 
 def run_app():
@@ -1511,8 +1707,16 @@ def write_crash_log(error):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Pyla-RL")
+    parser.add_argument("--instance", default="", help="Run as a multi-instance worker for the given instance id.")
+    args = parser.parse_args()
     try:
-        run_app()
+        if str(args.instance or "").strip():
+            run_instance_worker(str(args.instance).strip())
+        else:
+            run_app()
     except Exception as e:
         write_crash_log(e)
         try:

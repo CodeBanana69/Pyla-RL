@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 import aiohttp
 
-from discord_control import resolve_brawler_choice
-from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, read_state, request_stop, write_state
+from discord_control import callback_result_message, resolve_brawler_choice
+from runtime_control import PAUSED, RUNNING, read_state, request_stop, write_state
 from telegram_notifier import (
     allowed_chat_ids,
     async_send_message,
@@ -19,6 +19,8 @@ from telegram_notifier import (
     remember_chat_id,
 )
 from utils import _config_bool
+
+from gui.remote_formatting import format_telegram_command_result, format_telegram_help, format_telegram_queue, format_telegram_stats, format_telegram_status
 
 
 def set_runtime_state(state_path: str | Path, paused: bool) -> str:
@@ -55,9 +57,14 @@ class TelegramControlServer:
             press_key_callback: Callable[[str], Any] | None = None,
             back_callback: Callable[[], Any] | None = None,
             status_provider: Callable[[], dict[str, Any]] | None = None,
+            stats_provider: Callable[[], dict[str, Any]] | None = None,
             start_push_callback: Callable[[str, int | None], Any] | None = None,
+            skip_brawler_callback: Callable[[], Any] | None = None,
+            remove_brawler_callback: Callable[[str], Any] | None = None,
+            set_target_callback: Callable[[int], Any] | None = None,
             stop_all_callback: Callable[[], Any] | None = None,
             pause_menu_callback: Callable[[], Any] | None = None,
+            command_router: Any | None = None,
     ):
         self.state_path = Path(state_path)
         self.settings_loader = settings_loader
@@ -68,9 +75,15 @@ class TelegramControlServer:
         self.press_key_callback = press_key_callback
         self.back_callback = back_callback
         self.status_provider = status_provider
+        self.stats_provider = stats_provider
         self.start_push_callback = start_push_callback
+        self.skip_brawler_callback = skip_brawler_callback
+        self.remove_brawler_callback = remove_brawler_callback
+        self.set_target_callback = set_target_callback
         self.stop_all_callback = stop_all_callback
         self.pause_menu_callback = pause_menu_callback
+        self.command_router = command_router
+        self.router_mode = command_router is not None
         self.thread: threading.Thread | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.stop_event: asyncio.Event | None = None
@@ -109,7 +122,7 @@ class TelegramControlServer:
         self.loop = asyncio.get_running_loop()
         self.stop_event = asyncio.Event()
         print(
-            "Telegram control started: /help /status /pause /resume /quit /push "
+            "Telegram control started: /help /status /stats /pause /resume /quit /push /skip /remove /target /queue "
             "/pause_menu /screenshot /restart_game /restart_scrcpy /restart_emulator /back /press"
         )
         while not self.stop_event.is_set():
@@ -157,6 +170,14 @@ class TelegramControlServer:
 
         parts = text.split()
         command = parts[0].split("@", 1)[0].lower()
+        instance = None
+        if self.command_router and len(parts) > 1:
+            from gui.instance_registry import resolve_instance
+
+            maybe_instance = parts[-1].strip()
+            if resolve_instance(maybe_instance):
+                instance = maybe_instance
+                parts = parts[:-1]
         remember_chat_id(chat_id)
         chat_id_text = str(chat_id).strip()
         allowed = allowed_chat_ids(self.settings_loader())
@@ -180,10 +201,18 @@ class TelegramControlServer:
             return
 
         if command in {"/pause", "/stop"}:
+            if self.command_router:
+                ok, message = await run_callback(self.command_router.dispatch_state_action, instance, "pause")
+                await async_send_message(chat_id, message if ok else f"Pause failed: {message}", token=token)
+                return
             set_runtime_state(self.state_path, paused=True)
             await async_send_message(chat_id, "Pyla-RL paused.", token=token)
             return
         if command == "/resume":
+            if self.command_router:
+                ok, message = await run_callback(self.command_router.dispatch_state_action, instance, "resume")
+                await async_send_message(chat_id, message if ok else f"Resume failed: {message}", token=token)
+                return
             set_runtime_state(self.state_path, paused=False)
             await async_send_message(chat_id, "Pyla-RL resumed.", token=token)
             return
@@ -195,21 +224,25 @@ class TelegramControlServer:
         if command == "/status":
             await async_send_message(chat_id, self._status_text(), token=token)
             return
+        if command == "/stats":
+            if self.stats_provider is None:
+                await async_send_message(chat_id, "Session stats are not available in this process.", token=token)
+                return
+            try:
+                stats = self.stats_provider()
+            except Exception as exc:
+                await async_send_message(chat_id, f"Could not load session stats: {exc}", token=token)
+                return
+            await async_send_message(chat_id, format_telegram_stats(stats), token=token)
+            return
         if command == "/queue":
             from gui.brawler_queue import load_queue
 
             queue = load_queue()
             if not queue:
-                await async_send_message(chat_id, "Farm plan is empty.", token=token)
+                await async_send_message(chat_id, "<b>Farm plan</b>\nFarm plan is empty.", token=token)
                 return
-            lines = ["<b>Farm plan</b>"]
-            for index, row in enumerate(queue[:10], start=1):
-                if not isinstance(row, dict):
-                    continue
-                lines.append(
-                    f"{index}. {row.get('brawler', '?')} -> {row.get('push_until', row.get('wins', '?'))}"
-                )
-            await async_send_message(chat_id, "\n".join(lines), token=token)
+            await async_send_message(chat_id, format_telegram_queue(queue), token=token)
             return
         if command == "/screenshot":
             await self._send_screenshot(chat_id, token)
@@ -237,16 +270,46 @@ class TelegramControlServer:
             return
         if command == "/push":
             if len(parts) < 2:
-                await async_send_message(chat_id, "Usage: /push brawler [target]", token=token)
+                await async_send_message(chat_id, "Usage: /push brawler [target] [instance]", token=token)
                 return
             brawler = parts[1]
-            target = int(parts[2]) if len(parts) > 2 else None
+            target = int(parts[2]) if len(parts) > 2 and str(parts[2]).isdigit() else None
             resolved = resolve_brawler_choice(brawler)
             if not resolved:
                 await async_send_message(chat_id, f"Unknown brawler '{brawler}'.", token=token)
                 return
-            ok, message = await run_callback(self.start_push_callback, resolved, target)
-            await async_send_message(chat_id, message if ok else f"Push failed: {message}", token=token)
+            if self.command_router:
+                ok, message = await run_callback(self.command_router.dispatch_remote_action, instance, "push", {"brawler": resolved, "target": target})
+            else:
+                ok, message = await run_callback(self.start_push_callback, resolved, target)
+            await self._send_farm_plan_result(chat_id, token, ok, message, title="Push")
+            return
+        if command == "/skip":
+            ok, message = await run_callback(self.skip_brawler_callback)
+            await self._send_farm_plan_result(chat_id, token, ok, message, title="Skip")
+            return
+        if command == "/remove":
+            if len(parts) < 2:
+                await async_send_message(chat_id, "Usage: /remove brawler", token=token)
+                return
+            resolved = resolve_brawler_choice(parts[1])
+            if not resolved:
+                await async_send_message(chat_id, f"Unknown brawler '{parts[1]}'.", token=token)
+                return
+            ok, message = await run_callback(self.remove_brawler_callback, resolved)
+            await self._send_farm_plan_result(chat_id, token, ok, message, title="Remove")
+            return
+        if command == "/target":
+            if len(parts) < 2:
+                await async_send_message(chat_id, "Usage: /target trophies", token=token)
+                return
+            try:
+                target = int(parts[1])
+            except ValueError:
+                await async_send_message(chat_id, "Usage: /target trophies", token=token)
+                return
+            ok, message = await run_callback(self.set_target_callback, target)
+            await self._send_farm_plan_result(chat_id, token, ok, message, title="Target")
             return
         if command == "/pause_menu":
             ok, message = await run_callback(self.pause_menu_callback)
@@ -259,51 +322,34 @@ class TelegramControlServer:
 
         await async_send_message(chat_id, "Unknown command. Send /help.", token=token)
 
+    async def _send_farm_plan_result(self, chat_id, token, ok, message, *, title: str) -> None:
+        if ok and isinstance(message, dict):
+            text = format_telegram_command_result(
+                title,
+                str(message.get("summary") or "Command finished."),
+                message.get("queue_text"),
+            )
+            await async_send_message(chat_id, text, token=token)
+            return
+        text = callback_result_message(message) if ok else str(message)
+        prefix = title if ok else f"{title} failed"
+        await async_send_message(chat_id, f"<b>{prefix}</b>\n{text}", token=token)
+
     async def _run_named_action(self, chat_id, token, callback, label):
         await async_send_message(chat_id, f"{label} started...", token=token)
         ok, message = await run_callback(callback)
         await async_send_message(chat_id, message if ok else f"{label} failed: {message}", token=token)
 
     def _help_text(self, chat_id: str | None = None) -> str:
-        lines = ["<b>Pyla-RL Telegram commands</b>"]
+        lines = [format_telegram_help()]
         if chat_id:
-            lines.append(f"<b>This chat ID:</b> {chat_id}")
-        lines.extend([
-            "/status - bot status",
-            "/pause - pause movement",
-            "/resume - resume movement",
-            "/quit - stop the bot process",
-            "/queue - show next brawlers in farm plan",
-            "/pause_menu - reopen local pause window",
-            "/screenshot - send current emulator screenshot",
-            "/restart_game - restart Brawl Stars and scrcpy",
-            "/restart_scrcpy - restart scrcpy feed",
-            "/restart_emulator - restart emulator profile",
-            "/back - press Android Back",
-            "/press q|e|f|g|h|m|back - press a game button",
-        ])
-        lines.append("")
-        lines.append("Use /setup to show this list. Save this chat ID in the Telegram tab before control commands work.")
+            lines.insert(0, f"<b>This chat ID:</b> {chat_id}\n")
         return "\n".join(lines)
 
     def _status_text(self) -> str:
         state = read_state(self.state_path)
-        if state == STOP_REQUESTED:
-            runtime_label = "stopping"
-        elif state == PAUSED:
-            runtime_label = "paused"
-        else:
-            runtime_label = "running"
         details = self.status_provider() if self.status_provider else {}
-        lines = [
-            "<b>Pyla-RL status</b>",
-            f"<b>Runtime:</b> {runtime_label}",
-        ]
-        for key in ("state", "ips", "feed_fps", "emulator", "adb_device", "brawler", "target", "last_match", "queue_preview", "last_recovery"):
-            value = details.get(key)
-            if value is not None and value != "":
-                lines.append(f"<b>{key.replace('_', ' ').title()}:</b> {value}")
-        return "\n".join(lines)
+        return format_telegram_status(state, details)
 
     async def _send_screenshot(self, chat_id: int | str, token: str) -> None:
         if self.screenshot_provider is None:

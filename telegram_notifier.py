@@ -10,6 +10,12 @@ import aiohttp
 import numpy as np
 from PIL import Image
 
+from gui.remote_formatting import (
+    format_brawler_complete_description,
+    format_field_value,
+    format_match_description,
+    format_recovery_description,
+)
 from utils import _config_bool, load_toml_as_dict, resolve_project_path, save_dict_as_toml
 
 
@@ -24,6 +30,7 @@ EVENT_TITLES = {
     "brawler_complete": "Brawler target reached",
     "completed": "All targets complete",
     "bot_is_stuck": "Bot needs attention",
+    "recovery_alert": "Recovery alert",
     "test": "Telegram test",
 }
 
@@ -33,15 +40,22 @@ FIELD_LABELS = {
     "result": "Result",
     "started_trophies": "Started trophies",
     "trophies": "Current trophies",
+    "trophy_delta": "Trophy change",
+    "total_trophies": "Player trophies",
     "target": "Target",
     "wins": "Wins",
     "win_streak": "Win streak",
     "brawlers_left": "Brawlers left",
+    "next_up": "Next up",
+    "queue_preview": "Up next",
     "ips": "IPS",
     "state": "State",
     "emulator": "Emulator",
     "adb_device": "ADB device",
     "runtime": "Runtime",
+    "event_type": "Event",
+    "detail": "Detail",
+    "notice": "Notice",
 }
 
 
@@ -158,32 +172,47 @@ async def async_fetch_recent_chat_ids(token: str | None = None) -> list[str]:
 
 
 def _format_title(event_type: str, details: dict[str, Any]) -> str:
-    title = EVENT_TITLES.get(event_type, "Pyla-RL update")
     if event_type == "match":
-        result = str(details.get("result") or "finished")
-        brawler = str(details.get("brawler") or "").title()
-        if brawler:
-            return f"{title}: {result} with {brawler}"
-        return f"{title}: {result}"
-    return title
+        return "Match Report"
+    if event_type == "brawler_complete":
+        return "Target Complete"
+    if event_type == "recovery_alert":
+        return "Recovery Alert"
+    return EVENT_TITLES.get(event_type, "Pyla-RL update")
 
 
 def _format_message(event_type: str, details: dict[str, Any]) -> str:
-    lines = [f"<b>{_format_title(event_type, details)}</b>"]
-    message = str(details.get("message") or details.get("reason") or "").strip()
-    if message:
-        lines.append(message)
+    if event_type == "match":
+        lines = [f"<b>{_format_title(event_type, details)}</b>", format_match_description(details).replace("**", "")]
+    elif event_type == "brawler_complete":
+        lines = [f"<b>{_format_title(event_type, details)}</b>", format_brawler_complete_description(details).replace("**", "")]
+    elif event_type == "recovery_alert":
+        lines = [f"<b>{_format_title(event_type, details)}</b>", format_recovery_description(details)]
+    else:
+        lines = [f"<b>{_format_title(event_type, details)}</b>"]
+        message = str(details.get("message") or details.get("reason") or "").strip()
+        if message:
+            lines.append(message)
 
     hidden = {"message", "reason", "event_type"}
+    if event_type == "match":
+        hidden.add("brawler")
     ordered = [
         "brawler",
         "result",
         "started_trophies",
         "trophies",
+        "trophy_delta",
+        "total_trophies",
         "target",
         "wins",
         "win_streak",
         "brawlers_left",
+        "next_up",
+        "queue_preview",
+        "event_type",
+        "notice",
+        "detail",
         "ips",
         "state",
         "emulator",
@@ -196,7 +225,7 @@ def _format_message(event_type: str, details: dict[str, Any]) -> str:
         value = details.get(key)
         if value is None or value == "":
             continue
-        text = str(value)
+        text = format_field_value(key, value)
         if len(text) > 180:
             text = text[:177] + "..."
         lines.append(f"<b>{FIELD_LABELS.get(key, key.replace('_', ' ').title())}:</b> {text}")

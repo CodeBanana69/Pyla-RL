@@ -79,6 +79,105 @@ class LongRunWatchdogTests(unittest.TestCase):
     @patch("window_controller.time.sleep")
     @patch(
         "window_controller._get_package_task_display",
+        side_effect=[(42, 10), (42, 10), (42, 10)],
+    )
+    def test_passive_display_repair_does_not_restart_app(
+        self,
+        _mock_display,
+        _mock_sleep,
+        _mock_wake,
+        _mock_move,
+        mock_stop,
+        _mock_start,
+    ):
+        controller = object.__new__(WindowController)
+        controller.connected_serial = "emulator-5554"
+        controller.brawl_stars_package = "com.supercell.brawlstars"
+        controller.last_known_display_id = 0
+        controller.display_repair_count = 0
+        controller.recovery_logger = None
+
+        self.assertFalse(controller.ensure_brawl_stars_on_primary_display(passive=True))
+        mock_stop.assert_not_called()
+
+    @patch("window_controller._start_android_app_on_display", return_value=True)
+    @patch("window_controller._stop_android_app", return_value=True)
+    @patch("window_controller._move_android_task_to_display", return_value=True)
+    @patch("window_controller._wake_android_display")
+    @patch("window_controller.time.sleep")
+    @patch("window_controller.time.time", return_value=1000.0)
+    @patch(
+        "window_controller._get_package_task_display",
+        side_effect=[(42, 10), (42, 10), (42, 10)],
+    )
+    def test_display_repair_app_restart_respects_cooldown(
+        self,
+        _mock_display,
+        _mock_time,
+        _mock_sleep,
+        _mock_wake,
+        _mock_move,
+        mock_stop,
+        _mock_start,
+    ):
+        controller = object.__new__(WindowController)
+        controller.connected_serial = "emulator-5554"
+        controller.brawl_stars_package = "com.supercell.brawlstars"
+        controller.last_known_display_id = 0
+        controller.display_repair_count = 0
+        controller.app_restart_count = 0
+        controller.recovery_logger = None
+        controller.last_display_app_restart_time = 980.0
+        controller.display_app_restart_cooldown = 60.0
+
+        self.assertFalse(controller.ensure_brawl_stars_on_primary_display(allow_app_restart=True))
+        mock_stop.assert_not_called()
+
+    @patch("window_controller._kill_scrcpy_server_on_device", return_value=True)
+    @patch("window_controller.time.sleep")
+    @patch("window_controller.threading.Thread")
+    def test_restart_scrcpy_client_kills_device_server_when_stop_times_out(
+        self,
+        mock_thread_class,
+        _mock_sleep,
+        mock_kill,
+    ):
+        controller = object.__new__(WindowController)
+        controller.scrcpy_generation = 0
+        controller.connected_serial = "emulator-5554"
+        controller._SCRCPY_STOP_TIMEOUT = 5.0
+        controller.scrcpy_restart_count = 0
+        controller.scrcpy_restart_window = []
+        controller.recovery_logger = None
+        controller.ensure_emulator_online = lambda: True
+        controller.is_emulator_online = lambda: True
+        controller.start_scrcpy_client = lambda: None
+        controller.wait_for_fresh_frame = lambda timeout=6.0: True
+        controller.scrcpy_client = object()
+
+        stop_thread = mock_thread_class.return_value
+        stop_thread.is_alive.return_value = True
+
+        self.assertTrue(controller.restart_scrcpy_client())
+        mock_kill.assert_called_once_with("emulator-5554")
+
+    def test_kill_scrcpy_server_on_device_uses_pkill(self):
+        from window_controller import _kill_scrcpy_server_on_device
+
+        with patch("window_controller._run_adb") as mock_run:
+            mock_run.return_value.returncode = 0
+            self.assertTrue(_kill_scrcpy_server_on_device("emulator-5554"))
+            self.assertTrue(
+                any("pkill" in args[0][1] for args in mock_run.call_args_list)
+            )
+
+    @patch("window_controller._start_android_app_on_display", return_value=True)
+    @patch("window_controller._stop_android_app", return_value=True)
+    @patch("window_controller._move_android_task_to_display", return_value=True)
+    @patch("window_controller._wake_android_display")
+    @patch("window_controller.time.sleep")
+    @patch(
+        "window_controller._get_package_task_display",
         side_effect=[(42, 10), (42, 10), (42, 10), (42, 0)],
     )
     def test_primary_display_repair_force_restarts_when_move_does_not_stick(
@@ -93,6 +192,11 @@ class LongRunWatchdogTests(unittest.TestCase):
         controller = object.__new__(WindowController)
         controller.connected_serial = "emulator-5554"
         controller.brawl_stars_package = "com.supercell.brawlstars"
+        controller.last_display_app_restart_time = 0.0
+        controller.display_app_restart_cooldown = 60.0
+        controller.display_repair_count = 0
+        controller.app_restart_count = 0
+        controller.recovery_logger = None
 
         self.assertTrue(controller.ensure_brawl_stars_on_primary_display(allow_app_restart=True))
         mock_stop.assert_called_once_with("emulator-5554", "com.supercell.brawlstars")
