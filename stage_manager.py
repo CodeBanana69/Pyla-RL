@@ -17,6 +17,7 @@ from state_finder import (
     get_skin_reward_continue_button_center,
 )
 from trophy_observer import TrophyObserver
+from runtime_log import log_debug, log_info, log_warn
 from utils import find_template_center, load_toml_as_dict, async_notify_user, \
     save_brawler_data, extract_text_strings, load_brawl_stars_api_config, fetch_brawl_stars_player, \
     normalize_brawler_name, _extract_api_token, _config_bool
@@ -177,23 +178,23 @@ class StageManager:
         if use_play_again:
             screenshot = self.window_controller.screenshot()
             if self.is_play_again_button_visually_available(screenshot):
-                print("Post-match action: clicking PLAY AGAIN.")
+                log_debug("match", "Post-match action: clicking PLAY AGAIN.")
                 self.click_play_again_button()
                 return
 
             exit_center = self.get_play_again_missing_exit_center(screenshot, allow_ocr=False)
             if exit_center is not None:
-                print("Play Again unavailable; clicking EXIT to requeue from lobby.")
+                log_debug("match", "Play Again unavailable; clicking EXIT to requeue from lobby.")
                 self.window_controller.click(*exit_center, delay=0.08)
                 return
 
             text_state = self.get_play_again_text_state(screenshot)
             if text_state == "play_again":
-                print("Post-match action: clicking PLAY AGAIN.")
+                log_debug("match", "Post-match action: clicking PLAY AGAIN.")
                 self.click_play_again_button()
                 return
             if text_state == "exit":
-                print("Play Again unavailable; clicking EXIT to requeue from lobby.")
+                log_debug("match", "Play Again unavailable; clicking EXIT to requeue from lobby.")
                 self.window_controller.click(
                     int(1660 * self.window_controller.width_ratio),
                     int(980 * self.window_controller.height_ratio),
@@ -201,7 +202,7 @@ class StageManager:
                 )
                 return
 
-            print("Play Again button is not enabled; pressing continue instead.")
+            log_debug("match", "Play Again button is not enabled; pressing continue instead.")
             self.window_controller.press_key("Q")
             return
         self.window_controller.press_key("Q")
@@ -297,7 +298,7 @@ class StageManager:
         return ""
 
     def restart_and_select_next_after_target(self, target, type_of_push):
-        print("Target reached in Play Again mode; restarting Brawl Stars before selecting next brawler.")
+        log_info("match", "Target reached in Play Again mode; restarting Brawl Stars before selecting next brawler.")
         if not self._prepare_next_push_all_brawler(target, type_of_push):
             print("No remaining brawlers are below the target after restart preparation.")
             self.stop_after_post_match_rewards = True
@@ -506,9 +507,9 @@ class StageManager:
             reselect_brawler or normalized[0].get("brawler", "") or ""
         )
         self.pending_brawler_reselection = True
-        print(
-            f"[Queue] staged {len(normalized)} brawler(s) from {self.pending_queue_source}; "
-            "waiting for lobby selection."
+        log_info(
+            "queue",
+            f"Staged {len(normalized)} brawler(s) from {self.pending_queue_source}; waiting for lobby selection.",
         )
         return True
 
@@ -522,6 +523,12 @@ class StageManager:
             reason=source,
             reselect_brawler=remaining[0].get("brawler"),
         )
+
+    def _persist_runtime_queue_if_not_staged(self):
+        if getattr(self, "pending_queue", None):
+            return False
+        save_brawler_data(self.brawlers_pick_data)
+        return True
 
     def stage_queue_from_disk_if_changed(self):
         from gui.brawler_queue import load_queue, normalize_queue
@@ -583,14 +590,14 @@ class StageManager:
             selected = self.Lobby_automation.select_brawler(brawler_name)
 
         if not selected:
-            print(
-                f"Could not select staged brawler '{brawler_name}'; "
-                "will retry when lobby is detected again."
+            log_warn(
+                "queue",
+                f"Could not select staged brawler '{brawler_name}'; will retry when lobby is detected again.",
             )
             return False
 
         self.commit_pending_queue()
-        print(f"Staged queue committed after selecting {brawler_name or 'lowest-trophy brawler'}.")
+        log_info("queue", f"Staged queue committed after selecting {brawler_name or 'lowest-trophy brawler'}.")
         return True
 
     def reload_queue_from_disk_if_changed(self):
@@ -741,7 +748,7 @@ class StageManager:
 
     @staticmethod
     def _log_trophy_sync(message):
-        print(f"[TrophySync] {message}")
+        log_debug("match", message)
 
     def _match_trophy_api_sync_enabled(self, log_skips=True):
         if not self.brawlers_pick_data:
@@ -1004,10 +1011,10 @@ class StageManager:
         )
 
     def start_game(self):
-        print("state is lobby, starting game")
+        log_info("match", "Lobby detected; starting game")
         self.stage_queue_from_disk_if_changed()
         if getattr(self, "stop_after_post_match_rewards", False):
-            print("Post-match rewards cleared; stopping after completed target.")
+            log_info("match", "Post-match rewards cleared; stopping after completed target.")
             if os.path.exists("latest_brawler_data.json"):
                 os.remove("latest_brawler_data.json")
             self.window_controller.keys_up(list("wasd"))
@@ -1047,7 +1054,7 @@ class StageManager:
         # q btn is over the start btn
         self.window_controller.keys_up(list("wasd"))
         self.window_controller.press_key("Q")
-        print("Pressed Q to start a match")
+        log_debug("match", "Pressed Q to start a match")
 
     def advance_to_next_brawler_after_prestige(self):
         if not self.brawlers_pick_data:
@@ -1244,7 +1251,7 @@ class StageManager:
         )
         if already_recorded:
             found_game_result = current_result
-            print(f"end_game: re-entry on '{current_state}', skipping trophy update")
+            log_debug("match", f"Re-entry on '{current_state}', skipping trophy update")
             if self.last_match_api_sync_ok is False and self.brawlers_pick_data:
                 current_brawler = self.brawlers_pick_data[0].get("brawler")
                 self._log_trophy_sync(
@@ -1259,6 +1266,7 @@ class StageManager:
                         self.brawlers_pick_data[0].get(type_to_push, 0),
                         0,
                     )
+                    self.stage_queue_from_disk_if_changed()
                     use_play_again = self.should_use_play_again(
                         value,
                         self._number_or_default(self.brawlers_pick_data[0].get("push_until", 1000), 1000),
@@ -1288,6 +1296,7 @@ class StageManager:
                 self.last_recorded_result_time = time.time()
                 self.active_end_result = found_game_result
                 stats_recorded = True
+                self.stage_queue_from_disk_if_changed()
                 values = {
                     "trophies": self.Trophy_observer.current_trophies,
                     "wins": self.Trophy_observer.current_wins
@@ -1298,7 +1307,7 @@ class StageManager:
                 value = values[type_to_push]
                 self.brawlers_pick_data[0][type_to_push] = value
                 self.brawlers_pick_data[0]['win_streak'] = self.Trophy_observer.win_streak
-                save_brawler_data(self.brawlers_pick_data)
+                self._persist_runtime_queue_if_not_staged()
                 self.sync_trophies_from_api_after_match(current_brawler)
                 value = self._number_or_default(
                     self.brawlers_pick_data[0].get(type_to_push, value),
@@ -1327,8 +1336,7 @@ class StageManager:
                         row[type_to_push] = value
                         row["win_streak"] = self.Trophy_observer.win_streak
                         break
-                save_brawler_data(self.brawlers_pick_data)
-                self.stage_queue_from_disk_if_changed()
+                self._persist_runtime_queue_if_not_staged()
                 use_play_again = self.should_use_play_again(
                     value,
                     push_current_brawler_till,
@@ -1371,14 +1379,18 @@ class StageManager:
                             type_to_push,
                             source="target",
                         )
-                        print(
+                        log_info(
+                            "match",
                             "Target reached; returning to lobby to select the next brawler.",
                         )
 
             if use_play_again:
-                print("Post-match action: Play Again.")
+                log_info("match", "Post-match action: Play Again.")
             elif self.should_return_to_lobby_after_match(match_brawler):
-                print("Post-match action: return to lobby (target reached or brawler reselection pending).")
+                log_info(
+                    "match",
+                    "Post-match action: return to lobby (target reached or brawler reselection pending).",
+                )
 
             # Keep pressing the dismiss key on every iteration until the
             # end-of-match screens give way. One press is rarely enough in
@@ -1391,7 +1403,7 @@ class StageManager:
             screenshot = self.window_controller.screenshot()
             current_state = get_state(screenshot)
 
-        print("Game has ended", current_state)
+        log_info("match", f"Game has ended ({current_state})")
 
     def quit_shop(self):
         if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():

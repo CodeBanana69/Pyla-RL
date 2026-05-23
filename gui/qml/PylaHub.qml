@@ -2317,12 +2317,33 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "long_press_star_drop"); onToggled: function(value) { root.saveValue("settings", "long_press_star_drop", value) } } }
                         }
                         FieldRow {
-                            label: "Terminal Logging"
+                            label: "Save Terminal Log"
+                            hint: "Writes timestamped logs to logs/."
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "terminal_logging"); onToggled: function(value) { root.saveValue("settings", "terminal_logging", value) } } }
                         }
                         FieldRow {
-                            label: "Debug Screen"
+                            label: "Terminal Verbosity"
                             hint: "Restart bot to apply."
+                            Row {
+                                spacing: 8
+                                Repeater {
+                                    model: ["quiet", "normal", "verbose", "debug"]
+                                    delegate: ChoicePill {
+                                        label: modelData
+                                        selected: root.value("settings", "terminal_verbosity") === modelData
+                                        onClicked: root.saveValue("settings", "terminal_verbosity", modelData)
+                                    }
+                                }
+                            }
+                        }
+                        FieldRow {
+                            label: "Movement Debug"
+                            hint: "Rate-limited movement trace. Independent of Debug Screen."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "movement_debug"); onToggled: function(value) { root.saveValue("settings", "movement_debug", value) } } }
+                        }
+                        FieldRow {
+                            label: "Debug Screen"
+                            hint: "Overlay only. Does not flood the terminal."
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: function(value) { root.saveValue("settings", "visual_debug", value); statusText = "Restart bot to apply Debug Screen changes."; statusOk = true; statusToastTimer.restart() } } }
                         }
                         FieldRow {
@@ -2342,8 +2363,13 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_auto_reopen"); onToggled: function(value) { root.saveValue("settings", "pause_menu_auto_reopen", value) } } }
                         }
                         FieldRow {
-                            label: "Console IPS Output"
+                            label: "Console Status Line"
+                            hint: "In-place IPS summary instead of scrolling lines."
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "console_ips"); onToggled: function(value) { root.saveValue("settings", "console_ips", value) } } }
+                        }
+                        FieldRow {
+                            label: "Status Summary Seconds"
+                            ConfigInput { anchors.fill: parent; value: String(root.value("settings", "terminal_summary_seconds")); onSaved: function(value) { root.saveValue("settings", "terminal_summary_seconds", value) } } }
                         }
                         FieldRow {
                             label: "Pause Graph Samples"
@@ -2363,7 +2389,7 @@ ApplicationWindow {
                         FieldRow { label: "Debug Max FPS"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_fps")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_fps", value) } } }
                         FieldRow { label: "Debug Max Boxes"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_boxes")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_boxes", value) } } }
                         FieldRow { label: "Super Debug"; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "super_debug"); onToggled: function(value) { root.saveValue("settings", "super_debug", value) } } } }
-                        FieldRow { label: "Wall Stuck Debug"; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "wall_stuck_debug"); onToggled: function(value) { root.saveValue("settings", "wall_stuck_debug", value) } } } }
+                        FieldRow { label: "Wall Stuck Debug"; hint: "Movement escape trace."; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "wall_stuck_debug"); onToggled: function(value) { root.saveValue("settings", "wall_stuck_debug", value) } } } }
                     }
 
                     FormPanel {

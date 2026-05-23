@@ -68,6 +68,9 @@ class HubStateStore:
         "directml_device_id": ("general", "str"),
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
+        "terminal_verbosity": ("general", "str"),
+        "movement_debug": ("general", "yesno"),
+        "terminal_summary_seconds": ("general", "float"),
         "visual_debug": ("general", "yesno"),
         "advanced_visuals": ("general", "yesno"),
         "pause_menu_ips_graph": ("general", "yesno"),
@@ -218,6 +221,9 @@ class HubStateStore:
         self.general_config.setdefault("directml_device_id", "auto")
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
+        self.general_config.setdefault("terminal_verbosity", "normal")
+        self.general_config.setdefault("movement_debug", "no")
+        self.general_config.setdefault("terminal_summary_seconds", 5)
         self.general_config.setdefault("visual_debug", "no")
         self.general_config.setdefault("advanced_visuals", "no")
         self.general_config.setdefault("pause_menu_ips_graph", "no")
@@ -393,6 +399,7 @@ class HubStateStore:
             if key in {
                 "long_press_star_drop",
                 "terminal_logging",
+                "movement_debug",
                 "visual_debug",
                 "advanced_visuals",
                 "pause_menu_ips_graph",

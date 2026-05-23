@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 sys.path.append(os.path.abspath('/'))
 from utils import load_toml_as_dict
+from runtime_log import log_info, reload_config
 
 orig_screen_width, orig_screen_height = 1920, 1080
 
@@ -102,6 +103,7 @@ def refresh_runtime_config():
     crop_region = lobby_config['lobby']['trophy_observer']
     super_debug = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
     _current_gamemode = bot_config.get("gamemode", "")
+    reload_config()
     if super_debug and not os.path.exists("./debug_frames/"):
         os.makedirs("./debug_frames/")
 
@@ -1011,6 +1013,6 @@ def get_state(screenshot):
     if super_debug: cv2.imwrite(f"./debug_frames/state_screenshot_{len(os.listdir('./debug_frames'))}.png", screenshot_bgr)
     state = get_in_game_state(screenshot_bgr)
     if super_debug or state != _last_printed_state:
-        print(f"State: {state}")
+        log_info("state", state)
         _last_printed_state = state
     return state

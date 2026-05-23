@@ -11,6 +11,7 @@ import numpy as np
 from state_finder import get_state
 from detect import Detect
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info
+from runtime_log import LEVEL_INFO, log_debug, log_once, log_trace, reload_config
 from visual_debug_window import (
     log_visual_debug_startup,
     opencv_highgui_available,
@@ -22,8 +23,12 @@ debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 'no') == "yes"
 
 def vlog(*args):
-    if visual_debug:
-        print("[DBG]", *args)
+    message = " ".join(str(arg) for arg in args)
+    log_trace("movement", message, key=message[:96])
+
+
+def vdebug(*args):
+    log_debug("movement", " ".join(str(arg) for arg in args))
 
 
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
@@ -196,7 +201,7 @@ class Movement:
         return self.attack()
 
     def use_hypercharge(self):
-        print("Using hypercharge")
+        log_once("combat:hypercharge", 5.0, LEVEL_INFO, "combat", "Using hypercharge")
         self.window_controller.press_key("H", delay=0.035)
         return True
 
@@ -206,7 +211,7 @@ class Movement:
             if current_time - self.last_gadget_time < self.gadget_cooldown:
                 return False
             self.last_gadget_time = current_time
-        print("Using gadget")
+        log_once("combat:gadget", 5.0, LEVEL_INFO, "combat", "Using gadget")
         self.window_controller.press_key("G", delay=0.035)
         return True
 
@@ -216,7 +221,7 @@ class Movement:
             if current_time - self.last_super_time < self.super_cooldown:
                 return False
             self.last_super_time = current_time
-        print("Using super")
+        log_once("combat:super", 5.0, LEVEL_INFO, "combat", "Using super")
         self.window_controller.press_key("E", delay=0.035)
         return True
 
@@ -321,11 +326,8 @@ class Movement:
         return movement
 
     def _wslog(self, *args):
-        """Dedicated logger for wall-stuck / escape — independent of vlog/visual_debug
-        so the new unstuck machinery can be traced without dumping the full debug stream.
-        """
-        if self.wall_stuck_debug:
-            print("[WS]", *args)
+        """Dedicated logger for wall-stuck / escape."""
+        log_debug("movement", " ".join(str(arg) for arg in args))
 
     def _wall_centers_filtered(self, walls, player_pos):
         """Return (N, 2) float array of wall centers, excluding walls whose
@@ -550,6 +552,7 @@ class Play(Movement):
         self.gadget_crop_area = lobby_config['pixel_counter_crop_area']['gadget']
         self.hypercharge_crop_area = lobby_config['pixel_counter_crop_area']['hypercharge']
         global debug, visual_debug
+        reload_config()
         debug = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
         self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
@@ -1783,7 +1786,7 @@ class Play(Movement):
         own_box = scored[0][2]
         rejected = [item[2] for item in scored[1:]]
         if visual_debug and rejected:
-            print(f"[DBG] own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
+            vdebug(f"own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
         return own_box, rejected
 
     def stabilize_entity_roles(self, frame, data):
@@ -1809,8 +1812,8 @@ class Play(Movement):
             retry_data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_retry_confidence)
             if retry_data.get("player"):
                 if visual_debug:
-                    print(
-                        "[DBG] player recovered with lower entity threshold "
+                    vdebug(
+                        "player recovered with lower entity threshold "
                         f"{self.entity_detection_retry_confidence:.2f}"
                     )
                 data = retry_data
@@ -2126,7 +2129,10 @@ class Play(Movement):
         purple_pixels = count_hsv_pixels(screenshot, (137, 158, 159), (179, 255, 255))
         threshold = self._scaled_pixel_threshold(self.hypercharge_pixels_minimum, screenshot, self.hypercharge_crop_area)
         if debug:
-            print("hypercharge purple pixels:", purple_pixels, "(if > ", threshold, " then hypercharge is ready)")
+            log_debug(
+                "combat",
+                f"hypercharge purple pixels: {purple_pixels} (threshold {threshold})",
+            )
             cv2.imwrite(f"debug_frames/hypercharge_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
         if purple_pixels > threshold:
             return True
@@ -2140,12 +2146,9 @@ class Play(Movement):
         green_pixels = count_hsv_pixels(screenshot, (57, 219, 165), (62, 255, 255))
         threshold = self._scaled_pixel_threshold(self.gadget_pixels_minimum, screenshot, self.gadget_crop_area)
         if debug:
-            print(
-                "gadget green pixels:",
-                green_pixels,
-                "(if > ",
-                threshold,
-                " then gadget is ready)"
+            log_debug(
+                "combat",
+                f"gadget green pixels: {green_pixels} (threshold {threshold})",
             )
             cv2.imwrite(f"debug_frames/gadget_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
         if green_pixels > threshold:
@@ -2161,12 +2164,9 @@ class Play(Movement):
         orange_pixels = count_hsv_pixels(screenshot, (8, 120, 150), (38, 255, 255))
         threshold = self._scaled_pixel_threshold(self.super_pixels_minimum, screenshot, self.super_crop_area) * 2.0
         if debug:
-            print(
-                "super pixels:",
-                f"yellow={yellow_pixels}",
-                f"orange={orange_pixels}",
-                f"threshold={threshold}",
-                "(if above threshold, super is ready)",
+            log_debug(
+                "combat",
+                f"super pixels yellow={yellow_pixels} orange={orange_pixels} threshold={threshold}",
             )
             cv2.imwrite(f"debug_frames/super_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
 
@@ -2547,13 +2547,15 @@ class Play(Movement):
 
         safe_range, attack_range, super_range = self.get_brawler_range(brawler)
         player_pos = self.get_player_pos(player_data)
-        if debug: print("found player pos:", player_pos)
+        if debug:
+            vdebug(f"found player pos: {player_pos}")
         if not self.is_there_enemy(enemy_data):
             return self.no_enemy_movement(player_data, walls)
         enemy_coords, enemy_distance = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
         if enemy_coords is None:
             return self.no_enemy_movement(player_data, walls)
-        if debug: print("found enemy pos:", enemy_coords)
+        if debug:
+            vdebug(f"found enemy pos: {enemy_coords}")
         direction_x = enemy_coords[0] - player_pos[0]
         direction_y = enemy_coords[1] - player_pos[1]
 

@@ -48,6 +48,52 @@ class QueueReloadTests(unittest.TestCase):
             finally:
                 os.chdir(original_cwd)
 
+    def test_stage_from_disk_before_runtime_save_preserves_hub_front(self):
+        manager = StageManager.__new__(StageManager)
+        manager.brawlers_pick_data = [
+            {"brawler": "mina", "push_until": 1000, "trophies": 765, "type": "trophies"},
+        ]
+        manager.Trophy_observer = DummyTrophyObserver()
+        manager._queue_file_mtime = None
+        manager.pending_queue = None
+        manager.pending_brawler_reselection = False
+        manager.pending_reselect_brawler = ""
+        manager.post_match_action = "play_again"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            queue_path = os.path.join(tmp, "latest_brawler_data.json")
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(tmp)
+                import json
+
+                with open(queue_path, "w", encoding="utf-8") as handle:
+                    json.dump([
+                        {"brawler": "shade", "push_until": 1000, "trophies": 100, "type": "trophies"},
+                        {"brawler": "mina", "push_until": 1000, "trophies": 765, "type": "trophies"},
+                    ], handle)
+
+                manager.stage_queue_from_disk_if_changed()
+                self.assertEqual(manager.pending_queue[0]["brawler"], "shade")
+                self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "mina")
+                self.assertTrue(manager.requires_brawler_reselection("mina"))
+                self.assertFalse(
+                    manager.should_use_play_again(
+                        value=765,
+                        target=1000,
+                        active_brawler="mina",
+                    )
+                )
+
+                manager.brawlers_pick_data[0]["trophies"] = 770
+                manager._persist_runtime_queue_if_not_staged()
+
+                with open(queue_path, encoding="utf-8") as handle:
+                    saved = json.load(handle)
+                self.assertEqual(saved[0]["brawler"], "shade")
+            finally:
+                os.chdir(original_cwd)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,9 +28,25 @@ Profiles on **Overview** adjust scrcpy capture, ONNX threads, and related runtim
 
 Run `python tools/performance_check.py` to diagnose low IPS or wrong GPU provider.
 
+## Terminal output
+
+Settings → **Terminal / Debug** controls how much appears in the console:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| Terminal Verbosity | `normal` | `quiet`, `normal`, `verbose`, or `debug` |
+| Console Status Line | on | Updates IPS in place instead of printing a new line every second |
+| Status Summary Seconds | `5` | How often the status line also shows state and active brawler |
+| Movement Debug | off | Rate-limited movement trace (independent of Debug Screen) |
+| Debug Screen | off | Visual overlay only; does not flood the terminal |
+| Save Terminal Log | off | Mirror stdout/stderr to timestamped files under `logs/` |
+| Wall Stuck Debug | off | Escape/unstuck movement diagnostics |
+
+Recommended everyday setup: **Terminal Verbosity = normal**, **Console Status Line = on**, **Debug Screen** only when you need the overlay.
+
 ## Debug options
 
-In **Settings**, you can enable visual debug, terminal logging, and related diagnostics.
+You can still enable **Super Debug** for pixel-count diagnostics and deeper vision traces. That is separate from the normal terminal verbosity levels.
 
 ## Reopen setup wizard
 

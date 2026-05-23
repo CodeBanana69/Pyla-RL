@@ -53,6 +53,10 @@ from logger_setup import setup_logging_if_enabled
 
 setup_logging_if_enabled()
 
+import runtime_log
+
+runtime_log.configure()
+
 import window_controller
 from discord_control import DiscordControlServer
 from gui.qml_hub import QmlHub
@@ -243,12 +247,15 @@ def pyla_main(data):
             )
             self.last_duplicate_frame_replay = 0.0
             self.perf_duplicate_frame_replays = 0
-            print(
-                "Performance config:",
-                f"max_ips={self.max_ips if self.max_ips is not None else 'unlimited'}",
-                f"scrcpy_max_fps={general_config.get('scrcpy_max_fps', 'default')}",
-                f"scrcpy_max_width={general_config.get('scrcpy_max_width', 'default')}",
-                f"onnx_cpu_threads={general_config.get('onnx_cpu_threads', 'auto')}",
+            runtime_log.log_info(
+                "startup",
+                (
+                    "Performance config: "
+                    f"max_ips={self.max_ips if self.max_ips is not None else 'unlimited'} "
+                    f"scrcpy_max_fps={general_config.get('scrcpy_max_fps', 'default')} "
+                    f"scrcpy_max_width={general_config.get('scrcpy_max_width', 'default')} "
+                    f"onnx_cpu_threads={general_config.get('onnx_cpu_threads', 'auto')}"
+                ),
             )
             self.visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 'no') == "yes"
             self.run_for_minutes = int(load_toml_as_dict("cfg/general_config.toml")['run_for_minutes'])
@@ -362,6 +369,11 @@ def pyla_main(data):
             self.console_ips = str(
                 general_config.get("console_ips", "yes")
             ).strip().lower() in ("yes", "true", "1", "on")
+            self.terminal_summary_seconds = max(
+                1.0,
+                float(general_config.get("terminal_summary_seconds", 5)),
+            )
+            self.last_terminal_summary_at = 0.0
             self.pause_menu_auto_reopen = str(
                 general_config.get("pause_menu_auto_reopen", "yes")
             ).strip().lower() in ("yes", "true", "1", "on")
@@ -371,8 +383,9 @@ def pyla_main(data):
             self.control_window = RuntimeControlWindow(metrics_path=self.metrics_path)
             self.control_window.start()
             self.last_pause_menu_check = 0.0
-            print(
-                "Pause menu ready: F8 pause/resume, − minimize, × compact, □ expand full panel."
+            runtime_log.log_info(
+                "startup",
+                "Pause menu ready: F8 pause/resume, - minimize, x compact, expand full panel.",
             )
             self.remote_control_enabled = not self.instance_id
             # Single-instance remote control wiring (Discord slash + Telegram commands).
@@ -911,6 +924,26 @@ def pyla_main(data):
             )
             self.perf_duplicate_frame_replays += 1
 
+        def update_terminal_status(self):
+            if not self.console_ips or self.ips_ema is None:
+                return
+            now = time.time()
+            if now - self.last_terminal_summary_at >= self.terminal_summary_seconds:
+                self.last_terminal_summary_at = now
+                brawler = ""
+                if self.Stage_manager.brawlers_pick_data:
+                    brawler = self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                pending = ""
+                pending_queue = getattr(self.Stage_manager, "pending_queue", None)
+                if pending_queue:
+                    pending = pending_queue[0].get("brawler", "")
+                front = pending or brawler or "-"
+                runtime_log.log_status_line(
+                    f"IPS {self.ips_ema:.1f} | state {self.state or '?'} | brawler {front}"
+                )
+            else:
+                runtime_log.log_status_line(f"IPS {self.ips_ema:.1f}")
+
         def recover_low_ips(self, current_ips):
             now = time.time()
             if now - self.started_at < self.low_ips_startup_grace_seconds:
@@ -919,7 +952,7 @@ def pyla_main(data):
                 return False
             if current_ips >= self.low_ips_threshold:
                 if self.low_ips_since is not None:
-                    print(f"IPS recovered to {current_ips:.2f}; clearing low-IPS watchdog.")
+                    runtime_log.log_info("recovery", f"IPS recovered to {current_ips:.2f}; clearing low-IPS watchdog.")
                 self.reset_low_ips_watchdog(recovered=True)
                 self.runtime_notice = "Running"
                 return False
@@ -941,16 +974,19 @@ def pyla_main(data):
             self.runtime_notice = "Low IPS recovery"
             self.log_runtime_recovery("low_ips", f"ips={current_ips:.2f}")
             self.window_controller.keys_up(list("wasd"))
-            print(
-                f"IPS stayed low ({current_ips:.2f}, frame age {frame_age:.1f}s) "
-                f"for {low_for:.1f}s; recovery attempt {self.low_ips_recovery_attempts}."
+            runtime_log.log_warn(
+                "recovery",
+                (
+                    f"IPS stayed low ({current_ips:.2f}, frame age {frame_age:.1f}s) "
+                    f"for {low_for:.1f}s; recovery attempt {self.low_ips_recovery_attempts}."
+                ),
             )
 
             if self.low_ips_recovery_attempts >= self.low_ips_emulator_restart_after:
                 if frame_age <= 5:
-                    print(
-                        "Low IPS is still happening but scrcpy frames are fresh; "
-                        "skipping emulator restart and restarting Brawl Stars/scrcpy instead."
+                    runtime_log.log_warn(
+                        "recovery",
+                        "Low IPS is still happening but scrcpy frames are fresh; restarting Brawl Stars/scrcpy instead.",
                     )
                     self.restart_brawl_stars()
                     self.low_ips_recovery_attempts = max(
@@ -958,11 +994,11 @@ def pyla_main(data):
                         self.low_ips_emulator_restart_after - 1,
                     )
                 else:
-                    print("Low IPS did not recover after app/scrcpy restarts; restarting emulator profile.")
+                    runtime_log.log_warn("recovery", "Low IPS did not recover after app/scrcpy restarts; restarting emulator profile.")
                     if self.window_controller.restart_emulator_profile():
                         self.low_ips_recovery_attempts = 0
                     else:
-                        print("Emulator restart was not available; keeping bot alive and retrying scrcpy recovery.")
+                        runtime_log.log_warn("recovery", "Emulator restart was not available; keeping bot alive and retrying scrcpy recovery.")
                         if not self.window_controller.restart_scrcpy_client():
                             self.handle_offline_emulator()
                         self.low_ips_recovery_attempts = max(
@@ -970,10 +1006,10 @@ def pyla_main(data):
                             self.low_ips_emulator_restart_after - 1,
                         )
             elif self.low_ips_recovery_attempts >= self.low_ips_app_restart_after:
-                print("Low IPS persisted; restarting Brawl Stars and scrcpy.")
+                runtime_log.log_warn("recovery", "Low IPS persisted; restarting Brawl Stars and scrcpy.")
                 self.restart_brawl_stars()
             else:
-                print("Low IPS detected; restarting scrcpy feed.")
+                runtime_log.log_warn("recovery", "Low IPS detected; restarting scrcpy feed.")
                 if not self.window_controller.restart_scrcpy_client():
                     self.handle_offline_emulator()
 
@@ -1050,23 +1086,29 @@ def pyla_main(data):
             self.global_freeze_recovery_attempts += 1
             self.runtime_notice = "Screen freeze recovery"
             self.log_runtime_recovery("global_freeze", "screen hash unchanged")
-            print(
-                "Screen health check found no visible change for "
-                f"{self.global_freeze_health_interval:.0f}s (diff {diff:.3f}); "
-                f"recovery attempt {self.global_freeze_recovery_attempts}."
+            runtime_log.log_warn(
+                "recovery",
+                (
+                    "Screen health check found no visible change for "
+                    f"{self.global_freeze_health_interval:.0f}s (diff {diff:.3f}); "
+                    f"recovery attempt {self.global_freeze_recovery_attempts}."
+                ),
             )
             self.window_controller.keys_up(list("wasd"))
             if self.global_freeze_recovery_attempts >= self.global_freeze_emulator_restart_after:
-                print("Screen is still frozen after app recovery; restarting emulator profile.")
+                runtime_log.log_warn("recovery", "Screen is still frozen after app recovery; restarting emulator profile.")
                 if self.window_controller.restart_emulator_profile():
                     self.reset_visual_freeze_watchdog()
                     self.reset_low_ips_watchdog(recovered=False)
                     self.last_processed_frame_id = -1
                 else:
-                    print("Emulator restart was not available yet; restarting Brawl Stars and scrcpy instead.")
+                    runtime_log.log_warn(
+                        "recovery",
+                        "Emulator restart was not available yet; restarting Brawl Stars and scrcpy instead.",
+                    )
                     self.restart_brawl_stars()
             else:
-                print("Restarting Brawl Stars and scrcpy first.")
+                runtime_log.log_warn("recovery", "Restarting Brawl Stars and scrcpy first.")
                 self.restart_brawl_stars()
             return True
 
@@ -1151,7 +1193,7 @@ def pyla_main(data):
                 return False
 
             if now - self.last_lobby_start_press >= self.lobby_start_retry_interval:
-                print("Lobby watchdog: pressing start again.")
+                runtime_log.log_debug("match", "Lobby watchdog: pressing start again.")
                 self.window_controller.keys_up(list("wasd"))
                 self.window_controller.press_key("Q")
                 self.last_lobby_start_press = now
@@ -1160,7 +1202,10 @@ def pyla_main(data):
             if lobby_age < self.lobby_stuck_restart_seconds:
                 return False
 
-            print(f"Lobby did not enter a match for {lobby_age:.1f}s; restarting Brawl Stars.")
+            runtime_log.log_warn(
+                "recovery",
+                f"Lobby did not enter a match for {lobby_age:.1f}s; restarting Brawl Stars.",
+            )
             self.runtime_notice = "Lobby stuck recovery"
             self.log_runtime_recovery("lobby_stuck", f"state={state}")
             self.restart_brawl_stars()
@@ -1324,7 +1369,7 @@ def pyla_main(data):
             )
             if previous_state in {"lobby", "match_making"}:
                 self.Stage_manager.reset_prestige_reward_gate()
-            print("Fast match start detected; movement loop active.")
+            runtime_log.log_debug("match", "Fast match start detected; movement loop active.")
             return True
 
         def handle_disconnect_screen(self, frame):
@@ -1539,7 +1584,7 @@ def pyla_main(data):
                             if self.pause_menu_ips_graph or self.pause_menu_session_strip:
                                 self.write_runtime_metrics()
                         if self.console_ips:
-                            print(f"{self.ips_ema:.2f} IPS")
+                            self.update_terminal_status()
                             if self.recover_low_ips(self.ips_ema):
                                 s_time = time.time()
                                 c = 0
@@ -1567,7 +1612,7 @@ def pyla_main(data):
                     )
                 except ConnectionError as e:
                     if self.window_controller.is_emulator_online():
-                        print(f"{e} Recovering scrcpy feed.")
+                        runtime_log.log_warn("recovery", f"{e} Recovering scrcpy feed.")
                     self.handle_stale_scrcpy_feed()
                     continue
 
@@ -1672,7 +1717,7 @@ def run_instance_worker(instance_id: str):
     queue = load_queue()
     if not queue:
         raise RuntimeError(f"Instance '{instance_id}' has an empty farm plan.")
-    print(f"Starting Pyla-RL worker for instance '{instance_id}' on port {profile['emulator_port']}.")
+    runtime_log.log_info("startup", f"Starting Pyla-RL worker for instance '{instance_id}' on port {profile['emulator_port']}.")
     pyla_main(queue)
 
 
@@ -1682,7 +1727,7 @@ def run_app():
 
     remove_legacy_launchers(Path(__file__).resolve().parent)
 
-    print(f"{FREE_NOTICE} Official source: {OFFICIAL_GITHUB}")
+    runtime_log.log_info("startup", f"{FREE_NOTICE} Official source: {OFFICIAL_GITHUB}")
     all_brawlers = get_brawler_list()
     if api_base_url != "localhost":
         update_missing_brawlers_info(all_brawlers)
