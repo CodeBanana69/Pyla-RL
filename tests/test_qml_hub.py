@@ -239,6 +239,8 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("id: startBar", qml)
         self.assertIn('text: "START"', qml)
         self.assertIn("hubState.preflight", qml)
+        self.assertIn("statusChecked", qml)
+        self.assertIn("emulatorPreflightStatus", qml)
         self.assertIn("function startBot()", qml)
         self.assertNotIn("gradient: Gradient", qml)
         self.assertNotIn("scale: startMouse.pressed", qml)

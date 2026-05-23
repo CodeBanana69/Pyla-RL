@@ -90,10 +90,74 @@ def _persist_discovered_port(emulator, port, previous_port):
     save_dict_as_toml(general, str(general_path))
 
 
+def check_emulator_status(emulator, port=None):
+    selected = normalize_emulator_name(emulator)
+    general = load_toml_as_dict("cfg/general_config.toml")
+    _, configured_port = _resolve_emulator_settings(
+        general,
+        emulator=selected.lower(),
+        port=port,
+    )
+    process_ok, process_detail = detect_emulator_process(selected)
+    if not process_ok:
+        return {
+            "ok": False,
+            "process_ok": False,
+            "adb_ok": False,
+            "detail": process_detail,
+            "checked": True,
+        }
+
+    adb_result = connect_emulator_adb(selected, configured_port)
+    adb_ok = bool(adb_result.get("ok"))
+    return {
+        "ok": adb_ok,
+        "process_ok": True,
+        "adb_ok": adb_ok,
+        "detail": adb_result.get("detail") if adb_ok else adb_result.get("detail", "ADB check failed"),
+        "checked": True,
+    }
+
+
+def _emulator_status_summary():
+    return {
+        "ldplayer": check_emulator_status("ldplayer"),
+        "mumu": check_emulator_status("mumu"),
+    }
+
+
 def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_port=True):
+    try:
+        return _run_preflight_checks(
+            correct_zoom=correct_zoom,
+            emulator=emulator,
+            port=port,
+            persist_port=persist_port,
+        )
+    except Exception as exc:
+        return {
+            "ready": False,
+            "checks": [
+                _check_item(
+                    "preflight",
+                    "Pre-flight checks",
+                    False,
+                    str(exc),
+                    "required",
+                )
+            ],
+            "emulator_status": _emulator_status_summary(),
+            "emulator": normalize_emulator_name(emulator or "LDPlayer"),
+            "port": 0,
+            "serial": "",
+        }
+
+
+def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_port=True):
     general = load_toml_as_dict("cfg/general_config.toml")
     selected_emulator, configured_port = _resolve_emulator_settings(general, emulator=emulator, port=port)
     previous_port = int(general.get("emulator_port", configured_port) or configured_port)
+    emulator_status = _emulator_status_summary()
 
     checks = []
 
@@ -113,7 +177,9 @@ def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_po
         "required",
     ))
 
-    process_ok, process_detail = detect_emulator_process(selected_emulator)
+    selected_status = emulator_status.get(selected_emulator.lower(), {})
+    process_ok = bool(selected_status.get("process_ok"))
+    process_detail = str(selected_status.get("detail") or f"No {selected_emulator} process found")
     checks.append(_check_item(
         "emulator",
         f"{selected_emulator} process",
@@ -167,6 +233,7 @@ def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_po
     return {
         "ready": ready,
         "checks": checks,
+        "emulator_status": emulator_status,
         "emulator": selected_emulator,
         "port": connected_port if adb_ok else configured_port,
         "serial": serial,

@@ -261,7 +261,8 @@ def connect_emulator_adb(
         port = serial_port(device)
         if is_local_adb_serial(device) and port in allowed_ports:
             matches.append((device, port or 0))
-    if matches:
+    process_ok, process_detail = detect_emulator_process(selected)
+    if matches and process_ok:
         preferred_serial, preferred_port = sorted(
             matches,
             key=lambda item: (not str(item[0]).startswith("127.0.0.1:"), item[1]),
@@ -279,6 +280,16 @@ def connect_emulator_adb(
         open_ports = [port for port in candidate_ports if is_port_open("127.0.0.1", port)]
         if open_ports:
             ports_to_try = open_ports + [port for port in candidate_ports if port not in open_ports]
+        elif not process_ok:
+            detail = process_detail or f"No {selected} process found"
+            detail += f". {adb_hint_for_emulator(selected)}"
+            return {
+                "ok": False,
+                "serial": "",
+                "port": 0,
+                "detail": detail,
+                "ports_tried": candidate_ports,
+            }
 
     last_message = devices_error or ""
     for port in ports_to_try:

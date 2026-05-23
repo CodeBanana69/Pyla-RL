@@ -52,6 +52,13 @@ ApplicationWindow {
         }
         return parseTrophyTarget(fallbackValue)
     }
+
+    function emulatorPreflightStatus(emulatorId) {
+        if (!(hubState.preflight && hubState.preflight.emulator_status)) {
+            return null
+        }
+        return hubState.preflight.emulator_status[emulatorId] || null
+    }
     readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
@@ -436,6 +443,8 @@ ApplicationWindow {
         property string iconKind: ""
         property bool selected: false
         property bool locked: false
+        property bool statusChecked: false
+        property bool statusOk: false
         property bool hovered: false
         signal clicked()
 
@@ -494,12 +503,23 @@ ApplicationWindow {
                 Layout.preferredWidth: 16
                 Layout.preferredHeight: 16
                 radius: 8
-                color: card.selected && !card.locked ? theme.accent : "transparent"
-                border.width: card.selected && !card.locked ? 0 : 1
+                color: card.statusChecked
+                    ? (card.statusOk ? "#17351f" : "#351818")
+                    : (card.selected && !card.locked ? theme.accent : "transparent")
+                border.width: card.statusChecked || (card.selected && !card.locked) ? 0 : 1
                 border.color: theme.border
 
+                Text {
+                    anchors.centerIn: parent
+                    visible: card.statusChecked
+                    text: card.statusOk ? "\u2713" : "\u2717"
+                    color: card.statusOk ? theme.ok : "#ff6b5f"
+                    font.pixelSize: 10
+                    font.weight: Font.Bold
+                }
+
                 Rectangle {
-                    visible: card.selected && !card.locked
+                    visible: !card.statusChecked && card.selected && !card.locked
                     anchors.centerIn: parent
                     width: 6
                     height: 6
@@ -2211,6 +2231,18 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 label: "LDPlayer"
                                 selected: root.emulator === "ldplayer"
+                                statusChecked: {
+                                    var status = root.emulatorPreflightStatus("ldplayer")
+                                    return !!(status && status.checked)
+                                }
+                                statusOk: {
+                                    var status = root.emulatorPreflightStatus("ldplayer")
+                                    return !!(status && status.ok)
+                                }
+                                detail: {
+                                    var status = root.emulatorPreflightStatus("ldplayer")
+                                    return status && status.detail ? String(status.detail) : ""
+                                }
                                 onClicked: {
                                     hubBridge.updateSetting("emulator", "ldplayer")
                                     root.runAction("preflight-check")
@@ -2220,6 +2252,18 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                                 label: "MuMu"
                                 selected: root.emulator === "mumu"
+                                statusChecked: {
+                                    var status = root.emulatorPreflightStatus("mumu")
+                                    return !!(status && status.checked)
+                                }
+                                statusOk: {
+                                    var status = root.emulatorPreflightStatus("mumu")
+                                    return !!(status && status.ok)
+                                }
+                                detail: {
+                                    var status = root.emulatorPreflightStatus("mumu")
+                                    return status && status.detail ? String(status.detail) : ""
+                                }
                                 onClicked: {
                                     hubBridge.updateSetting("emulator", "mumu")
                                     root.runAction("preflight-check")

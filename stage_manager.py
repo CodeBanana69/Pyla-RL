@@ -397,7 +397,7 @@ class StageManager:
         if not player_tag or player_tag == "#YOURTAG" or not (has_token or has_refresh_login):
             return getattr(self, "last_player_total_trophies", None)
         try:
-            player = self.fetch_push_all_player_data()
+            player = self.fetch_push_all_player_data_with_retry()
             total = player.get("trophies")
             if total is not None:
                 self.last_player_total_trophies = int(total)
@@ -1012,6 +1012,16 @@ class StageManager:
             api_config.get("player_tag", "").strip(),
             int(api_config.get("timeout_seconds", 15)),
         )
+
+    @classmethod
+    def fetch_push_all_player_data_with_retry(cls):
+        try:
+            return cls.fetch_push_all_player_data(force_token_refresh=False)
+        except RuntimeError as e:
+            if "accessDenied" not in str(e):
+                raise
+            print("Brawl Stars API token was rejected; refreshing token for current public IP and retrying.")
+            return cls.fetch_push_all_player_data(force_token_refresh=True)
 
     def start_game(self):
         log_info("match", "Lobby detected; starting game")

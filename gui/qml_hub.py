@@ -219,11 +219,24 @@ class QmlHub:
                 from gui.preflight import run_preflight_checks
 
                 emulator, port = self._preflight_emulator_args()
-                self._preflight_cache = run_preflight_checks(
-                    correct_zoom=self._correct_zoom,
-                    emulator=emulator,
-                    port=port,
-                )
+                try:
+                    self._preflight_cache = run_preflight_checks(
+                        correct_zoom=self._correct_zoom,
+                        emulator=emulator,
+                        port=port,
+                    )
+                except Exception as exc:
+                    self._preflight_cache = {
+                        "ready": False,
+                        "checks": [{
+                            "id": "preflight",
+                            "label": "Pre-flight checks",
+                            "ok": False,
+                            "severity": "required",
+                            "detail": str(exc),
+                        }],
+                        "emulator_status": {},
+                    }
                 return self._preflight_cache
 
             @Slot(str, str)
@@ -377,7 +390,7 @@ class QmlHub:
                     ok, message = test_emulator_connection(emulator=emulator, port=port)
                     if ok:
                         return f"Emulator connection OK: {message}"
-                    raise ValueError(f"Emulator connection failed: {message}")
+                    return f"Emulator connection failed: {message}"
                 if action == "export-history":
                     path = self._store.export_match_history_csv()
                     return f"Match history exported to {path}"

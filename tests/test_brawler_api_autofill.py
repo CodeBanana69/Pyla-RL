@@ -154,6 +154,48 @@ class BrawlerApiAutofillTest(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    @patch("utils.save_dict_as_toml")
+    @patch("utils.get_public_ip", return_value="1.2.3.4")
+    @patch("utils._developer_api_post")
+    def test_auto_refresh_recovers_when_key_limit_reached(self, mock_post, _mock_ip, _mock_save):
+        utils._brawl_stars_api_refresh_done = False
+        utils._brawl_stars_api_refresh_signature = None
+        mock_post.side_effect = [
+            {},
+            {"developer": {"allowedScopes": ["brawlstars"]}},
+            {"keys": [{"id": "old-1", "name": "PylaAi-XXZ Auto old"}]},
+            RuntimeError("Developer portal error 403 at apikey/create: Allowed keys limit reached."),
+            {"keys": [{"id": "old-1", "name": "PylaAi-XXZ Auto old"}]},
+            {},
+            {"key": {"key": "NEW_TOKEN"}},
+        ]
+        config = {
+            "auto_refresh_token": True,
+            "developer_email": "user@example.com",
+            "developer_password": "secret",
+            "player_tag": "#PLAYER",
+            "api_token": "OLD_TOKEN",
+            "timeout_seconds": 15,
+            "delete_old_auto_tokens": False,
+            "key_name_prefix": "PylaAi-XXZ Auto",
+        }
+
+        refreshed = utils.refresh_brawl_stars_api_token_if_enabled(config)
+
+        self.assertEqual(refreshed["api_token"], "NEW_TOKEN")
+        self.assertEqual(
+            [call.args[1] for call in mock_post.call_args_list],
+            [
+                "login",
+                "account/load",
+                "apikey/list",
+                "apikey/create",
+                "apikey/list",
+                "apikey/revoke",
+                "apikey/create",
+            ],
+        )
+
     @patch("utils.refresh_brawl_stars_api_token_if_enabled")
     def test_force_refresh_still_reports_developer_refresh_failure(self, mock_refresh):
         mock_refresh.side_effect = RuntimeError("Developer portal error 401 at account/load: Session not found")

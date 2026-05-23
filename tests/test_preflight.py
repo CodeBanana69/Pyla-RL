@@ -38,6 +38,8 @@ class PreflightTests(unittest.TestCase):
         result = run_preflight_checks(correct_zoom=True, persist_port=False)
 
         self.assertTrue(result["ready"])
+        self.assertIn("emulator_status", result)
+        self.assertIn("ldplayer", result["emulator_status"])
         emulator = next(item for item in result["checks"] if item["id"] == "emulator")
         self.assertEqual(emulator["severity"], "recommended")
         self.assertFalse(emulator["ok"])
@@ -70,7 +72,7 @@ class PreflightTests(unittest.TestCase):
 
         result = run_preflight_checks(emulator="ldplayer", port=5555, persist_port=False)
 
-        mock_connect.assert_called_once_with("LDPlayer", 5555)
+        mock_connect.assert_any_call("LDPlayer", 5555)
         self.assertEqual(result["emulator"], "LDPlayer")
         self.assertTrue(result["ready"])
 
@@ -91,6 +93,7 @@ class PreflightTests(unittest.TestCase):
         result = run_preflight_checks(persist_port=False)
 
         self.assertFalse(result["ready"])
+        self.assertFalse(result["emulator_status"]["ldplayer"]["ok"])
         adb = next(item for item in result["checks"] if item["id"] == "adb")
         self.assertIn("5557", adb["detail"])
 
