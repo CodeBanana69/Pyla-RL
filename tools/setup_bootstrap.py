@@ -298,8 +298,10 @@ def main():
     if progress_window:
         progress_window.update("Installing Pyla-RL dependencies...")
     run(python_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
+    from tools.hub_first_run import ensure_hub_first_run_wizard
     from tools.launcher_bat import create_run_file
 
+    ensure_hub_first_run_wizard(project_dir)
     create_run_file(project_dir, python_command=python_command)
 
     print("")

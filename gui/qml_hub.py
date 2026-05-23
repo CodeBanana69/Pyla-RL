@@ -516,6 +516,9 @@ class QmlHub:
                     }
                 if action == "accept-license":
                     self._store.update_config("settings", "license_accepted", "yes")
+                    from tools.hub_first_run import mark_hub_license_acknowledged
+
+                    mark_hub_license_acknowledged()
                     return "License accepted. Pyla-RL is free and must not be sold."
                 if action == "check-updates":
                     import webbrowser

@@ -73,6 +73,17 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("pyla-rl.bat", source)
         self.assertIn("legacy_path.unlink()", source)
 
+    def test_general_config_template_requires_first_run_wizard(self):
+        source = Path("cfg/general_config.toml").read_text(encoding="utf-8")
+
+        self.assertIn('first_run_wizard = "yes"', source)
+        self.assertIn('license_accepted = "no"', source)
+
+    def test_setup_bootstrap_prepares_hub_first_run_wizard(self):
+        source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("ensure_hub_first_run_wizard", source)
+
     def test_main_repairs_numpy_before_importing_cv2(self):
         source = Path("main.py").read_text(encoding="utf-8")
 
