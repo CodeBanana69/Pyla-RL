@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 RUN_BAT_NAME = "pyla-rl.bat"
-LEGACY_BAT_NAMES = ("Run Pyla-RL.bat", "Run PylaAi-XXZ.bat", "start.bat")
+LEGACY_BAT_NAMES = (
+    "Run Pyla-RL.bat",
+    "Run PylaAi-XXZ.bat",
+    "start.bat",
+    "pyla-xxz.bat",
+    "Pyla-XXZ.bat",
+    "PylaAi-XXZ.bat",
+)
 
 _BAT_CONTENT = """\
 @echo off
@@ -79,6 +86,18 @@ exit /b %EXIT_CODE%
 """
 
 
+def remove_legacy_launchers(project_dir: Path) -> list[str]:
+    project_dir = Path(project_dir)
+    removed: list[str] = []
+    for legacy_name in LEGACY_BAT_NAMES:
+        legacy_path = project_dir / legacy_name
+        if legacy_path.exists():
+            legacy_path.unlink()
+            removed.append(legacy_name)
+            print(f"Removed legacy launcher {legacy_name}")
+    return removed
+
+
 def create_run_file(
     project_dir: Path,
     python_command: list[str] | None = None,
@@ -87,11 +106,7 @@ def create_run_file(
     del python_command, python_executable
     project_dir = Path(project_dir)
 
-    for legacy_name in LEGACY_BAT_NAMES:
-        legacy_path = project_dir / legacy_name
-        if legacy_path.exists():
-            legacy_path.unlink()
-            print(f"Removed legacy launcher {legacy_name}")
+    remove_legacy_launchers(project_dir)
 
     run_bat = project_dir / RUN_BAT_NAME
     run_bat.write_text(_BAT_CONTENT, encoding="ascii")

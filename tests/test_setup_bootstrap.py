@@ -69,6 +69,7 @@ class SetupBootstrapTests(unittest.TestCase):
         source = Path("tools/launcher_bat.py").read_text(encoding="utf-8")
 
         self.assertIn("Run PylaAi-XXZ.bat", source)
+        self.assertIn("pyla-xxz.bat", source)
         self.assertIn("Run Pyla-RL.bat", source)
         self.assertIn("pyla-rl.bat", source)
         self.assertIn("legacy_path.unlink()", source)

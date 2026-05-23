@@ -1678,6 +1678,9 @@ def run_instance_worker(instance_id: str):
 
 def run_app():
     from gui.brand import FREE_NOTICE, OFFICIAL_GITHUB
+    from tools.launcher_bat import remove_legacy_launchers
+
+    remove_legacy_launchers(Path(__file__).resolve().parent)
 
     print(f"{FREE_NOTICE} Official source: {OFFICIAL_GITHUB}")
     all_brawlers = get_brawler_list()

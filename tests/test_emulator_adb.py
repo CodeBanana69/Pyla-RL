@@ -13,7 +13,7 @@ from gui.emulator_adb import (
     normalize_emulator_name,
     ports_for_emulator,
 )
-from tools.launcher_bat import LEGACY_BAT_NAMES, RUN_BAT_NAME, create_run_file
+from tools.launcher_bat import LEGACY_BAT_NAMES, RUN_BAT_NAME, create_run_file, remove_legacy_launchers
 
 
 class EmulatorAdbTests(unittest.TestCase):
@@ -124,6 +124,19 @@ class LauncherBatTests(unittest.TestCase):
             content = run_bat.read_text(encoding="ascii")
             self.assertIn("main.py", content)
             self.assertIn("py -3.11-64", content)
+
+    def test_remove_legacy_launchers_removes_xxz_variants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = Path(tmp)
+            for name in ("pyla-xxz.bat", "Run PylaAi-XXZ.bat"):
+                (project_dir / name).write_text("legacy", encoding="ascii")
+
+            removed = remove_legacy_launchers(project_dir)
+
+            self.assertIn("pyla-xxz.bat", removed)
+            self.assertIn("Run PylaAi-XXZ.bat", removed)
+            self.assertFalse((project_dir / "pyla-xxz.bat").exists())
+            self.assertFalse((project_dir / "Run PylaAi-XXZ.bat").exists())
 
 
 if __name__ == "__main__":
