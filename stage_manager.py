@@ -501,8 +501,11 @@ class StageManager:
         if not normalized:
             return False
 
+        reason = str(reason or "remote")
         self.pending_queue = [dict(row) for row in normalized]
-        self.pending_queue_source = str(reason or "remote")
+        self.pending_queue_source = reason
+        if reason in ("hub", "remote") and self.pending_queue:
+            self.pending_queue[0]["selection_method"] = "named_brawler"
         self.pending_reselect_brawler = str(
             reselect_brawler or normalized[0].get("brawler", "") or ""
         )

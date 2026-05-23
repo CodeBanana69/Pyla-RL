@@ -38,7 +38,20 @@ ApplicationWindow {
     property string pickerTarget: "1000"
     property string pickerType: "trophies"
     property string historySort: "games"
-    readonly property var queueTargetOptions: ["250", "500", "750", "1000", "1250", "1500"]
+    readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
+
+    function parseTrophyTarget(value) {
+        var parsed = parseInt(String(value || "").trim())
+        return isNaN(parsed) ? 0 : parsed
+    }
+
+    function trophyTargetFromUi(fieldText, fallbackValue) {
+        var text = String(fieldText || "").trim()
+        if (text !== "") {
+            return parseTrophyTarget(text)
+        }
+        return parseTrophyTarget(fallbackValue)
+    }
     readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
@@ -593,6 +606,7 @@ ApplicationWindow {
     component ConfigInput: Rectangle {
         id: inputBox
         property string value: ""
+        property alias editText: field.text
         property bool secret: false
         property bool revealed: false
         property bool live: false
@@ -1442,14 +1456,41 @@ ApplicationWindow {
                 Popup {
                     id: queueTargetPopup
                     parent: Overlay.overlay
-                    x: targetButton.mapToItem(null, 0, targetButton.height).x
-                    y: targetButton.mapToItem(null, 0, targetButton.height).y + 4
-                    width: targetPopupRow.implicitWidth + 16
-                    height: targetPopupRow.implicitHeight + 16
+                    width: Math.max(targetPopupColumn.implicitWidth + 16, 180)
+                    height: Math.max(targetPopupColumn.implicitHeight + 16, 48)
                     padding: 8
                     modal: true
                     focus: true
                     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                    function repositionWithinOverlay() {
+                        var overlay = Overlay.overlay
+                        if (!overlay) {
+                            return
+                        }
+                        var margin = 8
+                        var belowPos = targetButton.mapToItem(overlay, 0, targetButton.height)
+                        var abovePos = targetButton.mapToItem(overlay, 0, 0)
+                        var buttonRightPos = targetButton.mapToItem(overlay, targetButton.width, 0)
+                        var popupW = queueTargetPopup.width
+                        var popupH = queueTargetPopup.height
+                        var maxX = Math.max(margin, overlay.width - popupW - margin)
+                        var maxY = Math.max(margin, overlay.height - popupH - margin)
+
+                        var nextX = belowPos.x
+                        if (nextX + popupW > overlay.width - margin) {
+                            nextX = buttonRightPos.x - popupW
+                        }
+                        queueTargetPopup.x = Math.max(margin, Math.min(nextX, maxX))
+
+                        var nextY = belowPos.y + 4
+                        if (nextY + popupH > overlay.height - margin) {
+                            nextY = abovePos.y - popupH - 4
+                        }
+                        queueTargetPopup.y = Math.max(margin, Math.min(nextY, maxY))
+                    }
+
+                    onOpened: repositionWithinOverlay()
 
                     background: Rectangle {
                         radius: 8
@@ -1458,21 +1499,52 @@ ApplicationWindow {
                         border.color: theme.borderSoft
                     }
 
-                    Row {
-                        id: targetPopupRow
-                        spacing: 6
-                        Repeater {
-                            model: root.queueTargetOptions
-                            delegate: ChoicePill {
-                                label: modelData
-                                selected: String(queueRow.rowData.target || "") === modelData
-                                onClicked: {
+                    Column {
+                        id: targetPopupColumn
+                        spacing: 8
+
+                        Flow {
+                            spacing: 6
+                            width: Math.min(480, (Overlay.overlay ? Overlay.overlay.width : root.width) - 32)
+                            Repeater {
+                                model: root.trophyTargetPresets
+                                delegate: ChoicePill {
+                                    label: modelData
+                                    selected: String(queueRow.rowData.target || "") === modelData
+                                    onClicked: {
+                                        root.runActionWithPayload("update-queue-item", {
+                                            index: queueRow.rowIndex,
+                                            push_until: parseInt(modelData)
+                                        })
+                                        queueTargetPopup.close()
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            width: parent.width
+                            spacing: 6
+                            ConfigInput {
+                                Layout.fillWidth: true
+                                id: queueTargetCustomInput
+                                value: String(queueRow.rowData.target || "")
+                                onSaved: function(value) {
+                                    var target = root.parseTrophyTarget(value)
+                                    if (target <= 0) {
+                                        return
+                                    }
                                     root.runActionWithPayload("update-queue-item", {
                                         index: queueRow.rowIndex,
-                                        push_until: parseInt(modelData)
+                                        push_until: target
                                     })
                                     queueTargetPopup.close()
                                 }
+                            }
+                            Text {
+                                text: "Custom"
+                                color: theme.faint
+                                font.pixelSize: 10
                             }
                         }
                     }
@@ -1527,16 +1599,26 @@ ApplicationWindow {
                             onClicked: root.openTutorial("farm-plan")
                         }
                     }
-                    RowLayout {
+                    Flow {
                         Layout.fillWidth: true
                         spacing: 8
                         Repeater {
-                            model: ["250", "500", "750", "1000", "1250", "1500"]
+                            model: root.trophyTargetPresets
                             delegate: ChoicePill {
                                 label: modelData
                                 selected: root.pushAllTarget === modelData
                                 onClicked: root.pushAllTarget = modelData
                             }
+                        }
+                    }
+                    FieldRow {
+                        label: "Custom target"
+                        Layout.fillWidth: true
+                        ConfigInput {
+                            id: pushAllTargetInput
+                            anchors.fill: parent
+                            value: root.pushAllTarget
+                            onSaved: function(value) { root.pushAllTarget = value }
                         }
                     }
                     RowLayout {
@@ -1545,7 +1627,15 @@ ApplicationWindow {
                         HubButton {
                             label: "Build Queue"
                             compact: true
-                            onClicked: root.runActionWithPayload("build-push-all", { target: parseInt(root.pushAllTarget) })
+                            onClicked: {
+                                var target = root.trophyTargetFromUi(pushAllTargetInput.editText, root.pushAllTarget)
+                                if (target <= 0) {
+                                    root.statusText = "Enter a valid trophy target."
+                                    root.statusOk = false
+                                    return
+                                }
+                                root.runActionWithPayload("build-push-all", { target: target })
+                            }
                         }
                         HubButton { label: "Import"; secondary: true; compact: true; onClicked: importQueueDialog.open() }
                         HubButton {
@@ -3152,20 +3242,32 @@ ApplicationWindow {
                     color: theme.faint
                     font.pixelSize: 11
                 }
-                FieldRow {
-                    label: "Target"
+                ColumnLayout {
                     Layout.fillWidth: true
-                    RowLayout {
-                        anchors.fill: parent
+                    spacing: 8
+                    Text {
+                        text: "Target"
+                        color: theme.muted
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
+                    Flow {
+                        Layout.fillWidth: true
                         spacing: 8
                         Repeater {
-                            model: ["250", "500", "750", "1000", "1250", "1500"]
+                            model: root.trophyTargetPresets
                             delegate: ChoicePill {
                                 label: modelData
                                 selected: root.pickerTarget === modelData
                                 onClicked: root.pickerTarget = modelData
                             }
                         }
+                    }
+                    ConfigInput {
+                        Layout.fillWidth: true
+                        id: pickerTargetInput
+                        value: root.pickerTarget
+                        onSaved: function(value) { root.pickerTarget = value }
                     }
                 }
                 RowLayout {
@@ -3180,9 +3282,15 @@ ApplicationWindow {
                         label: "Add"
                         clickable: root.pickerBrawler !== ""
                         onClicked: {
+                            var target = root.trophyTargetFromUi(pickerTargetInput.editText, root.pickerTarget)
+                            if (target <= 0) {
+                                root.statusText = "Enter a valid trophy target."
+                                root.statusOk = false
+                                return
+                            }
                             root.runActionWithPayload("add-to-queue", {
                                 brawler: root.pickerBrawler,
-                                push_until: parseInt(root.pickerTarget),
+                                push_until: target,
                                 trophies: 0,
                                 wins: 0,
                                 type: root.pickerType,

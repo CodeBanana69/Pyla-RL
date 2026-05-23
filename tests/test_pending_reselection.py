@@ -66,6 +66,22 @@ class PendingReselectionTests(unittest.TestCase):
         self.assertEqual(manager.pending_reselect_brawler, "colt")
         self.assertTrue(manager.requires_brawler_reselection())
 
+    def test_hub_stage_forces_named_brawler_selection(self):
+        manager = self.make_manager()
+        manager.stage_queue_update(
+            [{
+                "brawler": "mina",
+                "push_until": 1000,
+                "trophies": 100,
+                "type": "trophies",
+                "selection_method": "lowest_trophies",
+            }],
+            reason="hub",
+            reselect_brawler="mina",
+        )
+
+        self.assertEqual(manager.pending_queue[0]["selection_method"], "named_brawler")
+
     @patch("stage_manager.save_brawler_data")
     @patch("gui.brawler_queue.persist_queue")
     def test_apply_pending_reselection_commits_after_select_success(
@@ -81,6 +97,8 @@ class PendingReselectionTests(unittest.TestCase):
         )
 
         self.assertTrue(manager.apply_pending_reselection_in_lobby())
+        self.assertEqual(manager.Lobby_automation.named_calls, ["colt"])
+        self.assertEqual(manager.Lobby_automation.lowest_calls, 0)
 
         self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "colt")
         self.assertIsNone(manager.pending_queue)
