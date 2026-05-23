@@ -47,7 +47,15 @@ def repair_numpy_before_cv2_import():
 
 repair_numpy_before_cv2_import()
 
-import cv2
+try:
+    import cv2
+except ModuleNotFoundError:
+    print("\n" + "=" * 50)
+    print("  OpenCV (cv2) is not installed for this Python.")
+    print("  Run setup.exe in the Pyla-RL folder first.")
+    print("  Or run: py -3.11-64 setup.py --pyla-install")
+    print("=" * 50 + "\n")
+    raise SystemExit(1) from None
 
 from logger_setup import setup_logging_if_enabled
 

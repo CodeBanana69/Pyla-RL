@@ -72,7 +72,17 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("pyla-xxz.bat", source)
         self.assertIn("Run Pyla-RL.bat", source)
         self.assertIn("pyla-rl.bat", source)
+        self.assertIn('import cv2', source)
+        self.assertIn("pyla_python.txt", source)
+        self.assertIn("setup.exe", source)
         self.assertIn("legacy_path.unlink()", source)
+
+    def test_setup_bootstrap_installs_into_project_venv(self):
+        source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("ensure_project_venv", source)
+        self.assertIn("verify_cv2_import", source)
+        self.assertIn("venv_command + [\"setup.py\", \"--pyla-install\"]", source)
 
     def test_general_config_template_requires_first_run_wizard(self):
         source = Path("cfg/general_config.toml").read_text(encoding="utf-8")
@@ -93,6 +103,17 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertLess(repair_index, cv2_index)
         self.assertIn('"numpy<2.0.0"', source)
         self.assertIn("PYLAAI_NUMPY_REPAIR", source)
+        self.assertIn("ModuleNotFoundError", source)
+        self.assertIn("setup.exe", source)
+
+    def test_setup_splits_easyocr_from_core_batch(self):
+        source = Path("setup.py").read_text(encoding="utf-8")
+
+        core_start = source.index("base_reqs = [")
+        core_end = source.index("]", core_start)
+        core_block = source[core_start:core_end]
+        self.assertNotIn("easyocr", core_block)
+        self.assertIn('force_install(["easyocr"], no_deps=True)', source)
 
 
 if __name__ == "__main__":

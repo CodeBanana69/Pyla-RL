@@ -32,9 +32,25 @@ echo Pyla-RL launcher
 echo Official free download: https://github.com/CodeBanana69/Pyla-RL
 echo.
 
+if exist "cfg\\pyla_python.txt" (
+    set /p PYLA_PY=<cfg\\pyla_python.txt
+    "%PYLA_PY%" -c "import cv2" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=%PYLA_PY%"
+        goto :run
+    )
+    echo Pinned Python from setup is missing OpenCV; trying other interpreters...
+    echo.
+)
+
 if exist ".venv\\Scripts\\python.exe" (
-    set "PY=.venv\\Scripts\\python.exe"
-    goto :run
+    ".venv\\Scripts\\python.exe" -c "import cv2" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=.venv\\Scripts\\python.exe"
+        goto :run
+    )
+    echo Found .venv but OpenCV is not installed there; trying other interpreters...
+    echo.
 )
 
 where py >nul 2>&1
@@ -42,12 +58,12 @@ if not errorlevel 1 (
     py -3.11-64 -c "import sys" >nul 2>&1
     if not errorlevel 1 (
         set "PY=py -3.11-64"
-        goto :run
+        goto :precheck
     )
     py -3.11 -c "import sys" >nul 2>&1
     if not errorlevel 1 (
         set "PY=py -3.11"
-        goto :run
+        goto :precheck
     )
 )
 
@@ -56,7 +72,7 @@ if not errorlevel 1 (
     python -c "import sys; raise SystemExit(0 if sys.maxsize > 2**32 else 1)" >nul 2>&1
     if not errorlevel 1 (
         set "PY=python"
-        goto :run
+        goto :precheck
     )
 )
 
@@ -66,9 +82,30 @@ echo.
 pause
 exit /b 1
 
+:precheck
+%PY% -c "import cv2" >nul 2>&1
+if not errorlevel 1 goto :run
+
 :run
 echo Using: %PY%
 echo.
+
+%PY% -c "import cv2" >nul 2>&1
+if errorlevel 1 (
+    echo Dependencies are not installed for this Python.
+    echo.
+    if exist "setup.exe" (
+        echo Run setup.exe in this folder again, then launch pyla-rl.bat.
+    ) else (
+        echo Run: %PY% setup.py --pyla-install
+    )
+    echo.
+    echo Diagnostic: %PY% tools\\check_runtime.py
+    echo.
+    pause
+    exit /b 1
+)
+
 echo Make sure your emulator is running and Brawl Stars is open.
 echo.
 
@@ -84,6 +121,29 @@ if not "%EXIT_CODE%"=="0" (
 
 exit /b %EXIT_CODE%
 """
+
+
+def candidate_python_commands() -> list[tuple[str, list[str]]]:
+    """Return launcher Python candidates in priority order."""
+    candidates: list[tuple[str, list[str]]] = []
+    project_dir = Path(__file__).resolve().parents[1]
+    pin = project_dir / "cfg" / "pyla_python.txt"
+    if pin.exists():
+        value = pin.read_text(encoding="utf-8").strip()
+        if value:
+            candidates.append(("pinned", [value]))
+
+    venv_python = project_dir / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists():
+        candidates.append(("venv", [str(venv_python)]))
+
+    for label, command in (
+        ("py-3.11-64", ["py", "-3.11-64"]),
+        ("py-3.11", ["py", "-3.11"]),
+        ("python", ["python"]),
+    ):
+        candidates.append((label, command))
+    return candidates
 
 
 def remove_legacy_launchers(project_dir: Path) -> list[str]:
@@ -103,7 +163,11 @@ def create_run_file(
     python_command: list[str] | None = None,
     python_executable: str | None = None,
 ) -> Path:
-    del python_command, python_executable
+    del python_command
+    if python_executable:
+        from tools.python_runtime import write_python_pin
+
+        write_python_pin(project_dir, python_executable)
     project_dir = Path(project_dir)
 
     remove_legacy_launchers(project_dir)

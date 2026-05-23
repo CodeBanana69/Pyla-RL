@@ -186,6 +186,19 @@ def python_info(command):
     return None
 
 
+def ensure_project_venv(project_dir: Path, python_command: list[str]) -> tuple[list[str], str]:
+    venv_dir = project_dir / ".venv"
+    venv_python = venv_dir / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        print(f"Creating project virtual environment at {venv_dir}...")
+        run(python_command + ["-m", "venv", str(venv_dir)])
+    if not venv_python.exists():
+        print("Could not create .venv for Pyla-RL.")
+        input("Press Enter to close...")
+        raise SystemExit(1)
+    return [str(venv_python)], str(venv_python)
+
+
 def find_python():
     candidates = [
         ["py", f"-{PYTHON_MAJOR_MINOR}-64"],
@@ -275,6 +288,8 @@ def main():
         return 1
 
     print(f"Using Python: {python_executable}")
+    venv_command, venv_executable = ensure_project_venv(project_dir, python_command)
+    print(f"Project venv: {venv_executable}")
     progress_window = None
     if os.environ.get("PYLAAI_SETUP_GUI", "").strip().lower() in {"1", "yes", "true", "on"}:
         try:
@@ -291,18 +306,37 @@ def main():
     install_vc_redist()
     if progress_window:
         progress_window.update("Upgrading pip and setuptools...")
-    run(python_command + ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
 
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"
     if progress_window:
         progress_window.update("Installing Pyla-RL dependencies...")
-    run(python_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
+    run(venv_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
+
     from tools.hub_first_run import ensure_hub_first_run_wizard
     from tools.launcher_bat import create_run_file
+    from tools.python_runtime import verify_cv2_import, write_setup_status
 
+    try:
+        cv2_info = verify_cv2_import(venv_command)
+    except RuntimeError as exc:
+        print("")
+        print(str(exc))
+        print("")
+        print("Setup did not finish cleanly. Try running:")
+        print(f'  "{venv_executable}" -m pip install --force-reinstall --no-deps opencv-python==4.8.0.76')
+        print(f'  "{venv_executable}" tools\\check_runtime.py')
+        input("Press Enter to close...")
+        return 1
+
+    write_setup_status(
+        project_dir,
+        python_executable=venv_executable,
+        cv2_version=str(cv2_info.get("cv2", "")),
+    )
     ensure_hub_first_run_wizard(project_dir)
-    create_run_file(project_dir, python_command=python_command)
+    create_run_file(project_dir, python_executable=venv_executable)
 
     print("")
     print("Pyla-RL setup completed.")

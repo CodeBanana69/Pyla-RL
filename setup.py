@@ -83,13 +83,18 @@ def setup_pyla():
 
     # installing some must have dependencies
     print("Installing Core Dependencies...")
+    subprocess.run(
+        [sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
+        check=False,
+    )
     base_reqs = [
         "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
-        "opencv-python==4.8.0.76", "requests", "ultralytics", "aiohttp", "easyocr",
-        "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0"
+        "opencv-python==4.8.0.76", "requests", "ultralytics", "aiohttp",
+        "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0",
     ]
     force_install(base_reqs)
+    force_install(["easyocr"], no_deps=True)
 
     target, ver, name = get_gpu_data()
     status_pytorch, status_accel = "CPU Edition", "N/A"
@@ -193,6 +198,10 @@ def setup_pyla():
             print(f"Visual debug backend check: {backend}")
     except Exception as exc:
         print(f"WARNING: Could not verify visual debug backend: {exc}")
+
+    import cv2
+
+    print(f"OpenCV verified: {cv2.__version__} ({sys.executable})")
     # the setup completes
     os.system('cls')
     print("="*50)

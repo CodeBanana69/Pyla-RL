@@ -15,9 +15,25 @@ echo Pyla-RL launcher
 echo Official free download: https://github.com/CodeBanana69/Pyla-RL
 echo.
 
+if exist "cfg\pyla_python.txt" (
+    set /p PYLA_PY=<cfg\pyla_python.txt
+    "%PYLA_PY%" -c "import cv2" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=%PYLA_PY%"
+        goto :run
+    )
+    echo Pinned Python from setup is missing OpenCV; trying other interpreters...
+    echo.
+)
+
 if exist ".venv\Scripts\python.exe" (
-    set "PY=.venv\Scripts\python.exe"
-    goto :run
+    ".venv\Scripts\python.exe" -c "import cv2" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=.venv\Scripts\python.exe"
+        goto :run
+    )
+    echo Found .venv but OpenCV is not installed there; trying other interpreters...
+    echo.
 )
 
 where py >nul 2>&1
@@ -25,12 +41,12 @@ if not errorlevel 1 (
     py -3.11-64 -c "import sys" >nul 2>&1
     if not errorlevel 1 (
         set "PY=py -3.11-64"
-        goto :run
+        goto :precheck
     )
     py -3.11 -c "import sys" >nul 2>&1
     if not errorlevel 1 (
         set "PY=py -3.11"
-        goto :run
+        goto :precheck
     )
 )
 
@@ -39,7 +55,7 @@ if not errorlevel 1 (
     python -c "import sys; raise SystemExit(0 if sys.maxsize > 2**32 else 1)" >nul 2>&1
     if not errorlevel 1 (
         set "PY=python"
-        goto :run
+        goto :precheck
     )
 )
 
@@ -49,9 +65,30 @@ echo.
 pause
 exit /b 1
 
+:precheck
+%PY% -c "import cv2" >nul 2>&1
+if not errorlevel 1 goto :run
+
 :run
 echo Using: %PY%
 echo.
+
+%PY% -c "import cv2" >nul 2>&1
+if errorlevel 1 (
+    echo Dependencies are not installed for this Python.
+    echo.
+    if exist "setup.exe" (
+        echo Run setup.exe in this folder again, then launch pyla-rl.bat.
+    ) else (
+        echo Run: %PY% setup.py --pyla-install
+    )
+    echo.
+    echo Diagnostic: %PY% tools\check_runtime.py
+    echo.
+    pause
+    exit /b 1
+)
+
 echo Make sure your emulator is running and Brawl Stars is open.
 echo.
 
