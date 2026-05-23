@@ -319,8 +319,8 @@ class StageManager:
             return False
 
         selection_method = self.brawlers_pick_data[0].get("selection_method", "named_brawler")
-        if selection_method == "lowest_trophies":
-            selected = self.Lobby_automation.select_lowest_trophy_brawler()
+        if selection_method in ("lowest_trophies", "highest_trophies"):
+            selected = self.Lobby_automation.select_highest_trophy_brawler()
         else:
             selected = self.Lobby_automation.select_brawler(self.brawlers_pick_data[0]["brawler"])
         if not selected:
@@ -468,15 +468,18 @@ class StageManager:
         if not remaining:
             return []
 
-        if any(row.get("selection_method") == "lowest_trophies" for row in remaining):
+        if any(
+            row.get("selection_method") in ("lowest_trophies", "highest_trophies")
+            for row in remaining
+        ):
             remaining.sort(
                 key=lambda row: (
-                    self._number_or_default(row.get(type_of_push, 0), 0),
-                    str(row.get("brawler", "")),
+                    -self._number_or_default(row.get(type_of_push, 0), 0),
+                    str(row.get("brawler", "")).lower(),
                 )
             )
             for row in remaining:
-                row["selection_method"] = "lowest_trophies"
+                row["selection_method"] = "highest_trophies"
                 row["automatically_pick"] = True
 
         return remaining
@@ -587,8 +590,8 @@ class StageManager:
         front = self.pending_queue[0]
         selection_method = str(front.get("selection_method", "named_brawler") or "named_brawler")
         brawler_name = self.pending_reselect_brawler or front.get("brawler", "")
-        if selection_method == "lowest_trophies":
-            selected = self.Lobby_automation.select_lowest_trophy_brawler()
+        if selection_method in ("lowest_trophies", "highest_trophies"):
+            selected = self.Lobby_automation.select_highest_trophy_brawler()
         else:
             selected = self.Lobby_automation.select_brawler(brawler_name)
 
@@ -881,7 +884,10 @@ class StageManager:
             return False
         if self.brawlers_pick_data[0].get("type", "trophies") != "trophies":
             return False
-        if not any(row.get("selection_method") == "lowest_trophies" for row in self.brawlers_pick_data):
+        if not any(
+            row.get("selection_method") in ("lowest_trophies", "highest_trophies")
+            for row in self.brawlers_pick_data
+        ):
             return False
 
         old_front_brawler = self.brawlers_pick_data[0].get("brawler")
@@ -932,8 +938,8 @@ class StageManager:
         if current_row is not None:
             remaining_rows.sort(
                 key=lambda row: (
-                    self._number_or_default(row.get("trophies", 0), 0),
-                    str(row.get("brawler", "")),
+                    -self._number_or_default(row.get("trophies", 0), 0),
+                    str(row.get("brawler", "")).lower(),
                 )
             )
             refreshed_rows = [current_row] + remaining_rows
@@ -947,7 +953,7 @@ class StageManager:
                 if row.get("automatically_pick") is not True:
                     changed = True
                 row["automatically_pick"] = True
-                row["selection_method"] = "lowest_trophies"
+                row["selection_method"] = "highest_trophies"
 
         old_order = [row.get("brawler") for row in self.brawlers_pick_data]
         new_order = [row.get("brawler") for row in refreshed_rows]

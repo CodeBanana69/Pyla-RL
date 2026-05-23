@@ -443,6 +443,18 @@ class QmlHub:
                     target = int(payload.get("target", 1000) or 1000)
                     queue = self._store.build_push_all(target)
                     return f"Built Push All queue with {len(queue)} brawler(s) to {target} trophies."
+                if action == "sort-queue-by-trophies":
+                    descending = str(payload.get("order", "desc")).strip().lower() != "asc"
+                    queue = self._store.sort_queue_by_trophies(descending=descending)
+                    direction = "highest to lowest" if descending else "lowest to highest"
+                    return f"Sorted {len(queue)} brawler(s) by cups ({direction})."
+                if action == "sort-queue":
+                    from gui.brawler_queue import QUEUE_SORT_MODES
+
+                    mode = str(payload.get("mode", "cups_desc") or "cups_desc").strip().lower()
+                    queue, mode = self._store.sort_queue(mode=mode)
+                    label = QUEUE_SORT_MODES.get(mode, "sorted")
+                    return f"Sorted {len(queue)} brawler(s): {label}."
                 if action == "add-to-queue":
                     from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 

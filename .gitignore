@@ -16,6 +16,7 @@ test.py
 /extracted_map_data
 /runs
 logs/
+debug-*.log
 venv/
 /dist
 /build

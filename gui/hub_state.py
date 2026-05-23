@@ -536,6 +536,24 @@ class HubStateStore:
         from gui.brawler_queue import save_queue
         return save_queue(queue)
 
+    def sort_queue(self, *, mode="cups_desc"):
+        from gui.brawler_queue import QUEUE_SORT_MODES, load_queue, persist_queue, sort_queue
+
+        queue = sort_queue(load_queue(), mode=mode)
+        if not queue:
+            raise ValueError("Farm plan is empty.")
+        persist_queue(queue)
+        return queue, mode if mode in QUEUE_SORT_MODES else "cups_desc"
+
+    def sort_queue_by_trophies(self, *, descending=True):
+        from gui.brawler_queue import load_queue, persist_queue, sort_queue_by_trophies
+
+        queue = sort_queue_by_trophies(load_queue(), descending=descending)
+        if not queue:
+            raise ValueError("Farm plan is empty.")
+        persist_queue(queue)
+        return queue
+
     def build_push_all(self, target_trophies):
         from gui.brawler_queue import build_push_all_queue, load_push_order, persist_queue
         from utils import get_brawler_list

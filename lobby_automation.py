@@ -539,7 +539,7 @@ class LobbyAutomation:
               f"The bot will continue with the currently selected brawler.")
         return False
 
-    def select_lowest_trophy_brawler(self):
+    def select_highest_trophy_brawler(self):
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
 
@@ -547,22 +547,26 @@ class LobbyAutomation:
             self.window_controller.click(int(x * wr), int(y * hr))
             time.sleep(wait)
 
-        print("Selecting next brawler by sorting lowest trophies.")
+        print("Selecting next brawler by sorting most trophies.")
         self._dismiss_starr_nova_hub_if_present()
         tap(128, 500, 1.4)   # left Brawlers button in lobby
         self._dismiss_starr_nova_hub_if_present()
         tap(1210, 45, 0.6)   # sort dropdown
-        tap(1210, 426, 1.0)  # Least Trophies
+        tap(1210, 368, 1.0)  # Most Trophies
         tap(422, 359, 1.0)   # first brawler card after sorting
         tap(260, 991, 1.0)   # Select
         if self.ensure_lobby_after_selection():
             return True
 
-        print("Lowest-trophy brawler selection did not return to lobby; trying one recovery pass.")
+        print("Highest-trophy brawler selection did not return to lobby; trying one recovery pass.")
         self.press_back()
         time.sleep(0.8)
         tap(260, 991, 1.0)   # Select again if the brawler details screen is still open
         return self.ensure_lobby_after_selection()
+
+    def select_lowest_trophy_brawler(self):
+        """Legacy alias kept for older saved queues."""
+        return self.select_highest_trophy_brawler()
 
     def ensure_lobby_after_selection(self, timeout=6.0):
         deadline = time.time() + timeout

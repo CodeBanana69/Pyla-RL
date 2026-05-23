@@ -58,6 +58,23 @@ class BrawlerQueueTests(unittest.TestCase):
 
     @patch("gui.brawler_queue.fetch_brawl_stars_player")
     @patch("gui.brawler_queue.load_brawl_stars_api_config")
+    def test_get_push_all_data_sorts_highest_trophies_first(self, mock_config, mock_player):
+        from gui.brawler_queue import get_push_all_data
+
+        mock_config.return_value = {"api_token": "x", "player_tag": "#TAG", "timeout_seconds": 15}
+        mock_player.return_value = {
+            "brawlers": [
+                {"name": "Shelly", "trophies": 100},
+                {"name": "Colt", "trophies": 900},
+                {"name": "Nita", "trophies": 500},
+            ]
+        }
+        rows = get_push_all_data(1000, brawlers=["shelly", "colt", "nita"])
+        self.assertEqual([row["brawler"] for row in rows], ["colt", "nita", "shelly"])
+        self.assertEqual(rows[0]["selection_method"], "highest_trophies")
+
+    @patch("gui.brawler_queue.fetch_brawl_stars_player")
+    @patch("gui.brawler_queue.load_brawl_stars_api_config")
     def test_get_push_all_data_filters_by_target(self, mock_config, mock_player):
         from gui.brawler_queue import get_push_all_data
 
@@ -71,6 +88,47 @@ class BrawlerQueueTests(unittest.TestCase):
         rows = get_push_all_data(1000, brawlers=["shelly", "colt"])
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["brawler"], "shelly")
+
+
+    def test_sort_queue_by_trophies_descending(self):
+        from gui.brawler_queue import sort_queue_by_trophies
+
+        queue = sort_queue_by_trophies([
+            {"brawler": "shelly", "push_until": 1000, "trophies": 100},
+            {"brawler": "colt", "push_until": 1000, "trophies": 900},
+            {"brawler": "nita", "push_until": 1000, "trophies": 500},
+        ])
+        self.assertEqual([row["brawler"] for row in queue], ["colt", "nita", "shelly"])
+
+    def test_sort_queue_modes(self):
+        from gui.brawler_queue import sort_queue
+
+        rows = [
+            {"brawler": "shelly", "push_until": 1000, "trophies": 100, "type": "trophies"},
+            {"brawler": "colt", "push_until": 1500, "trophies": 900, "type": "trophies"},
+            {"brawler": "nita", "push_until": 1000, "trophies": 950, "type": "trophies"},
+        ]
+
+        self.assertEqual(
+            [row["brawler"] for row in sort_queue(rows, mode="cups_asc")],
+            ["shelly", "colt", "nita"],
+        )
+        self.assertEqual(
+            [row["brawler"] for row in sort_queue(rows, mode="gap_asc")],
+            ["nita", "colt", "shelly"],
+        )
+        self.assertEqual(
+            [row["brawler"] for row in sort_queue(rows, mode="target_desc")],
+            ["colt", "nita", "shelly"],
+        )
+        self.assertEqual(
+            [row["brawler"] for row in sort_queue(rows, mode="name_asc")],
+            ["colt", "nita", "shelly"],
+        )
+        self.assertEqual(
+            [row["brawler"] for row in sort_queue(rows, mode="name_desc")],
+            ["shelly", "nita", "colt"],
+        )
 
 
 if __name__ == "__main__":

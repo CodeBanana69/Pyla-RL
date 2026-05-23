@@ -115,6 +115,66 @@ def queue_item_icon_uri(brawler):
     return brawler_icon_uri(brawler)
 
 
+QUEUE_SORT_MODES = {
+    "cups_desc": "Cups high to low",
+    "cups_asc": "Cups low to high",
+    "gap_asc": "Closest to target",
+    "gap_desc": "Furthest from target",
+    "target_desc": "Target high to low",
+    "target_asc": "Target low to high",
+    "name_asc": "Name A to Z",
+    "name_desc": "Name Z to A",
+}
+
+
+def _queue_progress_values(row):
+    row_type = str(row.get("type", "trophies") or "trophies")
+    if row_type == "wins":
+        current = int(row.get("wins", 0) or 0)
+        target = int(row.get("push_until", 0) or 0)
+    else:
+        current = int(row.get("trophies", 0) or 0)
+        target = int(row.get("push_until", 0) or 0)
+    gap = max(0, target - current)
+    return current, target, gap
+
+
+def sort_queue(queue, *, mode="cups_desc"):
+    """Order farm-plan rows using a named sort mode."""
+    normalized = normalize_queue(queue if isinstance(queue, list) else [])
+    sort_mode = mode if mode in QUEUE_SORT_MODES else "cups_desc"
+
+    def sort_key(row):
+        brawler = str(row.get("brawler", "") or "").lower()
+        trophies, target, gap = _queue_progress_values(row)
+        if sort_mode == "cups_desc":
+            return (-trophies, brawler)
+        if sort_mode == "cups_asc":
+            return (trophies, brawler)
+        if sort_mode == "target_desc":
+            return (-target, -trophies, brawler)
+        if sort_mode == "target_asc":
+            return (target, trophies, brawler)
+        if sort_mode == "gap_asc":
+            return (gap, -trophies, brawler)
+        if sort_mode == "gap_desc":
+            return (-gap, trophies, brawler)
+        if sort_mode == "name_asc":
+            return (brawler, -trophies)
+        return (brawler,)
+
+    if sort_mode == "name_desc":
+        normalized.sort(key=lambda row: str(row.get("brawler", "") or "").lower(), reverse=True)
+    else:
+        normalized.sort(key=sort_key)
+    return normalized
+
+
+def sort_queue_by_trophies(queue, *, descending=True):
+    """Order farm-plan rows by current trophy count."""
+    return sort_queue(queue, mode="cups_desc" if descending else "cups_asc")
+
+
 def queue_state_items(queue):
     items = []
     for index, row in enumerate(queue):
@@ -155,7 +215,8 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
         if trophies < target_trophies:
             rows.append((trophies, index, brawler))
 
-    rows.sort(key=lambda item: (item[0], item[1]))
+    # Highest cups first so brawlers closest to the target are farmed before low-cup alts.
+    rows.sort(key=lambda item: (-item[0], item[1]))
     data = []
     for idx, (trophies, _, brawler) in enumerate(rows):
         data.append({
@@ -165,7 +226,7 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
             "wins": 0,
             "type": "trophies",
             "automatically_pick": True,
-            "selection_method": "lowest_trophies",
+            "selection_method": "highest_trophies",
             "win_streak": 0,
         })
     return data

@@ -777,7 +777,7 @@ class SelectBrawler:
             raise ConnectionError("No ADB serial returned for Push All.")
         return adb.device(serial=serial)
 
-    def quick_select_least_trophies_brawler(self):
+    def quick_select_highest_trophy_brawler(self):
         device = self.get_adb_device_for_quick_select()
         size = device.window_size()
         wr = size.width / 1920
@@ -790,7 +790,7 @@ class SelectBrawler:
         print(f"Push All using ADB device: {device.serial}")
         tap(128, 500, 1.4)   # left Brawlers button in lobby
         tap(1210, 45, 0.6)   # sort dropdown
-        tap(1210, 426, 1.0)  # Least Trophies
+        tap(1210, 368, 1.0)  # Most Trophies
         selected_brawler = self.detect_first_sorted_brawler(device)
         tap(422, 359, 1.0)   # first brawler card
         tap(260, 991, 1.0)   # Select
@@ -862,7 +862,7 @@ class SelectBrawler:
                 return
             data = self.apply_push_all_priority_order(data)
             if not self.push_all_priority_order:
-                selected_serial, selected_brawler = self.quick_select_least_trophies_brawler()
+                selected_serial, selected_brawler = self.quick_select_highest_trophy_brawler()
                 if selected_brawler:
                     data = self._move_brawler_to_front(data, selected_brawler)
             print(f"Push All {target_trophies} first brawler:", data[0])

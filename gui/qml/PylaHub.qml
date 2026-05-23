@@ -39,6 +39,16 @@ ApplicationWindow {
     property string pickerType: "trophies"
     property string historySort: "games"
     readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
+    readonly property var queueSortOptions: [
+        { id: "cups_desc", label: "Cups high \u2192 low" },
+        { id: "cups_asc", label: "Cups low \u2192 high" },
+        { id: "gap_asc", label: "Closest to target" },
+        { id: "gap_desc", label: "Furthest from target" },
+        { id: "target_desc", label: "Target high \u2192 low" },
+        { id: "target_asc", label: "Target low \u2192 high" },
+        { id: "name_asc", label: "Name A \u2192 Z" },
+        { id: "name_desc", label: "Name Z \u2192 A" }
+    ]
 
     function parseTrophyTarget(value) {
         var parsed = parseInt(String(value || "").trim())
@@ -1669,6 +1679,93 @@ ApplicationWindow {
                                     return
                                 }
                                 exportQueueDialog.open()
+                            }
+                        }
+                        HubButton {
+                            id: queueSortButton
+                            label: "Sort"
+                            secondary: true
+                            compact: true
+                            onClicked: {
+                                if (!(root.hubState.queue && root.hubState.queue.length)) {
+                                    root.statusText = "Farm plan is empty."
+                                    root.statusOk = false
+                                    return
+                                }
+                                queueSortPopup.open()
+                            }
+                        }
+                        Popup {
+                            id: queueSortPopup
+                            parent: Overlay.overlay
+                            width: Math.max(queueSortPopupColumn.implicitWidth + 16, 220)
+                            height: Math.max(queueSortPopupColumn.implicitHeight + 16, 48)
+                            padding: 8
+                            modal: true
+                            focus: true
+                            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+                            function repositionWithinOverlay() {
+                                var overlay = Overlay.overlay
+                                if (!overlay) {
+                                    return
+                                }
+                                var margin = 8
+                                var belowPos = queueSortButton.mapToItem(overlay, 0, queueSortButton.height)
+                                var abovePos = queueSortButton.mapToItem(overlay, 0, 0)
+                                var buttonRightPos = queueSortButton.mapToItem(overlay, queueSortButton.width, 0)
+                                var popupW = queueSortPopup.width
+                                var popupH = queueSortPopup.height
+                                var maxX = Math.max(margin, overlay.width - popupW - margin)
+                                var maxY = Math.max(margin, overlay.height - popupH - margin)
+
+                                var nextX = belowPos.x
+                                if (nextX + popupW > overlay.width - margin) {
+                                    nextX = buttonRightPos.x - popupW
+                                }
+                                queueSortPopup.x = Math.max(margin, Math.min(nextX, maxX))
+
+                                var nextY = belowPos.y + 4
+                                if (nextY + popupH > overlay.height - margin) {
+                                    nextY = abovePos.y - popupH - 4
+                                }
+                                queueSortPopup.y = Math.max(margin, Math.min(nextY, maxY))
+                            }
+
+                            onOpened: repositionWithinOverlay()
+
+                            background: Rectangle {
+                                radius: 8
+                                color: theme.panel2
+                                border.width: 1
+                                border.color: theme.borderSoft
+                            }
+
+                            Column {
+                                id: queueSortPopupColumn
+                                spacing: 8
+
+                                Text {
+                                    text: "Sort farm plan"
+                                    color: theme.text
+                                    font.pixelSize: 11
+                                    font.weight: Font.Bold
+                                }
+
+                                Flow {
+                                    spacing: 6
+                                    width: Math.min(420, (Overlay.overlay ? Overlay.overlay.width : root.width) - 32)
+                                    Repeater {
+                                        model: root.queueSortOptions
+                                        delegate: ChoicePill {
+                                            label: modelData.label
+                                            onClicked: {
+                                                root.runActionWithPayload("sort-queue", { mode: modelData.id })
+                                                queueSortPopup.close()
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                         HubButton { label: "Clear"; secondary: true; compact: true; onClicked: root.runAction("clear-queue") }
