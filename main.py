@@ -80,6 +80,8 @@ from state_finder import (
     get_state,
     get_starr_nova_got_it_button_center,
     get_starr_nova_hub_back_button_center,
+    is_in_brawl_pass,
+    is_in_star_road,
     is_starr_nova_hub_screen,
     is_starr_nova_info_screen,
 )
@@ -203,6 +205,24 @@ def normalize_detected_state(
 
 def should_accept_lobby_after_match(pending_for, confirm_seconds):
     return pending_for >= confirm_seconds
+
+
+def apply_in_match_overlay_guard(
+        state,
+        detected_state,
+        previous_state,
+        *,
+        allow_panel_escape=False,
+):
+    if (
+        previous_state == "match"
+        and detected_state in {"brawler_selection", "shop"}
+        and state == detected_state
+    ):
+        if allow_panel_escape and detected_state == "shop":
+            return "shop"
+        return "match"
+    return state
 
 
 def pyla_main(data):
@@ -1150,6 +1170,17 @@ def pyla_main(data):
             )
             return False
 
+        def handle_brawl_pass_screen(self, frame):
+            screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            if not (is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)):
+                return False
+            print("Brawl Pass panel detected; backing out.")
+            self.window_controller.keys_up(list("wasd"))
+            self.Stage_manager.quit_shop()
+            self.lobby_entered_at = None
+            self.last_lobby_start_press = time.time()
+            return True
+
         def handle_starr_nova_info_screen(self, frame):
             now = time.time()
             if now - self.last_starr_nova_info_check < self.starr_nova_info_check_interval:
@@ -1168,7 +1199,7 @@ def pyla_main(data):
             return True
 
         def handle_starr_nova_hub_screen(self, frame):
-            if self.state not in (None, "lobby", "shop"):
+            if self.state == "match":
                 return False
 
             screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -1219,7 +1250,7 @@ def pyla_main(data):
             self.restart_brawl_stars()
             return True
 
-        def apply_state_context_guard(self, detected_state, previous_state):
+        def apply_state_context_guard(self, detected_state, previous_state, *, allow_panel_escape=False):
             now = time.time()
             if detected_state in MATCH_RESULT_STATES:
                 self.post_match_reward_until = now + self.post_match_reward_window_seconds
@@ -1255,7 +1286,12 @@ def pyla_main(data):
                 and detected_state in {"brawler_selection", "shop"}
                 and state == detected_state
             ):
-                return "match"
+                return apply_in_match_overlay_guard(
+                    state,
+                    detected_state,
+                    previous_state,
+                    allow_panel_escape=allow_panel_escape,
+                )
             if detected_state != "lobby":
                 self.pending_lobby_since = None
 
@@ -1313,13 +1349,24 @@ def pyla_main(data):
             if self.handle_starr_nova_info_screen(frame):
                 return
 
+            if self.handle_brawl_pass_screen(frame):
+                return
+
             if self.handle_disconnect_screen(frame):
                 return
 
             if self.Time_management.state_check():
+                screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                allow_panel_escape = (
+                    is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)
+                )
                 detected_state = get_state(frame)
                 previous_state = self.state
-                state = self.apply_state_context_guard(detected_state, previous_state)
+                state = self.apply_state_context_guard(
+                    detected_state,
+                    previous_state,
+                    allow_panel_escape=allow_panel_escape,
+                )
                 self.state = state
                 if state != "match":
                     self.Play.time_since_last_proceeding = time.time()
@@ -1666,6 +1713,14 @@ def pyla_main(data):
                 )
 
                 if self.handle_visual_freeze(frame):
+                    continue
+
+                screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                if self.state == "match" and (
+                    is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)
+                ):
+                    self.handle_brawl_pass_screen(frame)
+                    time.sleep(0.05)
                     continue
 
                 if self.state != "match":

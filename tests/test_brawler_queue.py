@@ -58,7 +58,7 @@ class BrawlerQueueTests(unittest.TestCase):
 
     @patch("gui.brawler_queue.fetch_brawl_stars_player")
     @patch("gui.brawler_queue.load_brawl_stars_api_config")
-    def test_get_push_all_data_sorts_highest_trophies_first(self, mock_config, mock_player):
+    def test_get_push_all_data_sorts_lowest_trophies_first(self, mock_config, mock_player):
         from gui.brawler_queue import get_push_all_data
 
         mock_config.return_value = {"api_token": "x", "player_tag": "#TAG", "timeout_seconds": 15}
@@ -70,8 +70,8 @@ class BrawlerQueueTests(unittest.TestCase):
             ]
         }
         rows = get_push_all_data(1000, brawlers=["shelly", "colt", "nita"])
-        self.assertEqual([row["brawler"] for row in rows], ["colt", "nita", "shelly"])
-        self.assertEqual(rows[0]["selection_method"], "highest_trophies")
+        self.assertEqual([row["brawler"] for row in rows], ["shelly", "nita", "colt"])
+        self.assertEqual(rows[0]["selection_method"], "lowest_trophies")
 
     @patch("gui.brawler_queue.fetch_brawl_stars_player")
     @patch("gui.brawler_queue.load_brawl_stars_api_config")

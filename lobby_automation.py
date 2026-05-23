@@ -57,7 +57,7 @@ class LobbyAutomation:
             return False
         return is_in_brawler_selection(screenshot_bgr)
 
-    def _dismiss_starr_nova_hub_if_present(self, max_attempts=3):
+    def _dismiss_starr_nova_hub_if_present(self, max_attempts=5):
         dismissed = False
         for _ in range(max_attempts):
             screenshot = self.window_controller.screenshot()
@@ -67,11 +67,12 @@ class LobbyAutomation:
             if not is_starr_nova_hub_screen(screenshot_bgr):
                 break
             back_center = get_starr_nova_hub_back_button_center(screenshot_bgr)
-            if back_center is None:
-                break
-            print("Starr Nova hub open during brawler selection; clicking back.")
+            print("Starr Nova hub open during brawler selection; backing out.")
             self.window_controller.keys_up(list("wasd"))
-            self.window_controller.click(*back_center, delay=0.08)
+            if back_center is not None:
+                self.window_controller.click(*back_center, delay=0.08)
+            else:
+                self.press_back()
             time.sleep(0.8)
             dismissed = True
         return dismissed
@@ -517,10 +518,16 @@ class LobbyAutomation:
         self.window_controller.swipe(scroll_x, start_y, scroll_x, end_y, duration=0.28)
         self._wait_for_grid_settle()
 
-    def select_brawler(self, brawler):
-        self.window_controller.screenshot()
+    def _apply_brawler_sort(self, mode="lowest"):
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
+        sort_y = 426 if str(mode).lower() == "lowest" else 368
+        self.window_controller.click(int(1210 * wr), int(45 * hr))
+        time.sleep(0.6)
+        self.window_controller.click(int(1210 * wr), int(sort_y * hr))
+        time.sleep(1.0)
+
+    def _select_brawler_on_open_grid(self, brawler, *, max_scrolls=50, sort_applied=False):
         general_config = load_toml_as_dict("cfg/general_config.toml")
         debug_enabled = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         try:
@@ -531,19 +538,15 @@ class LobbyAutomation:
         grid_ocr_scale = max(ocr_scale, 0.75)
         target_key = self.normalize_ocr_name(brawler)
         target_key = self.resolve_ocr_typos(target_key)
-
-        if not self.open_brawler_selection():
-            print(f"WARNING: Could not open brawler selection menu for '{brawler}'. "
-                  "Continuing with the currently selected brawler instead of crashing.")
-            self.press_back()
-            return False
+        if sort_applied:
+            max_scrolls = min(max_scrolls, 15)
 
         same_screen_attempts = 0
         max_same_screen_attempts = 3
         scroll_direction = "down"
         previous_page_signature = None
         unchanged_pages = 0
-        for scroll_index in range(50):
+        for scroll_index in range(max_scrolls):
             self._dismiss_open_detail_card()
 
             screenshot_full = self.window_controller.screenshot()
@@ -615,11 +618,22 @@ class LobbyAutomation:
 
             self._scroll_brawler_grid(wr, hr, direction=scroll_direction)
 
-        print(f"WARNING: Brawler '{brawler}' was not found after 50 scroll attempts. "
-              f"The bot will continue with the currently selected brawler.")
+        print(
+            f"WARNING: Brawler '{brawler}' was not found after {max_scrolls} scroll attempts. "
+            "The bot will continue with the currently selected brawler."
+        )
         return False
 
-    def select_highest_trophy_brawler(self):
+    def select_brawler(self, brawler):
+        self.window_controller.screenshot()
+        if not self.open_brawler_selection():
+            print(f"WARNING: Could not open brawler selection menu for '{brawler}'. "
+                  "Continuing with the currently selected brawler instead of crashing.")
+            self.press_back()
+            return False
+        return self._select_brawler_on_open_grid(brawler)
+
+    def _select_sorted_trophy_brawler(self, *, sort_y, sort_label, recovery_label):
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
 
@@ -627,26 +641,69 @@ class LobbyAutomation:
             self.window_controller.click(int(x * wr), int(y * hr))
             time.sleep(wait)
 
-        print("Selecting next brawler by sorting most trophies.")
+        print(f"Selecting next brawler by sorting {sort_label}.")
         self._dismiss_starr_nova_hub_if_present()
         tap(128, 500, 1.4)   # left Brawlers button in lobby
         self._dismiss_starr_nova_hub_if_present()
         tap(1210, 45, 0.6)   # sort dropdown
-        tap(1210, 368, 1.0)  # Most Trophies
+        tap(1210, sort_y, 1.0)
         tap(422, 359, 1.0)   # first brawler card after sorting
         tap(260, 991, 1.0)   # Select
         if self.ensure_lobby_after_selection():
             return True
 
-        print("Highest-trophy brawler selection did not return to lobby; trying one recovery pass.")
+        print(f"{recovery_label} brawler selection did not return to lobby; trying one recovery pass.")
         self.press_back()
         time.sleep(0.8)
         tap(260, 991, 1.0)   # Select again if the brawler details screen is still open
         return self.ensure_lobby_after_selection()
 
-    def select_lowest_trophy_brawler(self):
-        """Legacy alias kept for older saved queues."""
-        return self.select_highest_trophy_brawler()
+    def _select_sorted_queue_brawler(self, brawler, *, mode="lowest"):
+        brawler_name = str(brawler or "").strip()
+        if not brawler_name:
+            if mode == "highest":
+                return self._select_sorted_trophy_brawler(
+                    sort_y=368,
+                    sort_label="most trophies",
+                    recovery_label="Highest-trophy",
+                )
+            return self._select_sorted_trophy_brawler(
+                sort_y=426,
+                sort_label="lowest trophies",
+                recovery_label="Lowest-trophy",
+            )
+
+        sort_label = "lowest trophies" if mode == "lowest" else "most trophies"
+        print(f"Selecting queued brawler {brawler_name} after {sort_label} sort.")
+        self._dismiss_starr_nova_hub_if_present()
+        if not self.open_brawler_selection():
+            print(f"WARNING: Could not open brawler selection menu for '{brawler_name}'.")
+            self.press_back()
+            return False
+        self._dismiss_starr_nova_hub_if_present()
+        self._apply_brawler_sort(mode)
+        if self._select_brawler_on_open_grid(brawler_name, sort_applied=True):
+            return True
+        self.press_back()
+        return False
+
+    def select_highest_trophy_brawler(self, brawler=None):
+        if brawler:
+            return self._select_sorted_queue_brawler(brawler, mode="highest")
+        return self._select_sorted_trophy_brawler(
+            sort_y=368,
+            sort_label="most trophies",
+            recovery_label="Highest-trophy",
+        )
+
+    def select_lowest_trophy_brawler(self, brawler=None):
+        if brawler:
+            return self._select_sorted_queue_brawler(brawler, mode="lowest")
+        return self._select_sorted_trophy_brawler(
+            sort_y=426,
+            sort_label="lowest trophies",
+            recovery_label="Lowest-trophy",
+        )
 
     def ensure_lobby_after_selection(self, timeout=6.0):
         deadline = time.time() + timeout

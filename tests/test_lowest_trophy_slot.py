@@ -25,6 +25,38 @@ class DummyWindowController:
 
 class LowestTrophySelectionTests(unittest.TestCase):
     @patch("lobby_automation.time.sleep", return_value=None)
+    def test_sorts_by_least_trophies_in_menu(self, *_):
+        automation = object.__new__(LobbyAutomation)
+        automation.window_controller = DummyWindowController()
+        automation._dismiss_starr_nova_hub_if_present = lambda: False
+        automation.ensure_lobby_after_selection = lambda: True
+
+        automation.select_lowest_trophy_brawler()
+
+        self.assertEqual(automation.window_controller.clicks[2], (1210, 426))
+
+    @patch("lobby_automation.time.sleep", return_value=None)
+    @patch.object(LobbyAutomation, "_select_brawler_on_open_grid", return_value=True)
+    @patch.object(LobbyAutomation, "_apply_brawler_sort")
+    @patch.object(LobbyAutomation, "open_brawler_selection", return_value=True)
+    @patch.object(LobbyAutomation, "_dismiss_starr_nova_hub_if_present", return_value=False)
+    def test_select_lowest_uses_named_grid_pick_for_queue_brawler(
+        self,
+        _dismiss,
+        _open,
+        mock_sort,
+        mock_grid,
+        *_,
+    ):
+        automation = object.__new__(LobbyAutomation)
+        automation.window_controller = DummyWindowController()
+        automation.ensure_lobby_after_selection = lambda: True
+
+        self.assertTrue(automation.select_lowest_trophy_brawler("finx"))
+        mock_sort.assert_called_once_with("lowest")
+        mock_grid.assert_called_once_with("finx", sort_applied=True)
+
+    @patch("lobby_automation.time.sleep", return_value=None)
     def test_always_clicks_first_lowest_trophy_brawler_card(self, *_):
         automation = object.__new__(LobbyAutomation)
         automation.window_controller = DummyWindowController()

@@ -319,10 +319,13 @@ class StageManager:
             return False
 
         selection_method = self.brawlers_pick_data[0].get("selection_method", "named_brawler")
-        if selection_method in ("lowest_trophies", "highest_trophies"):
-            selected = self.Lobby_automation.select_highest_trophy_brawler()
+        brawler_name = self.brawlers_pick_data[0].get("brawler", "")
+        if selection_method == "highest_trophies":
+            selected = self.Lobby_automation.select_highest_trophy_brawler(brawler_name)
+        elif selection_method == "lowest_trophies":
+            selected = self.Lobby_automation.select_lowest_trophy_brawler(brawler_name)
         else:
-            selected = self.Lobby_automation.select_brawler(self.brawlers_pick_data[0]["brawler"])
+            selected = self.Lobby_automation.select_brawler(brawler_name)
         if not selected:
             print("Could not confirm next brawler selection after restart.")
             return False
@@ -474,12 +477,12 @@ class StageManager:
         ):
             remaining.sort(
                 key=lambda row: (
-                    -self._number_or_default(row.get(type_of_push, 0), 0),
+                    self._number_or_default(row.get(type_of_push, 0), 0),
                     str(row.get("brawler", "")).lower(),
                 )
             )
             for row in remaining:
-                row["selection_method"] = "highest_trophies"
+                row["selection_method"] = "lowest_trophies"
                 row["automatically_pick"] = True
 
         return remaining
@@ -590,8 +593,10 @@ class StageManager:
         front = self.pending_queue[0]
         selection_method = str(front.get("selection_method", "named_brawler") or "named_brawler")
         brawler_name = self.pending_reselect_brawler or front.get("brawler", "")
-        if selection_method in ("lowest_trophies", "highest_trophies"):
-            selected = self.Lobby_automation.select_highest_trophy_brawler()
+        if selection_method == "highest_trophies":
+            selected = self.Lobby_automation.select_highest_trophy_brawler(brawler_name)
+        elif selection_method == "lowest_trophies":
+            selected = self.Lobby_automation.select_lowest_trophy_brawler(brawler_name)
         else:
             selected = self.Lobby_automation.select_brawler(brawler_name)
 
@@ -938,13 +943,19 @@ class StageManager:
         if current_row is not None:
             remaining_rows.sort(
                 key=lambda row: (
-                    -self._number_or_default(row.get("trophies", 0), 0),
+                    self._number_or_default(row.get("trophies", 0), 0),
                     str(row.get("brawler", "")).lower(),
                 )
             )
             refreshed_rows = [current_row] + remaining_rows
             self.push_all_needs_selection = False
         else:
+            remaining_rows.sort(
+                key=lambda row: (
+                    self._number_or_default(row.get("trophies", 0), 0),
+                    str(row.get("brawler", "")).lower(),
+                )
+            )
             refreshed_rows = remaining_rows
             self.push_all_needs_selection = bool(refreshed_rows)
 
@@ -953,7 +964,7 @@ class StageManager:
                 if row.get("automatically_pick") is not True:
                     changed = True
                 row["automatically_pick"] = True
-                row["selection_method"] = "highest_trophies"
+                row["selection_method"] = "lowest_trophies"
 
         old_order = [row.get("brawler") for row in self.brawlers_pick_data]
         new_order = [row.get("brawler") for row in refreshed_rows]
@@ -1128,6 +1139,8 @@ class StageManager:
         current_state = get_state(screenshot)
         attempts = 0
         while current_state != "lobby" and attempts < max_attempts:
+            if hasattr(self, "Lobby_automation"):
+                self.Lobby_automation._dismiss_starr_nova_hub_if_present()
             self.window_controller.press_key("Q")
             time.sleep(1.0)
             screenshot = self.window_controller.screenshot()
@@ -1425,9 +1438,15 @@ class StageManager:
         log_info("match", f"Game has ended ({current_state})")
 
     def quit_shop(self):
-        if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
-            return
-        self.window_controller.click(100*self.window_controller.width_ratio, 60*self.window_controller.height_ratio)
+        for _ in range(2):
+            if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
+                time.sleep(0.35)
+                continue
+            self.window_controller.click(
+                100 * self.window_controller.width_ratio,
+                60 * self.window_controller.height_ratio,
+            )
+            time.sleep(0.35)
 
     def close_pop_up(self):
         screenshot = self.window_controller.screenshot()

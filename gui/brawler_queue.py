@@ -215,8 +215,8 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
         if trophies < target_trophies:
             rows.append((trophies, index, brawler))
 
-    # Highest cups first so brawlers closest to the target are farmed before low-cup alts.
-    rows.sort(key=lambda item: (-item[0], item[1]))
+    # Lowest cups first so Push All always farms the lowest remaining brawler next.
+    rows.sort(key=lambda item: (item[0], item[1]))
     data = []
     for idx, (trophies, _, brawler) in enumerate(rows):
         data.append({
@@ -226,7 +226,7 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
             "wins": 0,
             "type": "trophies",
             "automatically_pick": True,
-            "selection_method": "highest_trophies",
+            "selection_method": "lowest_trophies",
             "win_streak": 0,
         })
     return data

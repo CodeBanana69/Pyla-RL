@@ -1,6 +1,10 @@
 import unittest
 
-from main import normalize_detected_state, should_accept_lobby_after_match
+from main import (
+    apply_in_match_overlay_guard,
+    normalize_detected_state,
+    should_accept_lobby_after_match,
+)
 
 
 class StateTransitionGuardTests(unittest.TestCase):
@@ -343,6 +347,24 @@ class StateTransitionGuardTests(unittest.TestCase):
         self.assertFalse(should_accept_lobby_after_match(2.9, 3.0))
         self.assertTrue(should_accept_lobby_after_match(3.0, 3.0))
         self.assertTrue(should_accept_lobby_after_match(126.9, 3.0))
+
+    def test_shop_panel_escape_is_allowed_after_match_when_brawl_pass_detected(self):
+        state = apply_in_match_overlay_guard(
+            "shop",
+            detected_state="shop",
+            previous_state="match",
+            allow_panel_escape=True,
+        )
+        self.assertEqual(state, "shop")
+
+    def test_shop_stays_suppressed_during_match_without_panel_escape(self):
+        state = apply_in_match_overlay_guard(
+            "shop",
+            detected_state="shop",
+            previous_state="match",
+            allow_panel_escape=False,
+        )
+        self.assertEqual(state, "match")
 
 
 if __name__ == "__main__":

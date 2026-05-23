@@ -99,6 +99,27 @@ class EmulatorAdbTests(unittest.TestCase):
         self.assertEqual(tried[1], "127.0.0.1:5557")
         self.assertTrue(all(":16384" not in serial for serial in tried))
 
+    @patch("gui.emulator_adb.adb_start_server")
+    @patch("gui.emulator_adb.list_adb_devices")
+    @patch("gui.emulator_adb.adb_connect_serial")
+    @patch("gui.emulator_adb.is_port_open", return_value=False)
+    @patch("gui.emulator_adb.detect_emulator_process", return_value=(True, "Detected mumuplayer.exe"))
+    def test_connect_emulator_adb_process_running_but_local_adb_unreachable(
+        self,
+        _process,
+        _open,
+        mock_connect,
+        mock_devices,
+        _start,
+    ):
+        mock_devices.return_value = (["192.168.1.116:5555"], "")
+        mock_connect.return_value = (False, "cannot connect to 127.0.0.1:5554: actively refused")
+        result = connect_emulator_adb("MuMu", 16384, probe_open_ports=False)
+        self.assertFalse(result["ok"])
+        self.assertIn("MuMu is running but local ADB is not reachable on 127.0.0.1:16384", result["detail"])
+        self.assertIn("Ignoring non-local device(s): 192.168.1.116:5555", result["detail"])
+        self.assertIn("Last connect error", result["detail"])
+
     @patch("gui.emulator_adb.shutil.which", return_value="tasklist")
     @patch("gui.emulator_adb.subprocess.run")
     def test_detect_ldplayer_process_names(self, mock_run, _which):

@@ -104,17 +104,20 @@ def check_emulator_status(emulator, port=None):
             "ok": False,
             "process_ok": False,
             "adb_ok": False,
+            "process_detail": process_detail,
             "detail": process_detail,
             "checked": True,
         }
 
     adb_result = connect_emulator_adb(selected, configured_port)
     adb_ok = bool(adb_result.get("ok"))
+    adb_detail = str(adb_result.get("detail") or "ADB check failed")
     return {
         "ok": adb_ok,
         "process_ok": True,
         "adb_ok": adb_ok,
-        "detail": adb_result.get("detail") if adb_ok else adb_result.get("detail", "ADB check failed"),
+        "process_detail": process_detail,
+        "detail": adb_detail,
         "checked": True,
     }
 
@@ -179,7 +182,14 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
 
     selected_status = emulator_status.get(selected_emulator.lower(), {})
     process_ok = bool(selected_status.get("process_ok"))
-    process_detail = str(selected_status.get("detail") or f"No {selected_emulator} process found")
+    if process_ok:
+        process_detail = str(selected_status.get("process_detail") or f"Detected {selected_emulator}")
+    else:
+        process_detail = str(
+            selected_status.get("process_detail")
+            or selected_status.get("detail")
+            or f"No {selected_emulator} process found"
+        )
     checks.append(_check_item(
         "emulator",
         f"{selected_emulator} process",

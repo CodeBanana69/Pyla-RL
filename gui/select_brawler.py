@@ -12,6 +12,7 @@ from adbutils import adb
 from PIL import Image
 from customtkinter import CTkImage
 from utils import (
+    extract_text_and_positions,
     extract_text_strings,
     fetch_brawl_stars_player,
     load_brawl_stars_api_config,
@@ -777,7 +778,53 @@ class SelectBrawler:
             raise ConnectionError("No ADB serial returned for Push All.")
         return adb.device(serial=serial)
 
-    def quick_select_highest_trophy_brawler(self):
+    def detect_brawler_on_sorted_grid(self, device, expected_brawler):
+        expected_key = normalize_brawler_name(expected_brawler)
+        if not expected_key:
+            return None
+
+        try:
+            screenshot = device.screenshot()
+            frame = np.array(screenshot)
+            if frame.ndim == 3 and frame.shape[2] == 4:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
+        except Exception as e:
+            print(f"Could not screenshot brawler screen for OCR: {e}")
+            return None
+
+        height, width = frame.shape[:2]
+        crop = frame[
+            int(height * 0.12):int(height * 0.92),
+            int(width * 0.10):int(width * 0.95),
+        ]
+        try:
+            positions = extract_text_and_positions(crop)
+        except Exception as e:
+            print(f"Could not OCR brawler grid for {expected_brawler}: {e}")
+            return None
+
+        offset_x = int(width * 0.10)
+        offset_y = int(height * 0.12)
+        best_match = None
+        for text, bbox in positions.items():
+            matched = self._match_brawler_from_ocr_texts([text], self.brawlers)
+            if not matched:
+                continue
+            if normalize_brawler_name(matched) != expected_key:
+                continue
+            center = bbox.get("center")
+            if not center:
+                continue
+            best_match = (
+                int(center[0] + offset_x),
+                int(center[1] + offset_y),
+            )
+            break
+        if best_match:
+            print(f"Located queued brawler {expected_brawler} on sorted grid at {best_match}.")
+        return best_match
+
+    def quick_select_lowest_trophy_brawler(self, expected_brawler=None):
         device = self.get_adb_device_for_quick_select()
         size = device.window_size()
         wr = size.width / 1920
@@ -790,10 +837,33 @@ class SelectBrawler:
         print(f"Push All using ADB device: {device.serial}")
         tap(128, 500, 1.4)   # left Brawlers button in lobby
         tap(1210, 45, 0.6)   # sort dropdown
-        tap(1210, 368, 1.0)  # Most Trophies
-        selected_brawler = self.detect_first_sorted_brawler(device)
-        tap(422, 359, 1.0)   # first brawler card
+        tap(1210, 426, 1.0)  # Least Trophies
+        selected_brawler = None
+        card_x, card_y = 422, 359
+        if expected_brawler:
+            located = self.detect_brawler_on_sorted_grid(device, expected_brawler)
+            if located:
+                card_x = located[0] / wr
+                card_y = max(359, (located[1] / hr) - 40)
+                selected_brawler = expected_brawler
+            else:
+                print(
+                    f"Push All could not locate {expected_brawler} on the sorted grid; "
+                    "falling back to the first visible card."
+                )
+        if selected_brawler is None:
+            selected_brawler = self.detect_first_sorted_brawler(device)
+        tap(card_x, card_y, 1.0)
         tap(260, 991, 1.0)   # Select
+        if (
+            expected_brawler
+            and selected_brawler
+            and normalize_brawler_name(selected_brawler) != normalize_brawler_name(expected_brawler)
+        ):
+            print(
+                f"Push All warning: expected {expected_brawler}, but game selected "
+                f"{selected_brawler}. Keeping API queue order."
+            )
         return device.serial, selected_brawler
 
     def open_push_all_target_window(self):
@@ -861,10 +931,18 @@ class SelectBrawler:
                 self.app.deiconify()
                 return
             data = self.apply_push_all_priority_order(data)
+            expected_brawler = data[0].get("brawler")
             if not self.push_all_priority_order:
-                selected_serial, selected_brawler = self.quick_select_highest_trophy_brawler()
-                if selected_brawler:
-                    data = self._move_brawler_to_front(data, selected_brawler)
+                selected_serial, selected_brawler = self.quick_select_lowest_trophy_brawler(expected_brawler)
+                if (
+                    selected_brawler
+                    and expected_brawler
+                    and normalize_brawler_name(selected_brawler) != normalize_brawler_name(expected_brawler)
+                ):
+                    print(
+                        f"Push All kept API queue front {expected_brawler}; "
+                        f"ignored in-game pick {selected_brawler}."
+                    )
             print(f"Push All {target_trophies} first brawler:", data[0])
             self.brawlers_data = data
             self.start_bot()

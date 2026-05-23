@@ -38,14 +38,17 @@ class DummyWindowController:
 class DummyLobbyAutomation:
     def __init__(self):
         self.lowest_calls = 0
+        self.lowest_brawlers = []
         self.named_calls = []
 
-    def select_lowest_trophy_brawler(self):
+    def select_lowest_trophy_brawler(self, brawler=None):
         self.lowest_calls += 1
+        self.lowest_brawlers.append(brawler)
         return True
 
     def select_brawler(self, name):
         self.named_calls.append(name)
+        return True
 
 
 class PushAllTargetSwitchTest(unittest.TestCase):
@@ -113,6 +116,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
                 self.assertEqual(manager.Trophy_observer.changed_to, 0)
                 self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
+                self.assertEqual(manager.Lobby_automation.lowest_brawlers, ["second"])
                 self.assertEqual(manager.Lobby_automation.named_calls, [])
                 self.assertIn("Q", manager.window_controller.pressed)
 
@@ -170,6 +174,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
         self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "lowest")
         self.assertEqual(manager.Trophy_observer.changed_to, 120)
         self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
+        self.assertEqual(manager.Lobby_automation.lowest_brawlers, ["lowest"])
         self.assertEqual([row["brawler"] for row in manager.brawlers_pick_data], ["lowest", "almost_done"])
 
     @patch.object(StageManager, "refresh_push_all_trophies_from_api", return_value=False)
@@ -243,6 +248,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
         self.assertEqual(notifications[0], ("brawler_complete", "first", 1000))
         self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
         self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
+        self.assertEqual(manager.Lobby_automation.lowest_brawlers, ["second"])
 
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.fetch_brawl_stars_player")

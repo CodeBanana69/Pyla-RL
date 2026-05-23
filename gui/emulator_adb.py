@@ -306,14 +306,34 @@ def connect_emulator_adb(
             }
         last_message = message or last_message
 
-    device_hint = ", ".join(devices) if devices else "none"
-    detail = (
-        f"No {selected} ADB device online on ports {', '.join(str(p) for p in candidate_ports)} "
-        f"using {adb_path}. Seen devices: {device_hint}."
-    )
-    if last_message:
-        detail += f" {last_message}"
-    detail += f" {adb_hint_for_emulator(selected)}"
+    non_local_devices = [device for device in devices if not is_local_adb_serial(device)]
+    local_matches = [
+        device
+        for device in devices
+        if is_local_adb_serial(device) and serial_port(device) in allowed_ports
+    ]
+    primary_port = candidate_ports[0] if candidate_ports else 0
+    if process_ok and not local_matches:
+        detail = (
+            f"{selected} is running but local ADB is not reachable on "
+            f"127.0.0.1:{primary_port}. {adb_hint_for_emulator(selected)}"
+        )
+        if non_local_devices:
+            detail += (
+                f" Ignoring non-local device(s): {', '.join(non_local_devices)} "
+                f"(Pyla needs local 127.0.0.1:{primary_port})."
+            )
+        if last_message:
+            detail += f" Last connect error: {last_message.strip()}"
+    else:
+        device_hint = ", ".join(devices) if devices else "none"
+        detail = (
+            f"No {selected} ADB device online on ports {', '.join(str(p) for p in candidate_ports)} "
+            f"using {adb_path}. Seen devices: {device_hint}."
+        )
+        if last_message:
+            detail += f" {last_message}"
+        detail += f" {adb_hint_for_emulator(selected)}"
     return {
         "ok": False,
         "serial": "",
