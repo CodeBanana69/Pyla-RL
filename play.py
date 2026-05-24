@@ -1,7 +1,6 @@
-import math
+﻿import math
 import json
 import os
-import queue
 import random
 import threading
 import time
@@ -11,28 +10,14 @@ import numpy as np
 from state_finder import get_state
 from detect import Detect
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info
-from runtime_log import LEVEL_INFO, log_debug, log_once, log_trace, reload_config
-from visual_debug_window import (
-    log_visual_debug_startup,
-    opencv_highgui_available,
-    show_visual_debug_frame,
-)
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
-CLOSE_TILE_CROP_SIZE = 640
-CLOSE_TILE_MODEL_PATH = "models/closeTileDetector.onnx"
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 'no') == "yes"
 
 def vlog(*args):
-    message = " ".join(str(arg) for arg in args)
-    log_trace("movement", message, key=message[:96])
-
-
-def vdebug(*args):
-    log_debug("movement", " ".join(str(arg) for arg in args))
-
-
+    if visual_debug:
+        print("[DBG]", *args)
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
@@ -59,9 +44,7 @@ class Movement:
         self.super_treshold = time_config["super"]
         self.gadget_treshold = time_config["gadget"]
         self.hypercharge_treshold = time_config["hypercharge"]
-        self.walls_treshold = float(
-            time_config.get("wall_detection_interval_seconds", time_config.get("wall_detection", 1.0))
-        )
+        self.walls_treshold = time_config["wall_detection"]
         self.keep_walls_in_memory = self.walls_treshold <= 1
         self.last_walls_data = []
         self.keys_hold = []
@@ -97,6 +80,13 @@ class Movement:
         self.map_object_water_detection = str(bot_config.get("map_object_water_detection", "no")).lower() in ("yes", "true", "1")
         self.map_object_min_area = float(bot_config.get("map_object_min_area", 900))
         self.last_map_object_data = {}
+        self.jump_pad_detection_enabled = str(bot_config.get("jump_pad_detection_enabled", "yes")).lower() in ("yes", "true", "1")
+        self.jump_pad_escape_distance = float(bot_config.get("jump_pad_escape_distance", 620))
+        self.jump_pad_escape_min_distance = float(bot_config.get("jump_pad_escape_min_distance", 55))
+        self.jump_pad_escape_requires_edge = str(bot_config.get("jump_pad_escape_requires_edge", "yes")).lower() in ("yes", "true", "1")
+        self.jump_pad_escape_edge_margin = float(bot_config.get("jump_pad_escape_edge_margin", 0.22))
+        self.jump_pad_escape_teammate_safe_distance = float(bot_config.get("jump_pad_escape_teammate_safe_distance", 360))
+        self.jump_pad_smoke_early_distance = float(bot_config.get("jump_pad_smoke_early_distance", 230))
         self.wall_stuck_state = {
             "last_sample_time": 0.0,
             "last_wall_centers": None,   # np.ndarray (N, 2) of filtered wall centers
@@ -146,17 +136,8 @@ class Movement:
         return (enemy[0] + enemy[2]) / 2, (enemy[1] + enemy[3]) / 2
 
     @staticmethod
-    def get_player_foot_circle(player_data):
-        x1, y1, x2, y2 = map(float, player_data[:4])
-        radius = max(4.0, (x2 - x1) / 2.0)
-        foot_x = (x1 + x2) / 2.0
-        foot_y = y2 - radius
-        return foot_x, foot_y, radius
-
-    @staticmethod
     def get_player_pos(player_data):
-        foot_x, foot_y, _ = Play.get_player_foot_circle(player_data)
-        return foot_x, foot_y
+        return (player_data[0] + player_data[2]) / 2, (player_data[1] + player_data[3]) / 2
 
     @staticmethod
     def get_distance(enemy_coords, player_coords):
@@ -203,7 +184,7 @@ class Movement:
         return self.attack()
 
     def use_hypercharge(self):
-        log_once("combat:hypercharge", 5.0, LEVEL_INFO, "combat", "Using hypercharge")
+        print("Using hypercharge")
         self.window_controller.press_key("H", delay=0.035)
         return True
 
@@ -213,7 +194,7 @@ class Movement:
             if current_time - self.last_gadget_time < self.gadget_cooldown:
                 return False
             self.last_gadget_time = current_time
-        log_once("combat:gadget", 5.0, LEVEL_INFO, "combat", "Using gadget")
+        print("Using gadget")
         self.window_controller.press_key("G", delay=0.035)
         return True
 
@@ -223,7 +204,7 @@ class Movement:
             if current_time - self.last_super_time < self.super_cooldown:
                 return False
             self.last_super_time = current_time
-        log_once("combat:super", 5.0, LEVEL_INFO, "combat", "Using super")
+        print("Using super")
         self.window_controller.press_key("E", delay=0.035)
         return True
 
@@ -328,8 +309,11 @@ class Movement:
         return movement
 
     def _wslog(self, *args):
-        """Dedicated logger for wall-stuck / escape."""
-        log_debug("movement", " ".join(str(arg) for arg in args))
+        """Dedicated logger for wall-stuck / escape — independent of vlog/visual_debug
+        so the new unstuck machinery can be traced without dumping the full debug stream.
+        """
+        if self.wall_stuck_debug:
+            print("[WS]", *args)
 
     def _wall_centers_filtered(self, walls, player_pos):
         """Return (N, 2) float array of wall centers, excluding walls whose
@@ -475,22 +459,6 @@ class Play(Movement):
             tile_detector_model,
             classes=self.tile_detector_model_classes
         )
-        self.close_tile_detector_enabled = str(
-            bot_config.get("close_tile_detector_enabled", "no")
-        ).lower() in ("yes", "true", "1")
-        self.Detect_close_tile_detector = None
-        if self.close_tile_detector_enabled:
-            if os.path.exists(CLOSE_TILE_MODEL_PATH):
-                self.Detect_close_tile_detector = Detect(
-                    CLOSE_TILE_MODEL_PATH,
-                    classes=self.tile_detector_model_classes,
-                )
-            else:
-                print(
-                    f"WARNING: {CLOSE_TILE_MODEL_PATH} not found; "
-                    "close tile detector disabled."
-                )
-                self.close_tile_detector_enabled = False
 
         self.time_since_movement = time.time()
         self.time_since_gadget_checked = time.time()
@@ -499,9 +467,7 @@ class Play(Movement):
         self.time_since_walls_checked = 0
         self.time_since_movement_change = time.time()
         self.time_since_player_last_found = time.time()
-        self.last_wall_primary_count = 0
-        self.last_tile_detection_debug = None
-        self.entity_retry_grace_seconds = 0.4
+        self.last_jump_pad_data = []
         self.current_brawler = None
         self.is_hypercharge_ready = False
         self.is_gadget_ready = False
@@ -542,9 +508,8 @@ class Play(Movement):
         self.wall_history = []
         self.wall_history_length = int(bot_config.get("wall_history_length", 3))
         self.scene_data = []
-        gamemode = str(bot_config.get("gamemode", "showdown")).strip().lower()
-        self.should_detect_walls = gamemode in ("showdown", "brawlball")
-        self.is_showdown = gamemode == "showdown"
+        self.should_detect_walls = bot_config["gamemode"] == "showdown"
+        self.is_showdown = bot_config["gamemode"] == "showdown"
         self.minimum_movement_delay = bot_config["minimum_movement_delay"]
         self.no_detection_proceed_delay = time_config["no_detection_proceed"]
         self.no_detection_q_press_interval = float(time_config.get("no_detection_q_press_interval", 15.0))
@@ -572,24 +537,17 @@ class Play(Movement):
         self.gadget_crop_area = lobby_config['pixel_counter_crop_area']['gadget']
         self.hypercharge_crop_area = lobby_config['pixel_counter_crop_area']['hypercharge']
         global debug, visual_debug
-        reload_config()
         debug = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
-        self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
         self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
         self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
         self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
-        self._last_advanced_visual_context = None
         self._visual_debug_next_frame_at = 0.0
         self._visual_debug_next_enqueue_at = 0.0
         self._visual_debug_lock = threading.Lock()
         self._visual_debug_payload = None
-        self._visual_debug_display_queue = queue.Queue(maxsize=1)
         self._visual_debug_thread = None
         self._visual_debug_stop = False
-        if visual_debug:
-            opencv_highgui_available()
-            log_visual_debug_startup()
         self.capture_bad_vision_frames = str(general_config.get("capture_bad_vision_frames", "no")).lower() in ("yes", "true", "1")
         self.bad_vision_capture_dir = general_config.get("bad_vision_capture_dir", "debug_frames/vision")
         self.bad_vision_capture_interval = float(general_config.get("bad_vision_capture_interval", 2.0))
@@ -612,7 +570,7 @@ class Play(Movement):
         self.fog_min_pixels_in_radius = 50
         # Run the fog-threat check once every N calls to get_showdown_movement.
         # Between checks the previous decision is reused.
-        self.fog_check_every_n_frames = int(bot_config.get("fog_check_every_n_frames", 3))
+        self.fog_check_every_n_frames = max(1, int(bot_config.get("fog_check_every_n_frames", 1)))
         self._fog_check_counter = 0
         self._fog_threat_cached = None
         self._fog_direction_escape_cached = None
@@ -713,7 +671,6 @@ class Play(Movement):
             "must_brawler_hold_attack": self.must_brawler_hold_attack,
             "get_brawler_range": self.get_brawler_range,
             "get_player_pos": self.get_player_pos,
-            "get_player_foot_circle": self.get_player_foot_circle,
             "get_entity_pos": self.get_entity_pos,
             "is_there_enemy": self.is_there_enemy,
             "is_there_poison_gas": self.is_there_poison_gas,
@@ -981,13 +938,13 @@ class Play(Movement):
 
         Result is cached per-frame (keyed by id(frame) and ROI tuple).
         """
-        if frame is None:
+        if frame is None or not hasattr(frame, "shape"):
             return None
 
         roi_radius = int(max(1, roi_radius))
         cache_key = (id(frame), int(roi_center[0]), int(roi_center[1]), int(roi_radius))
-        if self._fog_mask_cache_frame_id == cache_key:
-            return self._fog_mask_cache_value
+        if getattr(self, "_fog_mask_cache_frame_id", None) == cache_key:
+            return getattr(self, "_fog_mask_cache_value", None)
 
         import numpy as np
         h, w = frame.shape[:2]
@@ -1121,7 +1078,7 @@ class Play(Movement):
         return angle
 
     def _refresh_fog_cache(self, frame, player_position):
-        """Build fog threat + directional escape once per throttled check."""
+        """Build smoke threat state once, then reuse it across movement decisions."""
         if frame is None or player_position is None:
             self._fog_threat_cached = None
             self._fog_direction_escape_cached = None
@@ -1133,6 +1090,44 @@ class Play(Movement):
         locked, dist = self.choose_locked_teammate(player_pos, teammate_data or [], walls)
         return locked is not None and dist <= self.teammate_combat_regroup_distance
 
+    def detect_jump_pad_smoke_escape(self, frame, player_position):
+        """Return a softer fog escape angle for jump-pad decisions only.
+
+        Normal fog fleeing stays tight to avoid jitter. This detects smoke a
+        little earlier, but callers only use it when the bot is alone at the
+        map edge and a reachable jump pad exists.
+        """
+        if frame is None or player_position is None:
+            return None
+        r = int(max(self.jump_pad_smoke_early_distance, self.fog_flee_distance))
+        built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
+        if built is None:
+            return None
+        mask, (ox, oy) = built
+
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return None
+
+        px, py = int(player_position[0]), int(player_position[1])
+        dx_all = (xs + ox) - px
+        dy_all = (ys + oy) - py
+        dist_sq = dx_all * dx_all + dy_all * dy_all
+        inside = dist_sq <= r * r
+        count = int(inside.sum())
+        min_pixels = max(20, int(self.fog_min_pixels_in_radius * 0.45))
+        if count < min_pixels:
+            return None
+
+        cx = float(dx_all[inside].mean())
+        cy = float(dy_all[inside].mean())
+        if math.hypot(cx, cy) < 1:
+            return None
+        toward_fog = self.angle_from_direction(cx, cy)
+        flee = self.angle_opposite(toward_fog)
+        vlog(f"jump pad smoke check: {count}px within {r}px -> flee angle={flee:.1f}°")
+        return flee
+
     def angle_points_into_fog(self, frame, player_position, angle_degrees, lookahead=None):
         """Return True when moving at angle_degrees would drive into nearby fog.
 
@@ -1142,7 +1137,8 @@ class Play(Movement):
         """
         if frame is None or player_position is None or angle_degrees is None:
             return False
-        r = int(max(140, lookahead or self.fog_flee_distance * 1.7))
+        fog_flee_distance = float(getattr(self, "fog_flee_distance", 130))
+        r = int(max(140, lookahead or fog_flee_distance * 1.7))
         built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
         if built is None:
             return False
@@ -1188,9 +1184,12 @@ class Play(Movement):
         band = max(30, int(r * 0.45))
         min_pixels = max(12, int(self.fog_min_pixels_in_radius * 0.45))
         direction = str(direction).lower()
-        _, _, foot_radius = self.get_player_foot_circle(player_data)
-        dist_sq = dx * dx + dy * dy
-        player_area = dist_sq <= (foot_radius * foot_radius)
+        try:
+            player_half_width = max(8, abs(float(player_data[2]) - float(player_data[0])) * 0.55)
+            player_half_height = max(8, abs(float(player_data[3]) - float(player_data[1])) * 0.55)
+        except (TypeError, ValueError, IndexError):
+            player_half_width = player_half_height = max(12, band * 0.35)
+        player_area = (np.abs(dx) <= player_half_width) & (np.abs(dy) <= player_half_height)
         if int(player_area.sum()) >= min_pixels:
             return True
         checks = {
@@ -1437,11 +1436,6 @@ class Play(Movement):
             self.locked_teammate_distance = tracked_distance
         return self.locked_teammate, self.locked_teammate_distance
 
-    def _wall_aware_follow_angle(self, player_pos, angle, walls):
-        if isinstance(angle, float):
-            return self.find_best_angle(player_pos, angle, walls)
-        return angle
-
     def showdown_follow_teammate(self, player_data, teammate_data, walls):
         """Official Pyla follower behavior adapted to angle movement.
 
@@ -1468,11 +1462,7 @@ class Play(Movement):
                 if marker_angle is not None:
                     return self._wall_aware_follow_angle(player_pos, marker_angle, walls)
             vlog("follow teammate: no teammate detected -> roam")
-            return self._wall_aware_follow_angle(
-                player_pos,
-                self.showdown_roam(player_data, walls),
-                walls,
-            )
+            return self._wall_aware_follow_angle(player_pos, self.showdown_roam(player_data, walls), walls)
 
         direction_x = closest_teammate[0] - player_pos[0]
         direction_y = closest_teammate[1] - player_pos[1]
@@ -1508,7 +1498,14 @@ class Play(Movement):
         vlog(f"follow teammate: all paths blocked -> forcing angle={float(angle):.1f}°")
         return self._wall_aware_follow_angle(player_pos, angle, walls)
 
-    def get_showdown_movement(self, player_data, enemy_data, teammate_data, walls, brawler):
+    def _wall_aware_follow_angle(self, player_pos, angle, walls):
+        if isinstance(angle, (int, float)):
+            if not walls:
+                return float(angle) % 360
+            return self.find_best_angle(player_pos, float(angle), walls)
+        return angle
+
+    def get_showdown_movement(self, player_data, enemy_data, teammate_data, walls, brawler, jump_pads=None):
         """Showdown movement using analog joystick angles.
 
         Always returns a float angle in degrees (0–360).
@@ -1531,10 +1528,11 @@ class Play(Movement):
         enemy_distance = None
         follow_teammates = self.showdown_playstyle_mode in ("follow", "follower", "team", "teammate", "teammates")
 
-        # Fog override is applied uniformly at the end so it works for all
-        # movement sources. Respect fog_check_every_n_frames in every mode.
+        # Smoke override is applied uniformly so it beats teammate-follow,
+        # combat strafing, and ordinary roaming. Keep this fast by caching the
+        # screen analysis, but default to checking every frame.
         self._fog_check_counter += 1
-        if self._fog_check_counter >= self.fog_check_every_n_frames:
+        if follow_teammates or self._fog_check_counter >= self.fog_check_every_n_frames:
             self._refresh_fog_cache(self.current_frame, player_pos)
             self._fog_check_counter = 0
         fog_threat_angle = self._fog_threat_cached
@@ -1644,35 +1642,38 @@ class Play(Movement):
                     vlog(f"combat dodge blend -> desired={desired:.1f}°")
 
                 if (follow_teammates and teammate_data and enemy_distance > attack_range):
-                    locked_teammate, teammate_distance = self.choose_locked_teammate(
+                    closest_teammate, teammate_distance = self.choose_locked_teammate(
                         player_pos,
                         teammate_data,
                         walls,
                     )
-                    if locked_teammate is not None and teammate_distance > self.teammate_follow_step_distance:
+                    if closest_teammate is not None and teammate_distance > self.teammate_follow_step_distance:
                         team_angle = self.angle_from_direction(
-                            locked_teammate[0] - player_pos[0],
-                            locked_teammate[1] - player_pos[1],
+                            closest_teammate[0] - player_pos[0],
+                            closest_teammate[1] - player_pos[1],
                         )
                         team_weight = self.teammate_combat_bias
-                        if teammate_distance > self.teammate_combat_regroup_distance:
-                            team_weight = max(team_weight, 0.88)
+                        if self.trio_grouping_enabled and teammate_distance > self.teammate_combat_regroup_distance:
+                            team_weight = max(team_weight, 0.85)
                         desired = self.blend_angles(desired, team_angle, team_weight)
                         vlog(f"combat teammate pull -> desired={desired:.1f}° (team dist={int(teammate_distance)}px, weight={team_weight:.2f})")
 
                 angle = self.find_best_angle(player_pos, desired, walls)
                 vlog(f"showdown: movement angle={angle:.1f}° (desired={desired:.1f}°)")
 
-        path_flee_angle = None
         if (
                 follow_teammates
                 and fog_direction_escape is None
                 and self.angle_points_into_fog(self.current_frame, player_pos, angle)
         ):
-            path_flee_angle = fog_direction_escape or self.angle_opposite(angle)
+            path_flee_angle = self.angle_opposite(angle)
             vlog(f"showdown: follow path points into fog -> fallback escape={path_flee_angle:.1f}°")
+        else:
+            path_flee_angle = None
 
         # --- Fog proximity override ---
+        # If trusted smoke is close, replace movement with a flee angle. Attack
+        # block below still fires independently based on enemy_distance.
         if fog_direction_escape is not None:
             angle = self.find_best_angle(player_pos, fog_direction_escape, walls)
             vlog(f"showdown: fog override -> directional escape angle={angle:.1f}°")
@@ -1688,6 +1689,28 @@ class Play(Movement):
         ):
             angle = self.find_best_angle(player_pos, fog_threat_angle, walls)
             vlog(f"showdown: fog threat override -> angle={angle:.1f}°")
+
+        jump_pad_flee_angle = None
+        if (
+                fog_direction_escape is None
+                and jump_pads
+                and self.jump_pad_detection_enabled
+                and (not self.jump_pad_escape_requires_edge or self.is_player_near_map_edge(player_pos))
+                and not self.has_close_teammate_for_jump_escape(player_pos, teammate_data)
+        ):
+            jump_pad_flee_angle = path_flee_angle or fog_threat_angle or self.detect_jump_pad_smoke_escape(self.current_frame, player_pos)
+
+        if jump_pad_flee_angle is not None:
+            jump_pad_angle = self.find_jump_pad_escape_angle(
+                player_pos,
+                jump_pads or [],
+                walls,
+                jump_pad_flee_angle,
+                teammate_data=teammate_data,
+            )
+            if jump_pad_angle is not None:
+                angle = jump_pad_angle
+                vlog(f"showdown: fog override -> jump pad angle={angle:.1f}°")
 
         # --- Skills (only when an attackable enemy was found) ---
         if enemy_coords is None:
@@ -1806,7 +1829,7 @@ class Play(Movement):
         own_box = scored[0][2]
         rejected = [item[2] for item in scored[1:]]
         if visual_debug and rejected:
-            vdebug(f"own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
+            print(f"[DBG] own player selected: {own_box}; reclassified {len(rejected)} player boxes as enemy")
         return own_box, rejected
 
     def stabilize_entity_roles(self, frame, data):
@@ -1821,19 +1844,12 @@ class Play(Movement):
 
     def get_main_data(self, frame):
         data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
-        player_recently_seen = (
-                time.time() - self.time_since_player_last_found
-        ) < self.entity_retry_grace_seconds
-        if (
-                not data.get("player")
-                and not player_recently_seen
-                and self.entity_detection_retry_confidence < self.entity_detection_confidence
-        ):
+        if not data.get("player") and self.entity_detection_retry_confidence < self.entity_detection_confidence:
             retry_data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_retry_confidence)
             if retry_data.get("player"):
                 if visual_debug:
-                    vdebug(
-                        "player recovered with lower entity threshold "
+                    print(
+                        "[DBG] player recovered with lower entity threshold "
                         f"{self.entity_detection_retry_confidence:.2f}"
                     )
                 data = retry_data
@@ -1910,6 +1926,9 @@ class Play(Movement):
         if 'line_of_sight_wall' not in data.keys() or not data['line_of_sight_wall']:
             data['line_of_sight_wall'] = data['wall']
 
+        if 'jump_pad' not in data.keys() or not data['jump_pad']:
+            data['jump_pad'] = []
+
         if 'map_objects' not in data.keys() or not data['map_objects']:
             data['map_objects'] = {}
 
@@ -1984,8 +2003,12 @@ class Play(Movement):
                 teammate_data=data['teammate'],
                 walls=data['wall'],
                 brawler=brawler,
+                jump_pads=data.get('jump_pad') or [],
             )
-            strict_following = self.showdown_playstyle_mode in ("follow", "follower", "team", "teammate", "teammates")
+            strict_following = (
+                self.showdown_playstyle_mode in ("follow", "follower", "team", "teammate", "teammates")
+                and bool(data.get('teammate'))
+            )
             if strict_following:
                 self.last_movement = movement
                 self.last_movement_time = time.time()
@@ -1999,8 +2022,9 @@ class Play(Movement):
 
         current_time = time.time()
         if isinstance(movement, float):
-            # Analog showdown movement: apply every frame. move_joystick_angle already
-            # skips redundant scrcpy events when the pixel target is unchanged.
+            # Analog showdown movement must update every frame. Throttling it
+            # can leave the bot standing or walking into smoke with a stale
+            # joystick angle.
             escape_angle = self.semicircle_escape_step(current_time)
             if escape_angle is not None:
                 movement = escape_angle
@@ -2149,10 +2173,7 @@ class Play(Movement):
         purple_pixels = count_hsv_pixels(screenshot, (137, 158, 159), (179, 255, 255))
         threshold = self._scaled_pixel_threshold(self.hypercharge_pixels_minimum, screenshot, self.hypercharge_crop_area)
         if debug:
-            log_debug(
-                "combat",
-                f"hypercharge purple pixels: {purple_pixels} (threshold {threshold})",
-            )
+            print("hypercharge purple pixels:", purple_pixels, "(if > ", threshold, " then hypercharge is ready)")
             cv2.imwrite(f"debug_frames/hypercharge_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
         if purple_pixels > threshold:
             return True
@@ -2166,9 +2187,12 @@ class Play(Movement):
         green_pixels = count_hsv_pixels(screenshot, (57, 219, 165), (62, 255, 255))
         threshold = self._scaled_pixel_threshold(self.gadget_pixels_minimum, screenshot, self.gadget_crop_area)
         if debug:
-            log_debug(
-                "combat",
-                f"gadget green pixels: {green_pixels} (threshold {threshold})",
+            print(
+                "gadget green pixels:",
+                green_pixels,
+                "(if > ",
+                threshold,
+                " then gadget is ready)"
             )
             cv2.imwrite(f"debug_frames/gadget_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
         if green_pixels > threshold:
@@ -2184,9 +2208,12 @@ class Play(Movement):
         orange_pixels = count_hsv_pixels(screenshot, (8, 120, 150), (38, 255, 255))
         threshold = self._scaled_pixel_threshold(self.super_pixels_minimum, screenshot, self.super_crop_area) * 2.0
         if debug:
-            log_debug(
-                "combat",
-                f"super pixels yellow={yellow_pixels} orange={orange_pixels} threshold={threshold}",
+            print(
+                "super pixels:",
+                f"yellow={yellow_pixels}",
+                f"orange={orange_pixels}",
+                f"threshold={threshold}",
+                "(if above threshold, super is ready)",
             )
             cv2.imwrite(f"debug_frames/super_debug_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
 
@@ -2196,49 +2223,14 @@ class Play(Movement):
             return True
         return False
 
-    @staticmethod
-    def crop_close_tile_region(frame, player_pos, crop_size=CLOSE_TILE_CROP_SIZE):
-        if frame is None or player_pos is None:
-            return None, 0, 0
-        h, w = frame.shape[:2]
-        if w < crop_size or h < crop_size:
-            return None, 0, 0
-        cx, cy = int(player_pos[0]), int(player_pos[1])
-        half = crop_size // 2
-        x1 = max(0, min(cx - half, w - crop_size))
-        y1 = max(0, min(cy - half, h - crop_size))
-        x2 = x1 + crop_size
-        y2 = y1 + crop_size
-        return frame[y1:y2, x1:x2], x1, y1
-
-    @staticmethod
-    def offset_tile_boxes(tile_data, offset_x, offset_y):
-        if not tile_data:
-            return tile_data
-        offsetted = {}
-        for class_name, boxes in tile_data.items():
-            offsetted[class_name] = [
-                [
-                    int(box[0]) + offset_x,
-                    int(box[1]) + offset_y,
-                    int(box[2]) + offset_x,
-                    int(box[3]) + offset_y,
-                ]
-                for box in (boxes or [])
-            ]
-        return offsetted
-
-    def _detect_tile_data(self, detector, frame, conf_tresh):
-        tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
+    def get_tile_data(self, frame):
+        tile_data = self.Detect_tile_detector.detect_objects(frame, conf_tresh=self.wall_detection_confidence)
         primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
-        previous_primary_count = self.last_wall_primary_count
-        self.last_wall_primary_count = primary_count
         if (
                 primary_count < self.wall_detection_retry_min_objects
-                and previous_primary_count < self.wall_detection_retry_min_objects
-                and self.wall_detection_retry_confidence < conf_tresh
+                and self.wall_detection_retry_confidence < self.wall_detection_confidence
         ):
-            retry_data = detector.detect_objects(
+            retry_data = self.Detect_tile_detector.detect_objects(
                 frame,
                 conf_tresh=self.wall_detection_retry_confidence,
             )
@@ -2252,49 +2244,6 @@ class Play(Movement):
                     )
                 tile_data = retry_data
         return tile_data
-
-    def _set_tile_detection_debug(self, source, crop=None, fallback=None):
-        self.last_tile_detection_debug = {
-            "enabled": bool(self.close_tile_detector_enabled),
-            "source": source,
-            "crop": list(crop) if crop else None,
-            "fallback": fallback,
-        }
-
-    def get_tile_data(self, frame, player_pos=None):
-        if (
-                self.close_tile_detector_enabled
-                and self.Detect_close_tile_detector is not None
-                and player_pos is not None
-        ):
-            crop, crop_x, crop_y = self.crop_close_tile_region(frame, player_pos)
-            if crop is not None:
-                crop_box = [
-                    crop_x,
-                    crop_y,
-                    crop_x + CLOSE_TILE_CROP_SIZE,
-                    crop_y + CLOSE_TILE_CROP_SIZE,
-                ]
-                tile_data = self._detect_tile_data(
-                    self.Detect_close_tile_detector,
-                    crop,
-                    self.wall_detection_confidence,
-                )
-                self._set_tile_detection_debug("close", crop=crop_box)
-                return self.offset_tile_boxes(tile_data, crop_x, crop_y)
-            self._set_tile_detection_debug("full", fallback="crop_failed")
-        elif self.close_tile_detector_enabled:
-            if player_pos is None:
-                self._set_tile_detection_debug("full", fallback="no_player")
-            else:
-                self._set_tile_detection_debug("full", fallback="model_unavailable")
-        else:
-            self._set_tile_detection_debug("full")
-        return self._detect_tile_data(
-            self.Detect_tile_detector,
-            frame,
-            self.wall_detection_confidence,
-        )
 
     @staticmethod
     def normalize_box(box):
@@ -2407,7 +2356,7 @@ class Play(Movement):
 
     @staticmethod
     def nonblocking_map_object_classes():
-        return {"bush", "close_bush", "fog"}
+        return {"bush", "close_bush", "jump_pad", "fog"}
 
     def map_object_boxes_for_classes(self, map_objects, class_names):
         boxes = []
@@ -2434,12 +2383,10 @@ class Play(Movement):
                 objects.setdefault("water", []).extend(water_boxes)
 
         wall_count = len(objects.get("wall") or [])
-        skip_color_fallback = self.last_wall_primary_count >= self.wall_detection_retry_min_objects
         if (
                 self.map_object_vision_enabled
                 and self.map_object_wall_color_detection
                 and wall_count < self.wall_detection_retry_min_objects
-                and not skip_color_fallback
         ):
             color_wall_boxes = self.detect_wall_tiles_by_color(frame)
             if color_wall_boxes:
@@ -2619,6 +2566,115 @@ class Play(Movement):
     def box_center(box):
         return (box[0] + box[2]) * 0.5, (box[1] + box[3]) * 0.5
 
+    def is_player_near_map_edge(self, player_pos):
+        frame = getattr(self, "current_frame", None)
+        if frame is None or player_pos is None:
+            return False
+        h, w = frame.shape[:2]
+        margin = max(0.05, min(0.45, float(self.jump_pad_escape_edge_margin)))
+        edge_x = w * margin
+        edge_y = h * margin
+        x, y = player_pos
+        return x <= edge_x or x >= w - edge_x or y <= edge_y or y >= h - edge_y
+
+    def has_close_teammate_for_jump_escape(self, player_pos, teammate_data):
+        if player_pos is None:
+            return True
+        for teammate in teammate_data or []:
+            teammate_pos = self.get_enemy_pos(teammate)
+            if self.get_distance(teammate_pos, player_pos) <= self.jump_pad_escape_teammate_safe_distance:
+                return True
+        return False
+
+    def detect_jump_pads(self, frame):
+        """Detect jump pads from their yellow arrow inside a dark gray tile.
+
+        The wall model does not include jump pads, so this uses strict color and
+        shape anchors from the game art. It returns pad boxes in frame coords.
+        """
+        if not self.jump_pad_detection_enabled or frame is None:
+            return []
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        yellow = cv2.inRange(
+            hsv,
+            np.array((18, 90, 120), dtype=np.uint8),
+            np.array((38, 255, 255), dtype=np.uint8),
+        )
+        yellow = cv2.morphologyEx(
+            yellow,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+        )
+        contours, _ = cv2.findContours(yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = frame.shape[:2]
+        scale = max(0.4, min(1.2, w / brawl_stars_width))
+        min_area = max(80, int(450 * scale * scale))
+        max_area = max(min_area + 1, int(9000 * scale * scale))
+        pads = []
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area or area > max_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            if bw < 12 * scale or bh < 12 * scale:
+                continue
+            if bw > 160 * scale or bh > 160 * scale:
+                continue
+
+            pad_size = int(max(bw, bh) * 2.4)
+            cx, cy = x + bw * 0.5, y + bh * 0.5
+            rx1 = max(0, int(cx - pad_size * 0.5))
+            ry1 = max(0, int(cy - pad_size * 0.5))
+            rx2 = min(w, int(cx + pad_size * 0.5))
+            ry2 = min(h, int(cy + pad_size * 0.5))
+            roi = hsv[ry1:ry2, rx1:rx2]
+            if roi.size == 0:
+                continue
+
+            yellow_ratio = self._count_mask_pixels(roi, (18, 90, 120), (38, 255, 255)) / max(1, roi.shape[0] * roi.shape[1])
+            gray_ratio = self._count_mask_pixels(roi, (0, 0, 40), (179, 95, 190)) / max(1, roi.shape[0] * roi.shape[1])
+            dark_ratio = self._count_mask_pixels(roi, (0, 0, 0), (179, 255, 95)) / max(1, roi.shape[0] * roi.shape[1])
+            if not (0.035 <= yellow_ratio <= 0.42 and gray_ratio > 0.16 and dark_ratio > 0.10):
+                continue
+
+            pads.append([rx1, ry1, rx2, ry2])
+
+        return self.merge_wall_boxes(pads)
+
+    def find_jump_pad_escape_angle(self, player_pos, jump_pads, walls, fog_flee_angle=None, teammate_data=None):
+        if not jump_pads or player_pos is None:
+            return None
+        if self.jump_pad_escape_requires_edge and not self.is_player_near_map_edge(player_pos):
+            vlog("jump pad escape skipped: player is not near map edge")
+            return None
+        if self.has_close_teammate_for_jump_escape(player_pos, teammate_data):
+            vlog("jump pad escape skipped: teammate is close")
+            return None
+
+        candidates = []
+        for pad in jump_pads:
+            pad_pos = self.box_center(self.normalize_box(pad))
+            distance = self.get_distance(pad_pos, player_pos)
+            if distance < self.jump_pad_escape_min_distance or distance > self.jump_pad_escape_distance:
+                continue
+            angle = self.angle_from_direction(pad_pos[0] - player_pos[0], pad_pos[1] - player_pos[1])
+            if self.is_path_blocked_angle(player_pos, angle, walls, distance=max(40, min(distance, self.TILE_SIZE * 2))):
+                continue
+            fog_alignment = 0.0
+            if fog_flee_angle is not None:
+                fog_alignment = abs((angle - fog_flee_angle + 180) % 360 - 180)
+            candidates.append((fog_alignment, distance, angle, pad_pos))
+
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        _, distance, angle, pad_pos = candidates[0]
+        vlog(f"jump pad escape -> angle={angle:.1f}° dist={int(distance)}px pad={tuple(map(int, pad_pos))}")
+        return angle
+
     def combine_walls_from_history(self):
         if not self.wall_history:
             return []
@@ -2642,15 +2698,13 @@ class Play(Movement):
 
         safe_range, attack_range, super_range = self.get_brawler_range(brawler)
         player_pos = self.get_player_pos(player_data)
-        if debug:
-            vdebug(f"found player pos: {player_pos}")
+        if debug: print("found player pos:", player_pos)
         if not self.is_there_enemy(enemy_data):
             return self.no_enemy_movement(player_data, walls)
         enemy_coords, enemy_distance = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
         if enemy_coords is None:
             return self.no_enemy_movement(player_data, walls)
-        if debug:
-            vdebug(f"found enemy pos: {enemy_coords}")
+        if debug: print("found enemy pos:", enemy_coords)
         direction_x = enemy_coords[0] - player_pos[0]
         direction_y = enemy_coords[1] - player_pos[1]
 
@@ -2665,7 +2719,7 @@ class Play(Movement):
         movement_options = [move_horizontal + move_vertical]
         if self.game_mode == 3:
             movement_options += [move_vertical, move_horizontal]
-        elif self.game_mode in (4, 5):
+        elif self.game_mode == 5:
             movement_options += [move_horizontal, move_vertical]
         else:
             raise ValueError("Gamemode type is invalid")
@@ -2739,34 +2793,34 @@ class Play(Movement):
         data = raw_data
         if self.should_detect_walls and current_time - self.time_since_walls_checked > self.walls_treshold:
 
-            player_pos = None
-            if raw_data.get("player"):
-                player_pos = self.get_player_pos(raw_data["player"][0])
-            tile_data = self.get_tile_data(frame, player_pos)
+            tile_data = self.get_tile_data(frame)
 
             walls, map_objects = self.process_tile_data(tile_data, frame)
             line_of_sight_walls = self.map_object_boxes_for_classes(
                 map_objects,
                 self.line_of_sight_map_object_classes(),
             )
+            jump_pads = self.detect_jump_pads(frame)
+            if jump_pads:
+                map_objects.setdefault("jump_pad", []).extend(jump_pads)
+                map_objects["jump_pad"] = self.merge_wall_boxes(map_objects["jump_pad"])
 
             self.time_since_walls_checked = current_time
             self.last_walls_data = walls
+            self.last_jump_pad_data = jump_pads
             self.last_map_object_data = map_objects
             data['wall'] = walls
             data['line_of_sight_wall'] = line_of_sight_walls
+            data['jump_pad'] = jump_pads
             data['map_objects'] = map_objects
-            if visual_debug and self.last_tile_detection_debug:
-                data['close_tile_debug'] = dict(self.last_tile_detection_debug)
         elif self.keep_walls_in_memory:
             data['wall'] = self.last_walls_data
             data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
                 self.last_map_object_data,
                 self.line_of_sight_map_object_classes(),
             )
+            data['jump_pad'] = self.last_jump_pad_data
             data['map_objects'] = self.last_map_object_data
-            if visual_debug and self.last_tile_detection_debug:
-                data['close_tile_debug'] = dict(self.last_tile_detection_debug)
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)
@@ -2803,8 +2857,6 @@ class Play(Movement):
                         self.window_controller.press_key("Q")
                         self.time_since_last_no_detection_q = current_time
                     self.time_since_last_proceeding = time.time()
-            if visual_debug:
-                self.queue_visual_debug(frame, {"status": "No detections"}, brawler)
             return
         self.time_since_last_proceeding = time.time()
         self.refresh_ready_abilities(frame, current_time)
@@ -2815,8 +2867,6 @@ class Play(Movement):
         movement = self.loop(brawler, data, current_time)
 
         if visual_debug:
-            if self.advanced_visuals and data:
-                data["advanced_visuals"] = self.build_advanced_visual_context(data, movement, brawler)
             self.queue_visual_debug(frame, data, brawler)
 
         # if data:
@@ -2829,215 +2879,6 @@ class Play(Movement):
         #         'movement': movement,
         #     })
 
-    def _movement_to_angle(self, movement):
-        if isinstance(movement, (int, float)):
-            return float(movement) % 360
-        if not isinstance(movement, str) or not movement.strip():
-            return None
-        move = movement.lower()
-        dx = dy = 0
-        if "d" in move:
-            dx += 1
-        if "a" in move:
-            dx -= 1
-        if "s" in move:
-            dy += 1
-        if "w" in move:
-            dy -= 1
-        if dx == 0 and dy == 0:
-            return None
-        return self.angle_from_direction(dx, dy)
-
-    def build_advanced_visual_context(self, data, movement, brawler=None):
-        if not data or not data.get("player"):
-            return {}
-
-        player_pos = self.get_player_pos(data["player"][0])
-        walls = data.get("wall") or []
-        line_of_sight_walls = data.get("line_of_sight_wall") or walls
-
-        direction_samples = []
-        for angle in range(0, 360, 15):
-            direction_samples.append({
-                "angle": float(angle),
-                "blocked": self.is_path_blocked_angle(player_pos, angle, walls),
-            })
-
-        follow_target = None
-        teammate_data = data.get("teammate") or []
-        if teammate_data:
-            closest_teammate, _distance = self.choose_locked_teammate(player_pos, teammate_data, walls)
-            if closest_teammate is not None:
-                follow_target = [int(closest_teammate[0]), int(closest_teammate[1])]
-
-        hittable_enemies = []
-        for enemy in data.get("enemy") or []:
-            enemy_pos = self.get_enemy_pos(enemy)
-            if self.is_enemy_hittable(player_pos, enemy_pos, line_of_sight_walls, "attack"):
-                hittable_enemies.append([int(enemy_pos[0]), int(enemy_pos[1])])
-
-        attack_target = None
-        blocked_attack_target = None
-        enemy_coords, _enemy_distance = self.find_closest_enemy(
-            data.get("enemy") or [],
-            player_pos,
-            line_of_sight_walls,
-            "attack",
-        )
-        if enemy_coords is not None:
-            target = [int(enemy_coords[0]), int(enemy_coords[1])]
-            if self.is_enemy_hittable(player_pos, enemy_coords, line_of_sight_walls, "attack"):
-                attack_target = target
-            else:
-                blocked_attack_target = target
-
-        joystick_x = getattr(self.window_controller, "joystick_x", None)
-        joystick_y = getattr(self.window_controller, "joystick_y", None)
-        if joystick_x is None or joystick_y is None:
-            joystick_x = 220 * getattr(self.window_controller, "width_ratio", 1.0)
-            joystick_y = 870 * getattr(self.window_controller, "height_ratio", 1.0)
-
-        context = {
-            "player_pos": [int(player_pos[0]), int(player_pos[1])],
-            "joystick_center": [int(joystick_x), int(joystick_y)],
-            "direction_samples": direction_samples,
-            "movement_angle": self._movement_to_angle(movement),
-            "follow_target": follow_target,
-            "hittable_enemies": hittable_enemies,
-            "attack_target": attack_target,
-            "blocked_attack_target": blocked_attack_target,
-        }
-        self._last_advanced_visual_context = context
-        return context
-
-    @staticmethod
-    def _draw_dashed_line(img, start, end, color, thickness=2, dash_length=10, gap_length=8):
-        x1, y1 = start
-        x2, y2 = end
-        length = math.hypot(x2 - x1, y2 - y1)
-        if length < 1:
-            return
-        dx = (x2 - x1) / length
-        dy = (y2 - y1) / length
-        traveled = 0.0
-        draw = True
-        while traveled < length:
-            segment = dash_length if draw else gap_length
-            segment = min(segment, length - traveled)
-            sx = int(x1 + dx * traveled)
-            sy = int(y1 + dy * traveled)
-            ex = int(x1 + dx * (traveled + segment))
-            ey = int(y1 + dy * (traveled + segment))
-            if draw:
-                cv2.line(img, (sx, sy), (ex, ey), color, thickness, cv2.LINE_AA)
-            traveled += segment
-            draw = not draw
-
-    def _draw_player_foot_circle_debug(self, img, box, sp, s):
-        foot_x, foot_y, foot_r = self.get_player_foot_circle(box)
-        center = sp((foot_x, foot_y))
-        radius = max(3, s(int(round(foot_r))))
-        green = (0, 255, 0)
-        overlay = img.copy()
-        cv2.circle(overlay, center, radius, green, -1, cv2.LINE_AA)
-        cv2.addWeighted(overlay, 0.24, img, 0.76, 0, img)
-        cv2.circle(img, center, radius, green, max(2, s(2)), cv2.LINE_AA)
-        cv2.circle(img, center, max(2, s(2)), (255, 255, 255), -1, cv2.LINE_AA)
-
-    def _draw_advanced_visuals(self, img, data, scale, sp, s):
-        context = data.get("advanced_visuals") or {}
-        if not context:
-            return
-
-        inner_radius = s(35)
-        outer_radius = s(70)
-        joystick_center = context.get("joystick_center") or [220, 870]
-        center = sp((joystick_center[0], joystick_center[1]))
-
-        for sample in context.get("direction_samples") or []:
-            angle_rad = math.radians(sample["angle"])
-            color = (255, 60, 60) if sample.get("blocked") else (60, 255, 100)
-            start = (
-                int(center[0] + math.cos(angle_rad) * inner_radius),
-                int(center[1] + math.sin(angle_rad) * inner_radius),
-            )
-            end = (
-                int(center[0] + math.cos(angle_rad) * outer_radius),
-                int(center[1] + math.sin(angle_rad) * outer_radius),
-            )
-            cv2.line(img, start, end, color, max(1, s(3)), cv2.LINE_AA)
-
-        movement_angle = context.get("movement_angle")
-        if movement_angle is not None:
-            angle_rad = math.radians(movement_angle)
-            arrow_end = (
-                int(center[0] + math.cos(angle_rad) * s(85)),
-                int(center[1] + math.sin(angle_rad) * s(85)),
-            )
-            cv2.arrowedLine(
-                img,
-                center,
-                arrow_end,
-                (255, 255, 120),
-                max(2, s(3)),
-                tipLength=0.25,
-                line_type=cv2.LINE_AA,
-            )
-
-        cv2.circle(img, center, outer_radius, (220, 220, 220), 1, cv2.LINE_AA)
-
-        player_pos = context.get("player_pos")
-        if not player_pos:
-            return
-        player_point = sp((player_pos[0], player_pos[1]))
-
-        follow_target = context.get("follow_target")
-        if follow_target:
-            follow_point = sp((follow_target[0], follow_target[1]))
-            self._draw_dashed_line(img, player_point, follow_point, (80, 220, 255), max(1, s(2)))
-            cv2.putText(
-                img,
-                "follow",
-                (follow_point[0] + s(6), follow_point[1] - s(6)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.35, 0.5 * scale),
-                (80, 220, 255),
-                1,
-                cv2.LINE_AA,
-            )
-
-        attack_target = context.get("attack_target")
-        for enemy_pos in context.get("hittable_enemies") or []:
-            enemy_point = sp((enemy_pos[0], enemy_pos[1]))
-            cv2.line(img, player_point, enemy_point, (255, 140, 40), max(1, s(2)), cv2.LINE_AA)
-            if attack_target and enemy_pos == attack_target:
-                cv2.putText(
-                    img,
-                    "hit",
-                    (enemy_point[0] + s(6), enemy_point[1] - s(6)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    max(0.35, 0.5 * scale),
-                    (255, 140, 40),
-                    1,
-                    cv2.LINE_AA,
-                )
-
-        blocked_attack_target = context.get("blocked_attack_target")
-        if blocked_attack_target and blocked_attack_target != attack_target:
-            blocked_point = sp((blocked_attack_target[0], blocked_attack_target[1]))
-            cv2.line(img, player_point, blocked_point, (140, 140, 140), 1, cv2.LINE_AA)
-
-        cv2.putText(
-            img,
-            "red=wall green=clear",
-            (s(8), img.shape[0] - s(10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            max(0.32, 0.45 * scale),
-            (255, 255, 255),
-            1,
-            cv2.LINE_AA,
-        )
-
     def _copy_visual_debug_data(self, data):
         copied = {}
         for key, value in (data or {}).items():
@@ -3047,43 +2888,13 @@ class Play(Movement):
                     for item in value
                 ]
             elif isinstance(value, dict):
-                if key == "close_tile_debug":
-                    copied[key] = dict(value)
-                elif key == "advanced_visuals":
-                    copied[key] = {
-                        "player_pos": list(value.get("player_pos") or []),
-                        "joystick_center": list(value.get("joystick_center") or []),
-                        "direction_samples": [
-                            {
-                                "angle": float(sample.get("angle", 0.0)),
-                                "blocked": bool(sample.get("blocked")),
-                            }
-                            for sample in value.get("direction_samples") or []
-                        ],
-                        "movement_angle": value.get("movement_angle"),
-                        "follow_target": (
-                            list(value["follow_target"]) if value.get("follow_target") else None
-                        ),
-                        "hittable_enemies": [
-                            list(item) for item in value.get("hittable_enemies") or []
-                        ],
-                        "attack_target": (
-                            list(value["attack_target"]) if value.get("attack_target") else None
-                        ),
-                        "blocked_attack_target": (
-                            list(value["blocked_attack_target"])
-                            if value.get("blocked_attack_target")
-                            else None
-                        ),
-                    }
-                else:
-                    copied[key] = {
-                        sub_key: [
-                            list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
-                            for item in (sub_value or [])
-                        ]
-                        for sub_key, sub_value in value.items()
-                    }
+                copied[key] = {
+                    sub_key: [
+                        list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
+                        for item in (sub_value or [])
+                    ]
+                    for sub_key, sub_value in value.items()
+                }
             else:
                 copied[key] = value
         return copied
@@ -3098,26 +2909,6 @@ class Play(Movement):
             daemon=True,
         )
         self._visual_debug_thread.start()
-
-    def _enqueue_visual_debug_display(self, img):
-        while True:
-            try:
-                self._visual_debug_display_queue.get_nowait()
-            except queue.Empty:
-                break
-        try:
-            self._visual_debug_display_queue.put_nowait(img)
-        except queue.Full:
-            pass
-
-    def pump_visual_debug_display(self):
-        if not visual_debug:
-            return
-        try:
-            img = self._visual_debug_display_queue.get_nowait()
-        except queue.Empty:
-            return
-        show_visual_debug_frame(img)
 
     def queue_visual_debug(self, frame, data, brawler=None):
         now = time.time()
@@ -3163,19 +2954,6 @@ class Play(Movement):
             img = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         else:
             img = frame.copy() if isinstance(frame, np.ndarray) else np.array(frame)
-
-        status = data.get("status")
-        if status:
-            cv2.putText(
-                img,
-                status,
-                (8, max(24, img.shape[0] - 12)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.5, 0.7 * scale),
-                (255, 255, 0),
-                2,
-                cv2.LINE_AA,
-            )
 
         def s(value):
             return int(value * scale)
@@ -3235,6 +3013,7 @@ class Play(Movement):
             "water": (0, 190, 255),
             "bush": (0, 180, 60),
             "close_bush": (80, 255, 100),
+            "jump_pad": (255, 220, 0),
             "crate": (210, 130, 30),
             "barrel": (210, 110, 50),
             "fence": (210, 210, 210),
@@ -3256,12 +3035,7 @@ class Play(Movement):
                 if boxes_drawn >= self.visual_debug_max_boxes:
                     break
                 x1, y1, x2, y2 = map(int, box)
-                if key == "player":
-                    overlay = img.copy()
-                    cv2.rectangle(overlay, sp((x1, y1)), sp((x2, y2)), color, max(1, s(1)))
-                    cv2.addWeighted(overlay, 0.25, img, 0.75, 0, img)
-                else:
-                    cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
                 if key != "wall":
                     cv2.putText(img, key, sp((x1, max(y1 - 6, 0))),
                                 cv2.FONT_HERSHEY_SIMPLEX, max(0.35, 0.5 * scale), color, 1)
@@ -3310,40 +3084,6 @@ class Play(Movement):
                     label_drawn = True
                 boxes_drawn += 1
 
-        close_tile_debug = data.get("close_tile_debug")
-        if close_tile_debug:
-            crop = close_tile_debug.get("crop")
-            if crop and len(crop) >= 4:
-                x1, y1, x2, y2 = map(int, crop[:4])
-                cv2.rectangle(
-                    img,
-                    sp((x1, y1)),
-                    sp((x2, y2)),
-                    (0, 220, 255),
-                    max(2, s(2)),
-                )
-            source = close_tile_debug.get("source", "full")
-            fallback = close_tile_debug.get("fallback")
-            if source == "close":
-                label = "Tile: close 640x640"
-                label_color = (0, 220, 255)
-            elif fallback:
-                label = f"Tile: full ({fallback.replace('_', ' ')})"
-                label_color = (255, 200, 80)
-            else:
-                label = "Tile: full"
-                label_color = (200, 200, 200)
-            cv2.putText(
-                img,
-                label,
-                (s(8), s(36)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.35, 0.5 * scale),
-                label_color,
-                max(1, s(1)),
-                cv2.LINE_AA,
-            )
-
         # Draw attack/super ranges around the player based on brawlers_info.json.
         if brawler and data.get("player"):
             info = self.brawlers_info.get(brawler)
@@ -3357,43 +3097,8 @@ class Play(Movement):
                 if super_range > 0:
                     cv2.circle(img, center, super_range, (255, 255, 0), 2)  # yellow
 
-        if self.advanced_visuals and data.get("advanced_visuals"):
-            self._draw_advanced_visuals(img, data, scale, sp, s)
-
-        try:
-            from runtime_metrics import metrics_path_for_pid, read_metrics
-            import os
-
-            metrics = read_metrics(metrics_path_for_pid(os.getppid()))
-            if metrics is None:
-                metrics = read_metrics(metrics_path_for_pid(os.getpid()))
-            if metrics:
-                session = metrics.get("session") or {}
-                hud_lines = [
-                    f"State: {session.get('state') or '--'}",
-                    f"IPS {metrics.get('ips', 0):.1f} · Feed {metrics.get('feed_fps', 0):.1f}",
-                    session.get("notice") or "Running",
-                ]
-                y = 18
-                for line in hud_lines:
-                    cv2.putText(
-                        img,
-                        line,
-                        (8, y),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        max(0.4, 0.55 * scale),
-                        (255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-                    y += int(18 * max(scale, 0.5))
-        except Exception:
-            pass
-
-        for box in data.get("player") or []:
-            self._draw_player_foot_circle_debug(img, box, sp, s)
-
-        self._enqueue_visual_debug_display(img)
+        cv2.imshow("PylaAi-XXZ Visual Debug", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.waitKey(1)
 
     @staticmethod
     def movement_to_direction(movement):
