@@ -32,6 +32,7 @@ CATEGORY_LABELS = {
     "queue": "Queue",
     "recovery": "Recovery",
     "perf": "Perf",
+    "api": "API",
 }
 
 QUIET_INFO_CATEGORIES = frozenset({"match", "queue", "state", "recovery"})

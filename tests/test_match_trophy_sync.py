@@ -100,7 +100,7 @@ class MatchTrophySyncTests(unittest.TestCase):
     @patch("stage_manager.save_brawler_data")
     @patch.object(StageManager, "_fetch_api_trophies_with_retry")
     @patch("stage_manager.load_brawl_stars_api_config")
-    def test_sync_keeps_higher_local_estimate_for_active_brawler(
+    def test_sync_trusts_api_over_inflated_ocr_for_active_brawler(
             self,
             mock_api_config,
             mock_fetch_trophies,
@@ -118,8 +118,65 @@ class MatchTrophySyncTests(unittest.TestCase):
         result = manager.sync_trophies_from_api_after_match("shelly")
 
         self.assertTrue(result["updated"])
-        self.assertEqual(manager.Trophy_observer.current_trophies, 120)
-        self.assertEqual(manager.brawlers_pick_data[0]["trophies"], 120)
+        self.assertEqual(manager.Trophy_observer.current_trophies, 112)
+        self.assertEqual(manager.brawlers_pick_data[0]["trophies"], 112)
+
+    @patch("stage_manager.save_brawler_data")
+    @patch.object(StageManager, "_fetch_api_trophies_with_retry")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_sync_prevents_false_target_when_ocr_above_api(
+            self,
+            mock_api_config,
+            mock_fetch_trophies,
+            mock_save,
+    ):
+        manager = self.make_manager(998)
+        manager.brawlers_pick_data[0]["push_until"] = 1000
+        manager.brawlers_pick_data[0]["trophies"] = 1002
+        manager.Trophy_observer.current_trophies = 1002
+        manager.last_match_trophy_after = 1002
+        manager.last_match_trophy_delta = 4
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "sync_trophies_after_match": True,
+        }
+        mock_fetch_trophies.return_value = {"shelly": 998, "colt": 50}
+
+        manager.sync_trophies_from_api_after_match("shelly")
+        value, target, _ = manager._match_row_progress("shelly")
+
+        self.assertEqual(manager.brawlers_pick_data[0]["trophies"], 998)
+        self.assertEqual(manager.Trophy_observer.current_trophies, 998)
+        self.assertFalse(manager._front_target_reached())
+        self.assertLess(value, target)
+
+    @patch("stage_manager.save_brawler_data")
+    @patch.object(StageManager, "_fetch_api_trophies_with_retry")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_sync_logs_ocr_correction_to_terminal(
+            self,
+            mock_api_config,
+            mock_fetch_trophies,
+            _mock_save,
+    ):
+        manager = self.make_manager(1002)
+        manager.brawlers_pick_data[0]["push_until"] = 1000
+        manager.Trophy_observer.current_trophies = 1002
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "sync_trophies_after_match": True,
+        }
+        mock_fetch_trophies.return_value = {"shelly": 998, "colt": 50}
+
+        with redirect_stdout(io.StringIO()) as output:
+            manager.sync_trophies_from_api_after_match("shelly")
+
+        text = output.getvalue()
+        self.assertIn("[API] Post-match sync for shelly: OCR 1002, target 1000", text)
+        self.assertIn("[API]   shelly: 1002 -> 998 (OCR was 1002)", text)
+        self.assertIn("[API] Post-match sync complete: 1 brawler(s) updated", text)
 
     @patch.object(StageManager, "_fetch_api_trophies_with_retry")
     @patch("stage_manager.load_brawl_stars_api_config")
@@ -136,7 +193,7 @@ class MatchTrophySyncTests(unittest.TestCase):
 
         self.assertFalse(result["attempted"])
         self.assertFalse(manager.last_match_api_sync_ok)
-        self.assertIn("[TrophySync] skipped: sync_trophies_after_match is disabled", output.getvalue())
+        self.assertIn("[API] Post-match sync skipped: sync_trophies_after_match is disabled", output.getvalue())
         mock_fetch_trophies.assert_not_called()
 
     @patch.object(StageManager, "_fetch_api_trophies_with_retry")
@@ -173,7 +230,7 @@ class MatchTrophySyncTests(unittest.TestCase):
         self.assertFalse(result["updated"])
         self.assertEqual(result["reason"], "unchanged")
         self.assertTrue(manager.last_match_api_sync_ok)
-        self.assertIn("[TrophySync] complete: API matches local queue", output.getvalue())
+        self.assertIn("[API] Post-match sync complete: queue already matches API", output.getvalue())
 
 
 if __name__ == "__main__":

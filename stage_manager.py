@@ -633,8 +633,8 @@ class StageManager:
             type_of_push = "trophies"
         if type_of_push == "trophies":
             value = self._number_or_default(
-                getattr(self.Trophy_observer, "current_trophies", row.get("trophies", 0)),
-                row.get("trophies", 0),
+                row.get("trophies", getattr(self.Trophy_observer, "current_trophies", 0)),
+                getattr(self.Trophy_observer, "current_trophies", 0),
             )
             default_target = 1000
         else:
@@ -655,8 +655,8 @@ class StageManager:
             type_of_push = "trophies"
         if type_of_push == "trophies":
             value = self._number_or_default(
-                getattr(self.Trophy_observer, "current_trophies", row.get("trophies", 0)),
-                row.get("trophies", 0),
+                row.get("trophies", getattr(self.Trophy_observer, "current_trophies", 0)),
+                getattr(self.Trophy_observer, "current_trophies", 0),
             )
             default_target = 1000
         else:
@@ -758,32 +758,40 @@ class StageManager:
         return True
 
     @staticmethod
-    def _log_trophy_sync(message):
-        log_debug("match", message)
+    def _log_api_info(message):
+        log_info("api", message)
+
+    @staticmethod
+    def _log_api_warn(message):
+        log_warn("api", message)
+
+    @staticmethod
+    def _log_api_debug(message):
+        log_debug("api", message)
 
     def _match_trophy_api_sync_enabled(self, log_skips=True):
         if not self.brawlers_pick_data:
             if log_skips:
-                self._log_trophy_sync("skipped: no brawler queue loaded")
+                self._log_api_info("Post-match sync skipped: no brawler queue loaded")
             return False
         if self.brawlers_pick_data[0].get("type", "trophies") != "trophies":
             if log_skips:
-                self._log_trophy_sync("skipped: wins push mode does not sync API trophies")
+                self._log_api_info("Post-match sync skipped: wins push mode does not use API trophies")
             return False
         try:
             api_config = load_brawl_stars_api_config("cfg/brawl_stars_api.toml")
         except Exception as exc:
             if log_skips:
-                self._log_trophy_sync(f"skipped: could not load API config ({exc})")
+                self._log_api_warn(f"Post-match sync skipped: could not load API config ({exc})")
             return False
         if not _config_bool(api_config.get("sync_trophies_after_match"), True):
             if log_skips:
-                self._log_trophy_sync("skipped: sync_trophies_after_match is disabled")
+                self._log_api_info("Post-match sync skipped: sync_trophies_after_match is disabled")
             return False
         tag = str(api_config.get("player_tag", "")).strip().upper()
         if not tag or tag == "#YOURTAG":
             if log_skips:
-                self._log_trophy_sync("skipped: player_tag is missing or still #YOURTAG")
+                self._log_api_warn("Post-match sync skipped: player_tag is missing or still #YOURTAG")
             return False
         token = _extract_api_token(api_config.get("api_token", ""))
         if token:
@@ -795,7 +803,9 @@ class StageManager:
         ):
             return True
         if log_skips:
-            self._log_trophy_sync("skipped: no API token and auto-refresh credentials are incomplete")
+            self._log_api_warn(
+                "Post-match sync skipped: no API token and auto-refresh credentials are incomplete"
+            )
         return False
 
     def _fetch_api_trophies_map(self, force_token_refresh=False):
@@ -811,8 +821,15 @@ class StageManager:
         except RuntimeError as e:
             if "accessDenied" not in str(e):
                 raise
-            print("Post-match API token was rejected; refreshing token for current public IP and retrying.")
+            self._log_api_warn("Token rejected; refreshing for current public IP and retrying...")
             return self._fetch_api_trophies_map(force_token_refresh=True)
+
+    def _active_push_target(self):
+        if not self.brawlers_pick_data:
+            return 1000
+        row = self.brawlers_pick_data[0]
+        default_target = 1000 if row.get("type", "trophies") == "trophies" else 300
+        return self._number_or_default(row.get("push_until", default_target), default_target)
 
     def sync_trophies_from_api_after_match(self, current_brawler):
         result = {"attempted": False, "updated": False, "reason": "disabled"}
@@ -825,46 +842,50 @@ class StageManager:
             getattr(self.Trophy_observer, "current_trophies", 0),
             0,
         )
+        push_target = self._active_push_target()
         result["attempted"] = True
-        self._log_trophy_sync(
-            f"attempting sync for {current_brawler} (local={local_trophies})"
+        self._log_api_info(
+            f"Post-match sync for {current_brawler}: OCR {local_trophies}, target {push_target}"
         )
         try:
             trophies_by_brawler = self._fetch_api_trophies_with_retry()
         except Exception as e:
             result["reason"] = f"api_error: {e}"
             self.last_match_api_sync_ok = False
-            self._log_trophy_sync(f"failed: keeping local trophies ({e})")
+            self._log_api_warn(f"Post-match sync failed; keeping local trophies ({e})")
             return result
-
-        self._log_trophy_sync(f"API fetch ok ({len(trophies_by_brawler)} brawlers)")
 
         current_key = normalize_brawler_name(current_brawler)
         changed = False
+        updates = []
         for idx, row in enumerate(self.brawlers_pick_data):
             if row.get("type", "trophies") != "trophies":
                 continue
             key = normalize_brawler_name(row.get("brawler", ""))
+            brawler_name = row.get("brawler", key)
             if key not in trophies_by_brawler:
-                self._log_trophy_sync(f"{row.get('brawler')}: not found in API response")
+                self._log_api_warn(f"  {brawler_name}: not found in API response")
                 continue
             before = self._number_or_default(row.get("trophies", 0), 0)
             api_trophies = trophies_by_brawler[key]
-            if key == current_key:
-                api_trophies = max(api_trophies, local_trophies)
             if before != api_trophies:
                 self.brawlers_pick_data[idx]["trophies"] = api_trophies
                 changed = True
-                self._log_trophy_sync(
-                    f"{row.get('brawler')}: {before} -> {api_trophies}"
-                )
+                detail = f"{brawler_name}: {before} -> {api_trophies}"
+                if key == current_key and local_trophies != api_trophies:
+                    detail += f" (OCR was {local_trophies})"
+                updates.append(detail)
+                self._log_api_info(f"  {detail}")
             else:
-                self._log_trophy_sync(f"{row.get('brawler')}: unchanged at {before}")
+                self._log_api_debug(f"  {brawler_name}: unchanged at {before}")
 
         if not changed:
             result["reason"] = "unchanged"
             self.last_match_api_sync_ok = True
-            self._log_trophy_sync("complete: API matches local queue")
+            self._log_api_info(
+                f"Post-match sync complete: queue already matches API "
+                f"({current_brawler} {local_trophies}/{push_target})"
+            )
             return result
 
         front_trophies = self._number_or_default(self.brawlers_pick_data[0].get("trophies", 0), 0)
@@ -879,8 +900,9 @@ class StageManager:
         result["updated"] = True
         result["reason"] = "updated"
         self.last_match_api_sync_ok = True
-        self._log_trophy_sync(
-            f"updated {current_brawler}; observer now {front_trophies} trophies"
+        self._log_api_info(
+            f"Post-match sync complete: {len(updates)} brawler(s) updated, "
+            f"active {current_brawler} now {front_trophies}/{push_target}"
         )
         return result
 
@@ -896,10 +918,11 @@ class StageManager:
             return False
 
         old_front_brawler = self.brawlers_pick_data[0].get("brawler")
+        self._log_api_info(f"Push All refresh starting ({len(self.brawlers_pick_data)} queued brawlers)...")
         try:
             trophies_by_brawler = self._fetch_api_trophies_with_retry()
         except Exception as e:
-            print(f"Push All API trophy refresh failed; using local trophies. {e}")
+            self._log_api_warn(f"Push All refresh failed; using local trophies ({e})")
             return False
         default_target = self._number_or_default(self.brawlers_pick_data[0].get("push_until", 1000), 1000)
         changed = False
@@ -916,8 +939,12 @@ class StageManager:
                     )
                     api_trophies = max(api_trophies, local_trophies)
                 if refreshed_row.get("trophies") != api_trophies:
+                    before = self._number_or_default(refreshed_row.get("trophies", 0), 0)
                     refreshed_row["trophies"] = api_trophies
                     changed = True
+                    self._log_api_info(
+                        f"  {refreshed_row.get('brawler')}: {before} -> {api_trophies}"
+                    )
             row_target = self._number_or_default(refreshed_row.get("push_until", default_target), default_target)
             row_trophies = self._number_or_default(refreshed_row.get("trophies", 0), 0)
             is_front = refreshed_row.get("brawler") == old_front_brawler
@@ -974,7 +1001,7 @@ class StageManager:
         if not refreshed_rows:
             self.brawlers_pick_data = []
             save_brawler_data(self.brawlers_pick_data)
-            print("Push All API trophies refreshed: all brawlers reached target.")
+            self._log_api_info("Push All refresh complete: all brawlers reached target.")
             return True
 
         if len(refreshed_rows) != len(self.brawlers_pick_data):
@@ -1011,24 +1038,46 @@ class StageManager:
                 changed = True
 
         if changed:
+            front = self.brawlers_pick_data[0]
+            front_name = front.get("brawler", "")
+            front_trophies = self._number_or_default(front.get("trophies", 0), 0)
+            front_target = self._number_or_default(front.get("push_until", 1000), 1000)
             if self.push_all_needs_selection:
-                print("Push All API trophies refreshed; current brawler reached target, selecting next lowest.")
+                self._log_api_info(
+                    f"Push All refresh complete: {old_front_brawler} reached target; "
+                    f"switching to {front_name} ({front_trophies}/{front_target})"
+                )
             else:
-                print("Push All API trophies refreshed; keeping current brawler until target.")
+                self._log_api_info(
+                    f"Push All refresh complete: keeping {front_name} "
+                    f"({front_trophies}/{front_target})"
+                )
             save_brawler_data(self.brawlers_pick_data)
+        else:
+            self._log_api_debug("Push All refresh complete: no queue changes.")
         return changed
 
     @staticmethod
     def fetch_push_all_player_data(force_token_refresh=False):
+        if force_token_refresh:
+            StageManager._log_api_info("Refreshing API token, then fetching player profile...")
+        started = time.time()
         api_config = load_brawl_stars_api_config(
             "cfg/brawl_stars_api.toml",
             force_refresh=force_token_refresh,
         )
-        return fetch_brawl_stars_player(
+        player_tag = str(api_config.get("player_tag", "")).strip().upper()
+        data = fetch_brawl_stars_player(
             api_config.get("api_token", "").strip(),
             api_config.get("player_tag", "").strip(),
             int(api_config.get("timeout_seconds", 15)),
         )
+        elapsed = time.time() - started
+        brawler_count = len(data.get("brawlers", []))
+        StageManager._log_api_info(
+            f"Fetched {player_tag} ({brawler_count} brawlers, {elapsed:.1f}s)"
+        )
+        return data
 
     @classmethod
     def fetch_push_all_player_data_with_retry(cls):
@@ -1037,7 +1086,7 @@ class StageManager:
         except RuntimeError as e:
             if "accessDenied" not in str(e):
                 raise
-            print("Brawl Stars API token was rejected; refreshing token for current public IP and retrying.")
+            cls._log_api_warn("Token rejected; refreshing for current public IP and retrying...")
             return cls.fetch_push_all_player_data(force_token_refresh=True)
 
     def start_game(self):
@@ -1070,7 +1119,7 @@ class StageManager:
                     self.window_controller.keys_up(list("wasd"))
                     return
             elif self.push_all_needs_selection:
-                print("Push All queue changed from API; staging reselection for lobby.")
+                self._log_api_info("Push All queue changed from API; staging reselection for lobby.")
                 self.stage_queue_update(
                     [dict(row) for row in self.brawlers_pick_data],
                     reason="push_all",
@@ -1286,8 +1335,8 @@ class StageManager:
             log_debug("match", f"Re-entry on '{current_state}', skipping trophy update")
             if self.last_match_api_sync_ok is False and self.brawlers_pick_data:
                 current_brawler = self.brawlers_pick_data[0].get("brawler")
-                self._log_trophy_sync(
-                    f"retrying failed sync on end-screen re-entry for {current_brawler}"
+                self._log_api_info(
+                    f"Retrying failed post-match sync on end-screen re-entry for {current_brawler}"
                 )
                 sync_result = self.sync_trophies_from_api_after_match(current_brawler)
                 if sync_result.get("updated"):
