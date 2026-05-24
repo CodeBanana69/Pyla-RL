@@ -154,6 +154,7 @@ Performance troubleshooting :
 
 Wall model improvement :
 - The active wall/bush model is `models/tileDetector.onnx`.
+- Optional: enable `close_tile_detector_enabled = "yes"` in `cfg/bot_config.toml` (or the Hub **Close Tile Detector** toggle) to use `models/closeTileDetector.onnx` on a player-centered 640x640 crop with no downscale. When disabled or when the player is not detected, the bot uses the legacy full-screen `tileDetector.onnx` pipeline.
 - Capture wall-model frames:
   `python tools/capture_wall_samples.py --seconds 300 --start-match`
 - Build the wall YOLO dataset:

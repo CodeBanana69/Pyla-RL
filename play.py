@@ -19,6 +19,8 @@ from visual_debug_window import (
 )
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
+CLOSE_TILE_CROP_SIZE = 640
+CLOSE_TILE_MODEL_PATH = "models/closeTileDetector.onnx"
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 visual_debug = load_toml_as_dict("cfg/general_config.toml").get('visual_debug', 'no') == "yes"
 
@@ -473,6 +475,22 @@ class Play(Movement):
             tile_detector_model,
             classes=self.tile_detector_model_classes
         )
+        self.close_tile_detector_enabled = str(
+            bot_config.get("close_tile_detector_enabled", "no")
+        ).lower() in ("yes", "true", "1")
+        self.Detect_close_tile_detector = None
+        if self.close_tile_detector_enabled:
+            if os.path.exists(CLOSE_TILE_MODEL_PATH):
+                self.Detect_close_tile_detector = Detect(
+                    CLOSE_TILE_MODEL_PATH,
+                    classes=self.tile_detector_model_classes,
+                )
+            else:
+                print(
+                    f"WARNING: {CLOSE_TILE_MODEL_PATH} not found; "
+                    "close tile detector disabled."
+                )
+                self.close_tile_detector_enabled = False
 
         self.time_since_movement = time.time()
         self.time_since_gadget_checked = time.time()
@@ -482,6 +500,7 @@ class Play(Movement):
         self.time_since_movement_change = time.time()
         self.time_since_player_last_found = time.time()
         self.last_wall_primary_count = 0
+        self.last_tile_detection_debug = None
         self.entity_retry_grace_seconds = 0.4
         self.current_brawler = None
         self.is_hypercharge_ready = False
@@ -523,8 +542,9 @@ class Play(Movement):
         self.wall_history = []
         self.wall_history_length = int(bot_config.get("wall_history_length", 3))
         self.scene_data = []
-        self.should_detect_walls = bot_config["gamemode"] == "showdown"
-        self.is_showdown = bot_config["gamemode"] == "showdown"
+        gamemode = str(bot_config.get("gamemode", "showdown")).strip().lower()
+        self.should_detect_walls = gamemode in ("showdown", "brawlball")
+        self.is_showdown = gamemode == "showdown"
         self.minimum_movement_delay = bot_config["minimum_movement_delay"]
         self.no_detection_proceed_delay = time_config["no_detection_proceed"]
         self.no_detection_q_press_interval = float(time_config.get("no_detection_q_press_interval", 15.0))
@@ -2176,17 +2196,49 @@ class Play(Movement):
             return True
         return False
 
-    def get_tile_data(self, frame):
-        tile_data = self.Detect_tile_detector.detect_objects(frame, conf_tresh=self.wall_detection_confidence)
+    @staticmethod
+    def crop_close_tile_region(frame, player_pos, crop_size=CLOSE_TILE_CROP_SIZE):
+        if frame is None or player_pos is None:
+            return None, 0, 0
+        h, w = frame.shape[:2]
+        if w < crop_size or h < crop_size:
+            return None, 0, 0
+        cx, cy = int(player_pos[0]), int(player_pos[1])
+        half = crop_size // 2
+        x1 = max(0, min(cx - half, w - crop_size))
+        y1 = max(0, min(cy - half, h - crop_size))
+        x2 = x1 + crop_size
+        y2 = y1 + crop_size
+        return frame[y1:y2, x1:x2], x1, y1
+
+    @staticmethod
+    def offset_tile_boxes(tile_data, offset_x, offset_y):
+        if not tile_data:
+            return tile_data
+        offsetted = {}
+        for class_name, boxes in tile_data.items():
+            offsetted[class_name] = [
+                [
+                    int(box[0]) + offset_x,
+                    int(box[1]) + offset_y,
+                    int(box[2]) + offset_x,
+                    int(box[3]) + offset_y,
+                ]
+                for box in (boxes or [])
+            ]
+        return offsetted
+
+    def _detect_tile_data(self, detector, frame, conf_tresh):
+        tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
         primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
         previous_primary_count = self.last_wall_primary_count
         self.last_wall_primary_count = primary_count
         if (
                 primary_count < self.wall_detection_retry_min_objects
                 and previous_primary_count < self.wall_detection_retry_min_objects
-                and self.wall_detection_retry_confidence < self.wall_detection_confidence
+                and self.wall_detection_retry_confidence < conf_tresh
         ):
-            retry_data = self.Detect_tile_detector.detect_objects(
+            retry_data = detector.detect_objects(
                 frame,
                 conf_tresh=self.wall_detection_retry_confidence,
             )
@@ -2200,6 +2252,49 @@ class Play(Movement):
                     )
                 tile_data = retry_data
         return tile_data
+
+    def _set_tile_detection_debug(self, source, crop=None, fallback=None):
+        self.last_tile_detection_debug = {
+            "enabled": bool(self.close_tile_detector_enabled),
+            "source": source,
+            "crop": list(crop) if crop else None,
+            "fallback": fallback,
+        }
+
+    def get_tile_data(self, frame, player_pos=None):
+        if (
+                self.close_tile_detector_enabled
+                and self.Detect_close_tile_detector is not None
+                and player_pos is not None
+        ):
+            crop, crop_x, crop_y = self.crop_close_tile_region(frame, player_pos)
+            if crop is not None:
+                crop_box = [
+                    crop_x,
+                    crop_y,
+                    crop_x + CLOSE_TILE_CROP_SIZE,
+                    crop_y + CLOSE_TILE_CROP_SIZE,
+                ]
+                tile_data = self._detect_tile_data(
+                    self.Detect_close_tile_detector,
+                    crop,
+                    self.wall_detection_confidence,
+                )
+                self._set_tile_detection_debug("close", crop=crop_box)
+                return self.offset_tile_boxes(tile_data, crop_x, crop_y)
+            self._set_tile_detection_debug("full", fallback="crop_failed")
+        elif self.close_tile_detector_enabled:
+            if player_pos is None:
+                self._set_tile_detection_debug("full", fallback="no_player")
+            else:
+                self._set_tile_detection_debug("full", fallback="model_unavailable")
+        else:
+            self._set_tile_detection_debug("full")
+        return self._detect_tile_data(
+            self.Detect_tile_detector,
+            frame,
+            self.wall_detection_confidence,
+        )
 
     @staticmethod
     def normalize_box(box):
@@ -2570,7 +2665,7 @@ class Play(Movement):
         movement_options = [move_horizontal + move_vertical]
         if self.game_mode == 3:
             movement_options += [move_vertical, move_horizontal]
-        elif self.game_mode == 5:
+        elif self.game_mode in (4, 5):
             movement_options += [move_horizontal, move_vertical]
         else:
             raise ValueError("Gamemode type is invalid")
@@ -2644,7 +2739,10 @@ class Play(Movement):
         data = raw_data
         if self.should_detect_walls and current_time - self.time_since_walls_checked > self.walls_treshold:
 
-            tile_data = self.get_tile_data(frame)
+            player_pos = None
+            if raw_data.get("player"):
+                player_pos = self.get_player_pos(raw_data["player"][0])
+            tile_data = self.get_tile_data(frame, player_pos)
 
             walls, map_objects = self.process_tile_data(tile_data, frame)
             line_of_sight_walls = self.map_object_boxes_for_classes(
@@ -2658,6 +2756,8 @@ class Play(Movement):
             data['wall'] = walls
             data['line_of_sight_wall'] = line_of_sight_walls
             data['map_objects'] = map_objects
+            if visual_debug and self.last_tile_detection_debug:
+                data['close_tile_debug'] = dict(self.last_tile_detection_debug)
         elif self.keep_walls_in_memory:
             data['wall'] = self.last_walls_data
             data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
@@ -2665,6 +2765,8 @@ class Play(Movement):
                 self.line_of_sight_map_object_classes(),
             )
             data['map_objects'] = self.last_map_object_data
+            if visual_debug and self.last_tile_detection_debug:
+                data['close_tile_debug'] = dict(self.last_tile_detection_debug)
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)
@@ -2945,7 +3047,9 @@ class Play(Movement):
                     for item in value
                 ]
             elif isinstance(value, dict):
-                if key == "advanced_visuals":
+                if key == "close_tile_debug":
+                    copied[key] = dict(value)
+                elif key == "advanced_visuals":
                     copied[key] = {
                         "player_pos": list(value.get("player_pos") or []),
                         "joystick_center": list(value.get("joystick_center") or []),
@@ -3205,6 +3309,40 @@ class Play(Movement):
                                 cv2.FONT_HERSHEY_SIMPLEX, max(0.3, 0.42 * scale), color, 1)
                     label_drawn = True
                 boxes_drawn += 1
+
+        close_tile_debug = data.get("close_tile_debug")
+        if close_tile_debug:
+            crop = close_tile_debug.get("crop")
+            if crop and len(crop) >= 4:
+                x1, y1, x2, y2 = map(int, crop[:4])
+                cv2.rectangle(
+                    img,
+                    sp((x1, y1)),
+                    sp((x2, y2)),
+                    (0, 220, 255),
+                    max(2, s(2)),
+                )
+            source = close_tile_debug.get("source", "full")
+            fallback = close_tile_debug.get("fallback")
+            if source == "close":
+                label = "Tile: close 640x640"
+                label_color = (0, 220, 255)
+            elif fallback:
+                label = f"Tile: full ({fallback.replace('_', ' ')})"
+                label_color = (255, 200, 80)
+            else:
+                label = "Tile: full"
+                label_color = (200, 200, 200)
+            cv2.putText(
+                img,
+                label,
+                (s(8), s(36)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.35, 0.5 * scale),
+                label_color,
+                max(1, s(1)),
+                cv2.LINE_AA,
+            )
 
         # Draw attack/super ranges around the player based on brawlers_info.json.
         if brawler and data.get("player"):

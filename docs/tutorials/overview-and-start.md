@@ -17,7 +17,7 @@ On the **Overview** tab:
 
 ## Game mode
 
-**Showdown Trio** is the primary tuned mode in this fork. Brawl Ball is shown as locked in the Hub.
+**Showdown Trio** is the primary tuned mode in this fork. **Brawl Ball** is also available in the Hub and uses `playstyles/default.pyla`.
 
 ## Performance profile
 

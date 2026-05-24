@@ -55,6 +55,7 @@ class HubStateStore:
     SETTINGS_FIELDS = {
         "minimum_movement_delay": ("bot", "float"),
         "wall_detection_confidence": ("bot", "float"),
+        "close_tile_detector_enabled": ("bot", "yesno"),
         "entity_detection_confidence": ("bot", "float"),
         "unstuck_movement_delay": ("bot", "float"),
         "unstuck_movement_hold_time": ("bot", "float"),
@@ -205,6 +206,7 @@ class HubStateStore:
         self.bot_config.setdefault("gamemode", "showdown")
         self.bot_config.setdefault("minimum_movement_delay", 0.4)
         self.bot_config.setdefault("wall_detection_confidence", 0.9)
+        self.bot_config.setdefault("close_tile_detector_enabled", "no")
         self.bot_config.setdefault("entity_detection_confidence", 0.6)
         self.bot_config.setdefault("unstuck_movement_delay", 3.0)
         self.bot_config.setdefault("unstuck_movement_hold_time", 1.5)
@@ -310,8 +312,14 @@ class HubStateStore:
     def initial_state(self):
         gamemode = str(self.bot_config.get("gamemode", "showdown")).strip().lower()
         emulator = str(self.general_config.get("current_emulator", "LDPlayer")).strip().lower()
+        if gamemode == "showdown":
+            mode = "showdown-trio"
+        elif gamemode == "brawlball":
+            mode = "brawl-ball"
+        else:
+            mode = gamemode
         return {
-            "mode": "showdown-trio" if gamemode == "showdown" else gamemode,
+            "mode": mode,
             "emulator": "mumu" if emulator == "mumu" else "ldplayer",
         }
 
@@ -583,6 +591,7 @@ class HubStateStore:
         mode = patch.get("mode")
         mode_map = {
             "showdown-trio": (3, "showdown"),
+            "brawl-ball": (4, "brawlball"),
             "other-3": (3, "other"),
             "basketbrawl": (5, "basketbrawl"),
         }
@@ -590,6 +599,8 @@ class HubStateStore:
             gamemode_type, gamemode = mode_map[mode]
             self.bot_config["gamemode_type"] = gamemode_type
             self.bot_config["gamemode"] = gamemode
+            if mode == "brawl-ball":
+                self.bot_config["current_playstyle"] = "default.pyla"
             changed_bot = True
 
         emulator = patch.get("emulator")

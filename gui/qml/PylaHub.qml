@@ -2309,7 +2309,12 @@ ApplicationWindow {
                             columns: 2
                             columnSpacing: 12
                             rowSpacing: 12
-                            OptionCard { Layout.fillWidth: true; label: "Brawl Ball"; locked: true }
+                            OptionCard {
+                                Layout.fillWidth: true
+                                label: "Brawl Ball"
+                                selected: root.mode === "brawl-ball"
+                                onClicked: hubBridge.updateSetting("mode", "brawl-ball")
+                            }
                             OptionCard {
                                 Layout.fillWidth: true
                                 label: "Showdown Trio"
@@ -2481,6 +2486,11 @@ ApplicationWindow {
 
                     FormPanel {
                         title: "DETECTION"
+                        FieldRow {
+                            label: "Close Tile Detector"
+                            hint: "Player-centered 640x640 crop via models/closeTileDetector.onnx."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "close_tile_detector_enabled"); onToggled: function(value) { root.saveValue("settings", "close_tile_detector_enabled", value) } } }
+                        }
                         FieldRow {
                             label: "Wall Confidence"
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "wall_detection_confidence")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "wall_detection_confidence", value) } }

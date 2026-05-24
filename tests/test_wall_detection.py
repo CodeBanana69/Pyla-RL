@@ -20,6 +20,9 @@ class TestWallDetectionPostprocess(unittest.TestCase):
         play.map_object_water_detection = False
         play.map_object_min_area = 200
         play.wall_detection_retry_min_objects = 3
+        play.last_wall_primary_count = 0
+        play.close_tile_detector_enabled = False
+        play.Detect_close_tile_detector = None
         play.TILE_SIZE = 60
         return play
 

@@ -92,6 +92,17 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertEqual(toml.load(paths["general"])["current_emulator"], "LDPlayer")
         self.assertEqual(toml.load(paths["general"])["emulator_port"], 5555)
 
+    def test_qml_brawl_ball_mode_sets_playstyle(self):
+        store, paths = self.make_store()
+
+        store.apply_state({"mode": "brawl-ball"})
+
+        bot = toml.load(paths["bot"])
+        self.assertEqual(bot["gamemode_type"], 4)
+        self.assertEqual(bot["gamemode"], "brawlball")
+        self.assertEqual(bot["current_playstyle"], "default.pyla")
+        self.assertEqual(store.initial_state()["mode"], "brawl-ball")
+
     def test_qml_state_exposes_old_menu_configs(self):
         store, _ = self.make_store(
             bot_config={"wall_detection_confidence": 0.7},

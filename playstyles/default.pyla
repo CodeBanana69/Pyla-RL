@@ -74,7 +74,7 @@ else:
         movement_options = [move_horizontal + move_vertical]
         if game_mode == 3:
             movement_options += [move_vertical, move_horizontal]
-        elif game_mode == 5:
+        elif game_mode in (4, 5):
             movement_options += [move_horizontal, move_vertical]
         else:
             raise ValueError("Gamemode type is invalid")

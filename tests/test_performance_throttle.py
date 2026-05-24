@@ -20,6 +20,7 @@ class PerformanceThrottleTests(unittest.TestCase):
 
     def test_wall_tick_skips_retry_when_previous_primary_count_was_healthy(self):
         play = object.__new__(Play)
+        play.close_tile_detector_enabled = False
         play.wall_detection_confidence = 0.9
         play.wall_detection_retry_confidence = 0.2
         play.wall_detection_retry_min_objects = 3
