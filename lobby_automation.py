@@ -372,14 +372,14 @@ class LobbyAutomation:
         return normalized
 
     def _is_confident_grid_name_match(self, detected_name, target_name):
+        if not detected_name or not target_name:
+            return False
         if detected_name == target_name:
             return True
-        if len(target_name) <= 3:
-            if detected_name not in self.known_brawler_names:
-                return False
-            if detected_name == target_name:
-                return True
-            return self.bounded_edit_distance(detected_name, target_name, 1) <= 1
+        max_len = max(len(detected_name), len(target_name))
+        if max_len <= 5:
+            limit = 1
+            return self.bounded_edit_distance(detected_name, target_name, limit) <= limit
         return self.names_match(detected_name, target_name)
 
     @staticmethod
@@ -403,13 +403,34 @@ class LobbyAutomation:
         full_h, full_w = screenshot_full.shape[:2]
         matches = []
         for entry in entries:
-            detected_name = self._normalize_grid_label(entry["text"])
+            raw_text = str(entry.get("text", "")).strip()
+            if not raw_text:
+                continue
+            detected_name = self._normalize_grid_label(raw_text)
+            if not detected_name:
+                continue
             if not self._is_confident_grid_name_match(detected_name, target_key):
                 continue
             if not self._is_probable_grid_label(entry["box"], full_h, full_w):
                 continue
             score = self.name_match_score(detected_name, target_key) + min(entry["confidence"], 0.99) * 0.05
             matches.append((score, detected_name, entry["box"], entry["text"]))
+
+        if not matches and len(target_key) <= 5:
+            for entry in entries:
+                raw_text = str(entry.get("text", "")).strip()
+                if not raw_text:
+                    continue
+                detected_name = self._normalize_grid_label(raw_text)
+                if not detected_name:
+                    continue
+                if self.bounded_edit_distance(detected_name, target_key, 1) > 1:
+                    continue
+                if not self._is_probable_grid_label(entry["box"], full_h, full_w):
+                    continue
+                score = self.name_match_score(detected_name, target_key) + min(entry["confidence"], 0.99) * 0.05
+                matches.append((score, detected_name, entry["box"], entry["text"]))
+
         matches.sort(key=lambda item: (-item[0], item[2]["center"][1], item[2]["center"][0]))
         return matches
 
@@ -605,9 +626,11 @@ class LobbyAutomation:
         except (TypeError, ValueError):
             ocr_scale = 0.65
         ocr_scale = max(0.35, min(1.0, ocr_scale))
-        grid_ocr_scale = max(ocr_scale, 0.75)
         target_key = self.normalize_ocr_name(brawler)
         target_key = self.resolve_ocr_typos(target_key)
+        grid_ocr_scale = max(ocr_scale, 0.75)
+        if len(target_key) <= 5:
+            grid_ocr_scale = max(grid_ocr_scale, 0.95)
         if sort_applied:
             max_scrolls = min(max_scrolls, int(self._timing("sorted_max_scrolls", 40)))
 
@@ -850,9 +873,18 @@ class LobbyAutomation:
 
     @classmethod
     def names_match(cls, detected_name: str, target_name: str) -> bool:
+        detected_name = str(detected_name or "").strip()
+        target_name = str(target_name or "").strip()
+        if not detected_name or not target_name:
+            return False
         if detected_name == target_name:
             return True
-        if len(target_name) >= 4 and (target_name in detected_name or detected_name in target_name):
+        min_sub_len = max(3, len(target_name) - 1)
+        if (
+            len(target_name) >= 4
+            and len(detected_name) >= min_sub_len
+            and (target_name in detected_name or detected_name in target_name)
+        ):
             return True
         limit = 1 if len(target_name) <= 5 else 2
         if cls.bounded_edit_distance(detected_name, target_name, limit) <= limit:

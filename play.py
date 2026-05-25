@@ -2910,6 +2910,15 @@ class Play(Movement):
         )
         self._visual_debug_thread.start()
 
+    def pump_visual_debug_display(self):
+        """Pump OpenCV UI events on the main thread (worker thread renders frames)."""
+        if not visual_debug:
+            return
+        try:
+            cv2.waitKey(1)
+        except Exception:
+            pass
+
     def queue_visual_debug(self, frame, data, brawler=None):
         now = time.time()
         frame_delay = 1.0 / self.visual_debug_max_fps
