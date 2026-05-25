@@ -113,6 +113,27 @@ class BrawlerQueueTests(unittest.TestCase):
             [row["brawler"] for row in sort_queue(rows, mode="cups_asc")],
             ["shelly", "colt", "nita"],
         )
+        cups_desc = sort_queue(
+            [
+                {"brawler": "shelly", "push_until": 1000, "trophies": 100, "selection_method": "lowest_trophies"},
+                {"brawler": "colt", "push_until": 1000, "trophies": 900, "selection_method": "lowest_trophies"},
+            ],
+            mode="cups_desc",
+        )
+        self.assertEqual([row["brawler"] for row in cups_desc], ["colt", "shelly"])
+        self.assertEqual(cups_desc[0]["selection_method"], "highest_trophies")
+        self.assertEqual(cups_desc[0]["queue_sort_mode"], "cups_desc")
+        gap_asc = sort_queue(
+            [
+                {"brawler": "shelly", "push_until": 1000, "trophies": 100, "selection_method": "lowest_trophies"},
+                {"brawler": "colt", "push_until": 1500, "trophies": 900, "selection_method": "lowest_trophies"},
+                {"brawler": "nita", "push_until": 1000, "trophies": 950, "selection_method": "lowest_trophies"},
+            ],
+            mode="gap_asc",
+        )
+        self.assertEqual([row["brawler"] for row in gap_asc], ["nita", "colt", "shelly"])
+        self.assertEqual(gap_asc[0]["selection_method"], "named_brawler")
+        self.assertEqual(gap_asc[0]["queue_sort_mode"], "gap_asc")
         self.assertEqual(
             [row["brawler"] for row in sort_queue(rows, mode="gap_asc")],
             ["nita", "colt", "shelly"],

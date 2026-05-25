@@ -1,3 +1,4 @@
+import os
 import os.path
 import sys
 
@@ -86,6 +87,7 @@ class StageManager:
         self.end_screen_dismiss_delay = float(time_thresholds.get("end_screen_dismiss_delay", 0.35))
         self.window_controller = window_controller
         self.states = {
+            'starr_nova_hub': self.handle_starr_nova_hub_screen,
             'shop': self.quit_shop,
             'brawler_selection': self.quit_shop,
             'popup': self.close_pop_up,
@@ -440,6 +442,54 @@ class StageManager:
         self.Trophy_observer.current_wins = self._number_or_default(current.get("wins", 0), 0)
         self.Trophy_observer.win_streak = self._number_or_default(current.get("win_streak", 0), 0)
 
+    def _trophy_progress_value(self, row):
+        row_trophies = self._number_or_default(row.get("trophies", 0), 0)
+        observer_trophies = self._number_or_default(
+            getattr(self.Trophy_observer, "current_trophies", row_trophies),
+            row_trophies,
+        )
+        if getattr(self, "last_match_api_sync_ok", False):
+            return self._number_or_default(row_trophies, observer_trophies)
+        return self._number_or_default(observer_trophies, row_trophies)
+
+    def _is_push_all_trophy_queue(self):
+        if not self.brawlers_pick_data:
+            return False
+        if self.brawlers_pick_data[0].get("type", "trophies") != "trophies":
+            return False
+        from gui.brawler_queue import get_queue_sort_mode
+
+        if get_queue_sort_mode(self.brawlers_pick_data):
+            return True
+        return any(
+            row.get("selection_method") in ("lowest_trophies", "highest_trophies")
+            for row in self.brawlers_pick_data
+        )
+
+    def _sort_push_all_rows(self, rows, type_of_push="trophies"):
+        from gui.brawler_queue import get_queue_sort_mode, sort_push_all_rows
+
+        sort_mode = get_queue_sort_mode(rows) or get_queue_sort_mode(self.brawlers_pick_data)
+        if sort_mode:
+            sorted_rows = sort_push_all_rows(rows, mode=sort_mode)
+            rows[:] = sorted_rows
+            return rows
+        highest_first = False
+        if len(rows) >= 2:
+            trophies = [
+                self._number_or_default(row.get(type_of_push, 0), 0)
+                for row in rows
+            ]
+            highest_first = trophies[0] > trophies[-1]
+        rows.sort(
+            key=lambda row: (
+                self._number_or_default(row.get(type_of_push, 0), 0),
+                str(row.get("brawler", "")).lower(),
+            ),
+            reverse=highest_first,
+        )
+        return rows
+
     def _build_next_queue_rows(self, target, type_of_push="trophies"):
         if not self.brawlers_pick_data:
             return []
@@ -472,18 +522,11 @@ class StageManager:
             return []
 
         if any(
-            row.get("selection_method") in ("lowest_trophies", "highest_trophies")
+            row.get("selection_method") in ("lowest_trophies", "highest_trophies", "named_brawler")
+            or row.get("queue_sort_mode")
             for row in remaining
         ):
-            remaining.sort(
-                key=lambda row: (
-                    self._number_or_default(row.get(type_of_push, 0), 0),
-                    str(row.get("brawler", "")).lower(),
-                )
-            )
-            for row in remaining:
-                row["selection_method"] = "lowest_trophies"
-                row["automatically_pick"] = True
+            self._sort_push_all_rows(remaining, type_of_push)
 
         return remaining
 
@@ -632,10 +675,7 @@ class StageManager:
         if type_of_push not in ("trophies", "wins"):
             type_of_push = "trophies"
         if type_of_push == "trophies":
-            value = self._number_or_default(
-                row.get("trophies", getattr(self.Trophy_observer, "current_trophies", 0)),
-                getattr(self.Trophy_observer, "current_trophies", 0),
-            )
+            value = self._trophy_progress_value(row)
             default_target = 1000
         else:
             value = self._number_or_default(
@@ -654,10 +694,7 @@ class StageManager:
         if type_of_push not in ("trophies", "wins"):
             type_of_push = "trophies"
         if type_of_push == "trophies":
-            value = self._number_or_default(
-                row.get("trophies", getattr(self.Trophy_observer, "current_trophies", 0)),
-                getattr(self.Trophy_observer, "current_trophies", 0),
-            )
+            value = self._trophy_progress_value(row)
             default_target = 1000
         else:
             value = self._number_or_default(
@@ -907,18 +944,18 @@ class StageManager:
         return result
 
     def refresh_push_all_trophies_from_api(self):
-        if not self.brawlers_pick_data:
-            return False
-        if self.brawlers_pick_data[0].get("type", "trophies") != "trophies":
-            return False
-        if not any(
-            row.get("selection_method") in ("lowest_trophies", "highest_trophies")
-            for row in self.brawlers_pick_data
-        ):
+        if not self._is_push_all_trophy_queue():
             return False
 
+        from gui.brawler_queue import QUEUE_SORT_MODES, get_queue_sort_mode
+
         old_front_brawler = self.brawlers_pick_data[0].get("brawler")
-        self._log_api_info(f"Push All refresh starting ({len(self.brawlers_pick_data)} queued brawlers)...")
+        old_order = [row.get("brawler") for row in self.brawlers_pick_data]
+        sort_mode = get_queue_sort_mode(self.brawlers_pick_data)
+        direction = QUEUE_SORT_MODES.get(sort_mode, "custom order")
+        self._log_api_info(
+            f"Push All refresh starting ({len(self.brawlers_pick_data)} brawlers, {direction})..."
+        )
         try:
             trophies_by_brawler = self._fetch_api_trophies_with_retry()
         except Exception as e:
@@ -937,7 +974,13 @@ class StageManager:
                         getattr(self.Trophy_observer, "current_trophies", refreshed_row.get("trophies", 0)),
                         refreshed_row.get("trophies", 0),
                     )
+                    row_target = self._number_or_default(
+                        refreshed_row.get("push_until", default_target),
+                        default_target,
+                    )
                     api_trophies = max(api_trophies, local_trophies)
+                    if api_trophies >= row_target and local_trophies < row_target:
+                        api_trophies = local_trophies
                 if refreshed_row.get("trophies") != api_trophies:
                     before = self._number_or_default(refreshed_row.get("trophies", 0), 0)
                     refreshed_row["trophies"] = api_trophies
@@ -968,21 +1011,11 @@ class StageManager:
         ]
 
         if current_row is not None:
-            remaining_rows.sort(
-                key=lambda row: (
-                    self._number_or_default(row.get("trophies", 0), 0),
-                    str(row.get("brawler", "")).lower(),
-                )
-            )
+            self._sort_push_all_rows(remaining_rows)
             refreshed_rows = [current_row] + remaining_rows
             self.push_all_needs_selection = False
         else:
-            remaining_rows.sort(
-                key=lambda row: (
-                    self._number_or_default(row.get("trophies", 0), 0),
-                    str(row.get("brawler", "")).lower(),
-                )
-            )
+            self._sort_push_all_rows(remaining_rows)
             refreshed_rows = remaining_rows
             self.push_all_needs_selection = bool(refreshed_rows)
 
@@ -990,10 +1023,7 @@ class StageManager:
             for row in refreshed_rows:
                 if row.get("automatically_pick") is not True:
                     changed = True
-                row["automatically_pick"] = True
-                row["selection_method"] = "lowest_trophies"
 
-        old_order = [row.get("brawler") for row in self.brawlers_pick_data]
         new_order = [row.get("brawler") for row in refreshed_rows]
         if new_order != old_order:
             changed = True
@@ -1008,6 +1038,12 @@ class StageManager:
             changed = True
 
         self.brawlers_pick_data = refreshed_rows
+
+        from gui.brawler_queue import apply_push_all_sort_metadata, resolve_queue_sort_mode
+
+        resolved_sort_mode = resolve_queue_sort_mode(self.brawlers_pick_data)
+        if resolved_sort_mode:
+            apply_push_all_sort_metadata(self.brawlers_pick_data, resolved_sort_mode)
 
         new_front_brawler = self.brawlers_pick_data[0].get("brawler")
         if new_front_brawler != old_front_brawler:
@@ -1486,12 +1522,21 @@ class StageManager:
 
         log_info("match", f"Game has ended ({current_state})")
 
+    def handle_starr_nova_hub_screen(self):
+        if hasattr(self, "Lobby_automation"):
+            if self.Lobby_automation._dismiss_starr_nova_hub_if_present(max_attempts=4):
+                return
+        self.quit_shop()
+
     def quit_shop(self):
         now = time.time()
         last_escape = getattr(self, "_last_shop_escape_at", 0.0)
         if now - last_escape < 1.0:
             return
         self._last_shop_escape_at = now
+        if hasattr(self.window_controller, "press_escape") and self.window_controller.press_escape():
+            time.sleep(0.35)
+            return
         if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
             time.sleep(0.35)
             return

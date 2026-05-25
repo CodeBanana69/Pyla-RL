@@ -12,6 +12,17 @@ from utils import (
 QUEUE_PATH = Path("latest_brawler_data.json")
 PUSH_ORDER_PATH = Path("cfg/push_order.json")
 
+QUEUE_SORT_MODES = {
+    "cups_desc": "Cups high to low",
+    "cups_asc": "Cups low to high",
+    "gap_asc": "Closest to target",
+    "gap_desc": "Furthest from target",
+    "target_desc": "Target high to low",
+    "target_asc": "Target low to high",
+    "name_asc": "Name A to Z",
+    "name_desc": "Name Z to A",
+}
+
 
 def _active_queue_path(path=None):
     if path is not None:
@@ -37,6 +48,9 @@ def normalize_queue_row(row):
     normalized["automatically_pick"] = True
     normalized["selection_method"] = str(normalized.get("selection_method", "named_brawler") or "named_brawler")
     normalized["win_streak"] = int(normalized.get("win_streak", 0) or 0)
+    sort_mode = str(normalized.get("queue_sort_mode", "") or "").strip()
+    if sort_mode in QUEUE_SORT_MODES:
+        normalized["queue_sort_mode"] = sort_mode
     return normalized
 
 
@@ -115,18 +129,6 @@ def queue_item_icon_uri(brawler):
     return brawler_icon_uri(brawler)
 
 
-QUEUE_SORT_MODES = {
-    "cups_desc": "Cups high to low",
-    "cups_asc": "Cups low to high",
-    "gap_asc": "Closest to target",
-    "gap_desc": "Furthest from target",
-    "target_desc": "Target high to low",
-    "target_asc": "Target low to high",
-    "name_asc": "Name A to Z",
-    "name_desc": "Name Z to A",
-}
-
-
 def _queue_progress_values(row):
     row_type = str(row.get("type", "trophies") or "trophies")
     if row_type == "wins":
@@ -167,7 +169,65 @@ def sort_queue(queue, *, mode="cups_desc"):
         normalized.sort(key=lambda row: str(row.get("brawler", "") or "").lower(), reverse=True)
     else:
         normalized.sort(key=sort_key)
+    apply_push_all_sort_metadata(normalized, sort_mode)
     return normalized
+
+
+def selection_method_for_sort_mode(mode):
+    if mode == "cups_asc":
+        return "lowest_trophies"
+    if mode == "cups_desc":
+        return "highest_trophies"
+    return "named_brawler"
+
+
+def get_queue_sort_mode(queue):
+    for row in queue or []:
+        mode = str(row.get("queue_sort_mode", "") or "").strip()
+        if mode in QUEUE_SORT_MODES:
+            return mode
+    return None
+
+
+def infer_queue_sort_mode(queue):
+    stored = get_queue_sort_mode(queue)
+    if stored:
+        return stored
+    if not queue:
+        return None
+    methods = {
+        str(row.get("selection_method", "named_brawler") or "named_brawler")
+        for row in queue
+    }
+    if "highest_trophies" in methods:
+        return "cups_desc"
+    if "lowest_trophies" in methods:
+        return "cups_asc"
+    return None
+
+
+def resolve_queue_sort_mode(queue):
+    return get_queue_sort_mode(queue) or infer_queue_sort_mode(queue)
+
+
+def apply_push_all_sort_metadata(queue, mode):
+    """Remember Hub sort mode so post-match API refresh re-sorts the same way."""
+    sort_mode = mode if mode in QUEUE_SORT_MODES else "cups_asc"
+    method = selection_method_for_sort_mode(sort_mode)
+    for row in queue:
+        row["queue_sort_mode"] = sort_mode
+        current = str(row.get("selection_method", "named_brawler") or "named_brawler")
+        if current in ("lowest_trophies", "highest_trophies"):
+            row["selection_method"] = method
+            row["automatically_pick"] = True
+    return queue
+
+
+def sort_push_all_rows(rows, *, mode=None):
+    sort_mode = mode or resolve_queue_sort_mode(rows) or "cups_asc"
+    sorted_rows = sort_queue(rows, mode=sort_mode)
+    apply_push_all_sort_metadata(sorted_rows, sort_mode)
+    return sorted_rows
 
 
 def sort_queue_by_trophies(queue, *, descending=True):
@@ -229,6 +289,7 @@ def get_push_all_data(target_trophies=1000, brawlers=None):
             "selection_method": "lowest_trophies",
             "win_streak": 0,
         })
+    apply_push_all_sort_metadata(data, "cups_asc")
     return data
 
 

@@ -46,6 +46,11 @@ class DummyLobbyAutomation:
         self.lowest_brawlers.append(brawler)
         return True
 
+    def select_highest_trophy_brawler(self, brawler=None):
+        self.lowest_calls += 1
+        self.lowest_brawlers.append(brawler)
+        return True
+
     def select_brawler(self, name):
         self.named_calls.append(name)
         return True
@@ -75,6 +80,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 "automatically_pick": False,
                 "win_streak": 0,
                 "selection_method": "lowest_trophies",
+                "queue_sort_mode": "cups_asc",
             },
             {
                 "brawler": "second",
@@ -85,6 +91,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 "automatically_pick": True,
                 "win_streak": 0,
                 "selection_method": "lowest_trophies",
+                "queue_sort_mode": "cups_asc",
             },
         ]
         manager.started_trophies_by_brawler = {"first": target, "second": 0}
@@ -146,6 +153,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 "automatically_pick": True,
                 "win_streak": 0,
                 "selection_method": "lowest_trophies",
+                "queue_sort_mode": "cups_asc",
             },
             {
                 "brawler": "lowest",
@@ -156,6 +164,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 "automatically_pick": True,
                 "win_streak": 0,
                 "selection_method": "lowest_trophies",
+                "queue_sort_mode": "cups_asc",
             },
             {
                 "brawler": "already_done",
@@ -166,6 +175,7 @@ class PushAllTargetSwitchTest(unittest.TestCase):
                 "automatically_pick": True,
                 "win_streak": 0,
                 "selection_method": "lowest_trophies",
+                "queue_sort_mode": "cups_asc",
             },
         ]
 
@@ -249,6 +259,165 @@ class PushAllTargetSwitchTest(unittest.TestCase):
         self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "second")
         self.assertEqual(manager.Lobby_automation.lowest_calls, 1)
         self.assertEqual(manager.Lobby_automation.lowest_brawlers, ["second"])
+
+    @patch("stage_manager.save_brawler_data")
+    @patch("stage_manager.fetch_brawl_stars_player")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_refresh_preserves_high_to_low_push_order(
+            self,
+            mock_api_config,
+            mock_fetch_player,
+            _mock_save,
+    ):
+        manager = self.make_manager(1000)
+        manager.brawlers_pick_data = [
+            {
+                "brawler": "meg",
+                "push_until": 1000,
+                "trophies": 750,
+                "wins": 0,
+                "type": "trophies",
+                "automatically_pick": True,
+                "win_streak": 0,
+                "selection_method": "highest_trophies",
+                "queue_sort_mode": "cups_desc",
+            },
+            {
+                "brawler": "colt",
+                "push_until": 1000,
+                "trophies": 500,
+                "wins": 0,
+                "type": "trophies",
+                "automatically_pick": True,
+                "win_streak": 0,
+                "selection_method": "highest_trophies",
+                "queue_sort_mode": "cups_desc",
+            },
+            {
+                "brawler": "shelly",
+                "push_until": 1000,
+                "trophies": 249,
+                "wins": 0,
+                "type": "trophies",
+                "automatically_pick": True,
+                "win_streak": 0,
+                "selection_method": "highest_trophies",
+                "queue_sort_mode": "cups_desc",
+            },
+        ]
+        manager.Trophy_observer = DummyTrophyObserver(750)
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "timeout_seconds": 15,
+        }
+        mock_fetch_player.return_value = {
+            "brawlers": [
+                {"name": "MEG", "trophies": 750},
+                {"name": "COLT", "trophies": 500},
+                {"name": "SHELLY", "trophies": 249},
+            ]
+        }
+
+        manager.refresh_push_all_trophies_from_api()
+
+        self.assertEqual(
+            [row["brawler"] for row in manager.brawlers_pick_data],
+            ["meg", "colt", "shelly"],
+        )
+        self.assertTrue(
+            all(row["selection_method"] == "highest_trophies" for row in manager.brawlers_pick_data)
+        )
+        self.assertTrue(
+            all(row["queue_sort_mode"] == "cups_desc" for row in manager.brawlers_pick_data)
+        )
+
+    @patch("stage_manager.save_brawler_data")
+    @patch("stage_manager.fetch_brawl_stars_player")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_refresh_preserves_gap_asc_order_after_api_update(
+            self,
+            mock_api_config,
+            mock_fetch_player,
+            _mock_save,
+    ):
+        from gui.brawler_queue import sort_queue
+
+        rows = sort_queue(
+            [
+                {"brawler": "shelly", "push_until": 1000, "trophies": 100, "selection_method": "lowest_trophies"},
+                {"brawler": "colt", "push_until": 1500, "trophies": 900, "selection_method": "lowest_trophies"},
+                {"brawler": "nita", "push_until": 1000, "trophies": 950, "selection_method": "lowest_trophies"},
+            ],
+            mode="gap_asc",
+        )
+        manager = self.make_manager(1000)
+        manager.brawlers_pick_data = rows
+        manager.Trophy_observer = DummyTrophyObserver(950)
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "timeout_seconds": 15,
+        }
+        mock_fetch_player.return_value = {
+            "brawlers": [
+                {"name": "SHELLY", "trophies": 120},
+                {"name": "COLT", "trophies": 900},
+                {"name": "NITA", "trophies": 960},
+            ]
+        }
+
+        manager.refresh_push_all_trophies_from_api()
+
+        self.assertEqual(
+            [row["brawler"] for row in manager.brawlers_pick_data],
+            ["nita", "colt", "shelly"],
+        )
+        self.assertEqual(manager.brawlers_pick_data[0]["queue_sort_mode"], "gap_asc")
+
+    @patch("stage_manager.save_brawler_data")
+    @patch("stage_manager.fetch_brawl_stars_player")
+    @patch("stage_manager.load_brawl_stars_api_config")
+    def test_refresh_preserves_name_desc_order(
+            self,
+            mock_api_config,
+            mock_fetch_player,
+            _mock_save,
+    ):
+        from gui.brawler_queue import sort_queue
+
+        rows = sort_queue(
+            [
+                {"brawler": "shelly", "push_until": 1000, "trophies": 249, "selection_method": "lowest_trophies"},
+                {"brawler": "colt", "push_until": 1000, "trophies": 500, "selection_method": "lowest_trophies"},
+                {"brawler": "meg", "push_until": 1000, "trophies": 750, "selection_method": "lowest_trophies"},
+            ],
+            mode="name_desc",
+        )
+        manager = self.make_manager(1000)
+        manager.brawlers_pick_data = rows
+        manager.Trophy_observer = DummyTrophyObserver(750)
+        mock_api_config.return_value = {
+            "api_token": "token",
+            "player_tag": "#TAG",
+            "timeout_seconds": 15,
+        }
+        mock_fetch_player.return_value = {
+            "brawlers": [
+                {"name": "MEG", "trophies": 750},
+                {"name": "COLT", "trophies": 500},
+                {"name": "SHELLY", "trophies": 249},
+            ]
+        }
+
+        manager.refresh_push_all_trophies_from_api()
+
+        self.assertEqual(
+            [row["brawler"] for row in manager.brawlers_pick_data],
+            ["shelly", "meg", "colt"],
+        )
+        self.assertEqual(manager.brawlers_pick_data[0]["selection_method"], "named_brawler")
+        self.assertEqual(manager.brawlers_pick_data[0]["queue_sort_mode"], "name_desc")
 
     @patch("stage_manager.save_brawler_data")
     @patch("stage_manager.fetch_brawl_stars_player")

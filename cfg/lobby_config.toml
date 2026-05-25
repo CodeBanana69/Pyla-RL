@@ -19,3 +19,21 @@ super=[1460, 830, 1560, 930]
 gadget=[1580, 930, 1700, 1050]
 hypercharge=[1350, 940, 1450, 1050]
 
+[lobby_timing]
+menu_open_delay = 0.35
+menu_retry_delay = 0.35
+back_panel_delay = 0.35
+sort_open_delay = 0.25
+sort_apply_delay = 0.35
+grid_settle_timeout = 0.45
+grid_settle_delay = 0.06
+scroll_swipe_duration = 0.22
+pick_tap_delay = 0.35
+pick_verify_delay = 0.35
+detail_back_delay = 0.25
+select_confirm_delay = 0.35
+lobby_return_poll = 0.35
+sorted_max_scrolls = 40
+default_max_scrolls = 40
+starr_nova_dismiss_delay = 0.35
+

@@ -33,6 +33,13 @@ class LobbyAutomation:
         self.window_controller = window_controller
         self.known_brawler_names = self._load_known_brawler_names()
 
+    def _timing(self, key, default):
+        section = self.coords_cfg.get("lobby_timing") or {}
+        try:
+            return float(section.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
     def _read_state(self):
         try:
             screenshot = self.window_controller.screenshot()
@@ -75,7 +82,7 @@ class LobbyAutomation:
                 self.window_controller.click(*back_center, delay=0.08)
             else:
                 self.press_back()
-            time.sleep(0.8)
+            time.sleep(self._timing("starr_nova_dismiss_delay", 0.35))
             dismissed = True
         return dismissed
 
@@ -96,7 +103,7 @@ class LobbyAutomation:
 
     def _back_out_of_lobby_panel(self):
         self.press_back()
-        time.sleep(0.65)
+        time.sleep(self._timing("back_panel_delay", 0.35))
 
     def _brawler_button_points(self):
         cfg_x, cfg_y = tuple(self.coords_cfg.get("lobby", {}).get("brawler_btn", (110, 490)))
@@ -131,7 +138,7 @@ class LobbyAutomation:
     def _try_open_brawler_via_ocr(self):
         if not self.click_visible_brawler_menu_button():
             return False
-        time.sleep(0.8)
+        time.sleep(self._timing("menu_open_delay", 0.35))
         self._dismiss_starr_nova_hub_if_present()
         state = self._read_state()
         if state == "brawler_selection" or self._confirm_brawler_menu_open():
@@ -148,6 +155,7 @@ class LobbyAutomation:
         brawler_button_points = self._brawler_button_points()
         if attempts is None:
             attempts = len(brawler_button_points)
+        menu_retry_delay = self._timing("menu_retry_delay", 0.35)
 
         self._dismiss_starr_nova_hub_if_present()
 
@@ -171,7 +179,7 @@ class LobbyAutomation:
             click_x = int(x * wr)
             click_y = int(y * hr)
             self.window_controller.click(click_x, click_y)
-            time.sleep(0.8)
+            time.sleep(menu_retry_delay)
 
             state = self._read_state()
             screenshot = self.window_controller.screenshot()
@@ -187,7 +195,7 @@ class LobbyAutomation:
             if state == "shop" and probably_brawler:
                 return True
             if state == "shop":
-                time.sleep(0.4)
+                time.sleep(self._timing("menu_open_delay", 0.35))
                 if self._confirm_brawler_menu_open():
                     return True
                 if self.is_probably_brawler_selection_screen():
@@ -438,7 +446,7 @@ class LobbyAutomation:
             for lift_factor in lift_factors:
                 if opened_detail:
                     self.press_back()
-                    time.sleep(0.5)
+                    time.sleep(self._timing("detail_back_delay", 0.25))
 
                 click_x, click_y = self._text_box_click_position(
                     text_box,
@@ -451,7 +459,7 @@ class LobbyAutomation:
                     f"EasyOCR found {raw_text!r} for {brawler}; "
                     f"clicking ({click_x}, {click_y}), lift={lift_factor}"
                 )
-                time.sleep(1.0)
+                time.sleep(self._timing("pick_tap_delay", 0.35))
 
                 verify_screenshot = self.window_controller.screenshot()
                 verify_state = get_state(verify_screenshot)
@@ -469,7 +477,7 @@ class LobbyAutomation:
                 opened_detail = True
                 if self._verify_brawler_detail_card(verify_screenshot, target_key):
                     self._press_select_button()
-                    time.sleep(0.5)
+                    time.sleep(self._timing("pick_verify_delay", 0.35))
                     print(f"Selected brawler {brawler}")
                     return True
 
@@ -481,7 +489,7 @@ class LobbyAutomation:
 
         if opened_detail:
             self.press_back()
-            time.sleep(0.5)
+            time.sleep(self._timing("detail_back_delay", 0.25))
         return False
 
     def _select_button_visible(self, screenshot):
@@ -536,11 +544,15 @@ class LobbyAutomation:
             return False
         if self._select_button_visible(screenshot):
             self.press_back()
-            time.sleep(0.55)
+            time.sleep(self._timing("detail_back_delay", 0.25))
             return True
         return False
 
-    def _wait_for_grid_settle(self, stable_frames=1, delay=0.1, diff_threshold=6.5, timeout=0.9):
+    def _wait_for_grid_settle(self, stable_frames=1, delay=None, diff_threshold=6.5, timeout=None):
+        if delay is None:
+            delay = self._timing("grid_settle_delay", 0.06)
+        if timeout is None:
+            timeout = self._timing("grid_settle_timeout", 0.45)
         previous = None
         stable = 0
         deadline = time.time() + timeout
@@ -568,7 +580,10 @@ class LobbyAutomation:
         else:
             start_y = int(790 * hr)
             end_y = int(570 * hr)
-        self.window_controller.swipe(scroll_x, start_y, scroll_x, end_y, duration=0.28)
+        swipe_duration = self._timing("scroll_swipe_duration", 0.22)
+        self.window_controller.swipe(
+            scroll_x, start_y, scroll_x, end_y, duration=swipe_duration
+        )
         self._wait_for_grid_settle()
 
     def _apply_brawler_sort(self, mode="lowest"):
@@ -576,11 +591,13 @@ class LobbyAutomation:
         hr = self.window_controller.height_ratio
         sort_y = 426 if str(mode).lower() == "lowest" else 368
         self.window_controller.click(int(1210 * wr), int(45 * hr))
-        time.sleep(0.6)
+        time.sleep(self._timing("sort_open_delay", 0.25))
         self.window_controller.click(int(1210 * wr), int(sort_y * hr))
-        time.sleep(1.0)
+        time.sleep(self._timing("sort_apply_delay", 0.35))
 
-    def _select_brawler_on_open_grid(self, brawler, *, max_scrolls=50, sort_applied=False):
+    def _select_brawler_on_open_grid(self, brawler, *, max_scrolls=None, sort_applied=False):
+        if max_scrolls is None:
+            max_scrolls = int(self._timing("default_max_scrolls", 40))
         general_config = load_toml_as_dict("cfg/general_config.toml")
         debug_enabled = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         try:
@@ -592,7 +609,7 @@ class LobbyAutomation:
         target_key = self.normalize_ocr_name(brawler)
         target_key = self.resolve_ocr_typos(target_key)
         if sort_applied:
-            max_scrolls = min(max_scrolls, 15)
+            max_scrolls = min(max_scrolls, int(self._timing("sorted_max_scrolls", 40)))
 
         same_screen_attempts = 0
         max_same_screen_attempts = 3
@@ -690,7 +707,12 @@ class LobbyAutomation:
         wr = self.window_controller.width_ratio
         hr = self.window_controller.height_ratio
 
-        def tap(x, y, wait=0.6):
+        tap_delay = self._timing("pick_tap_delay", 0.35)
+        confirm_delay = self._timing("select_confirm_delay", 0.35)
+
+        def tap(x, y, wait=None):
+            if wait is None:
+                wait = tap_delay
             self.window_controller.click(int(x * wr), int(y * hr))
             time.sleep(wait)
 
@@ -701,17 +723,17 @@ class LobbyAutomation:
             self.press_back()
             return False
         self._dismiss_starr_nova_hub_if_present()
-        tap(1210, 45, 0.6)   # sort dropdown
-        tap(1210, sort_y, 1.0)
-        tap(422, 359, 1.0)   # first brawler card after sorting
-        tap(260, 991, 1.0)   # Select
+        tap(1210, 45)   # sort dropdown
+        tap(1210, sort_y, self._timing("sort_apply_delay", 0.35))
+        tap(422, 359, confirm_delay)   # first brawler card after sorting
+        tap(260, 991, confirm_delay)   # Select
         if self.ensure_lobby_after_selection():
             return True
 
         print(f"{recovery_label} brawler selection did not return to lobby; trying one recovery pass.")
         self.press_back()
-        time.sleep(0.8)
-        tap(260, 991, 1.0)   # Select again if the brawler details screen is still open
+        time.sleep(self._timing("menu_retry_delay", 0.35))
+        tap(260, 991, confirm_delay)   # Select again if the brawler details screen is still open
         return self.ensure_lobby_after_selection()
 
     def _select_sorted_queue_brawler(self, brawler, *, mode="lowest"):
@@ -781,7 +803,7 @@ class LobbyAutomation:
                 # Immediately after selecting a brawler, "match" usually means
                 # an unrecognized brawler details/stats screen, not a real game.
                 self.press_back()
-            time.sleep(0.7)
+            time.sleep(self._timing("lobby_return_poll", 0.35))
         return False
 
     def press_back(self):
