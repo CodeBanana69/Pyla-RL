@@ -146,6 +146,28 @@ def _patch_stage_manager(module) -> None:
 
     original_sync_after_match = stage_manager.sync_trophies_from_api_after_match
     original_trophy_progress = stage_manager._trophy_progress_value
+    original_front_target_reached = stage_manager._front_target_reached
+    original_refresh_push_all = stage_manager.refresh_push_all_trophies_from_api
+    original_should_use_play_again = stage_manager.should_use_play_again
+
+    def _front_progress_numbers(self):
+        if not getattr(self, "brawlers_pick_data", None):
+            return 0, 1000, 0, ""
+        front = self.brawlers_pick_data[0]
+        target = _safe_int(front.get("push_until", 1000), 1000)
+        row_trophies = _safe_int(front.get("trophies", 0), 0)
+        observer_trophies = _safe_int(
+            getattr(self.Trophy_observer, "current_trophies", row_trophies),
+            row_trophies,
+        )
+        return row_trophies, target, observer_trophies, str(front.get("brawler", "") or "")
+
+    def _local_match_after_is_below_target(self, target: int) -> bool:
+        after = getattr(self, "last_match_trophy_after", None)
+        if after is None:
+            return False
+        after = _safe_int(after, 0)
+        return after < target and (target - after) > 20
 
     def _restore_front_trophies_if_suspicious(self, *, reason: str) -> bool:
         if not getattr(self, "brawlers_pick_data", None):
@@ -160,6 +182,9 @@ def _patch_stage_manager(module) -> None:
             getattr(self.Trophy_observer, "current_trophies", row_trophies),
             row_trophies,
         )
+        local_after = getattr(self, "last_match_trophy_after", None)
+        if local_after is not None:
+            observer_trophies = min(observer_trophies, _safe_int(local_after, observer_trophies))
 
         # A normal Showdown match cannot add hundreds of trophies. This usually
         # means the Brawl Stars API tag points to a different account or returned
@@ -215,6 +240,9 @@ def _patch_stage_manager(module) -> None:
             row_trophies,
         )
         target = _safe_int(row.get("push_until", 1000), 1000)
+        local_after = getattr(self, "last_match_trophy_after", None)
+        if local_after is not None:
+            observer_trophies = min(observer_trophies, _safe_int(local_after, observer_trophies))
 
         if row_trophies >= target and observer_trophies < target and row_trophies - observer_trophies > 80:
             print(
@@ -224,8 +252,84 @@ def _patch_stage_manager(module) -> None:
             return observer_trophies
         return value
 
+    def front_target_reached_guarded(self):
+        row_trophies, target, observer_trophies, brawler = _front_progress_numbers(self)
+        if _local_match_after_is_below_target(self, target):
+            print(
+                "Push All target guard: keeping current brawler because the last local match "
+                f"ended below target ({brawler} {getattr(self, 'last_match_trophy_after', None)}/{target})."
+            )
+            return False
+        if row_trophies >= target and observer_trophies < target and row_trophies - observer_trophies > 80:
+            _restore_front_trophies_if_suspicious(self, reason="front target check")
+            return False
+        return original_front_target_reached(self)
+
+    def refresh_push_all_trophies_from_api_guarded(self):
+        old_front = dict(self.brawlers_pick_data[0]) if getattr(self, "brawlers_pick_data", None) else {}
+        old_name = str(old_front.get("brawler", "") or "")
+        old_target = _safe_int(old_front.get("push_until", 1000), 1000)
+        old_row_trophies = _safe_int(old_front.get("trophies", 0), 0)
+        old_observer = _safe_int(
+            getattr(getattr(self, "Trophy_observer", None), "current_trophies", old_row_trophies),
+            old_row_trophies,
+        )
+        local_before = min(old_row_trophies, old_observer)
+
+        changed = original_refresh_push_all(self)
+
+        if not old_name or not getattr(self, "brawlers_pick_data", None):
+            return changed
+        still_present = any(_same_brawler(row.get("brawler", ""), old_name) for row in self.brawlers_pick_data)
+        if still_present:
+            return changed
+
+        # If the current brawler was below its target before the API refresh,
+        # never let a refresh silently remove it. This protects against wrong
+        # player tags, stale API rows, or OCR/API desync causing 380/408 -> next.
+        if local_before < old_target and (old_target - local_before) > 20:
+            restored_row = dict(old_front)
+            restored_row["trophies"] = max(0, local_before)
+            print(
+                "Push All API refresh tried to remove the active brawler before local target: "
+                f"restoring {old_name} at {local_before}/{old_target}."
+            )
+            self.brawlers_pick_data = [restored_row] + [
+                row for row in self.brawlers_pick_data
+                if not _same_brawler(row.get("brawler", ""), old_name)
+            ]
+            self.push_all_needs_selection = False
+            try:
+                self.Trophy_observer.change_trophies(local_before)
+            except Exception:
+                pass
+            try:
+                module.save_brawler_data(self.brawlers_pick_data)
+            except Exception as exc:
+                print(f"Could not save queue after restoring active brawler: {exc}")
+            return True
+        return changed
+
+    def should_use_play_again_guarded(self, value=0, target=0, active_brawler=None):
+        target_int = _safe_int(target, 0)
+        value_int = _safe_int(value, 0)
+        if target_int and value_int >= target_int and _local_match_after_is_below_target(self, target_int):
+            print(
+                "Play Again guard: API/queue value says target reached, but local match "
+                f"is still {getattr(self, 'last_match_trophy_after', None)}/{target_int}. Continuing."
+            )
+            if getattr(self, "post_match_action", "") != "play_again":
+                return False
+            if self.requires_brawler_reselection(active_brawler):
+                return False
+            return True
+        return original_should_use_play_again(self, value, target, active_brawler)
+
     stage_manager.sync_trophies_from_api_after_match = sync_trophies_from_api_after_match_guarded
     stage_manager._trophy_progress_value = trophy_progress_value_guarded
+    stage_manager._front_target_reached = front_target_reached_guarded
+    stage_manager.refresh_push_all_trophies_from_api = refresh_push_all_trophies_from_api_guarded
+    stage_manager.should_use_play_again = should_use_play_again_guarded
     stage_manager._pyla_runtime_safety_patched = True
 
 
