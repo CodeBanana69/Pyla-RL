@@ -28,7 +28,12 @@ if any(cmd in sys.argv for cmd in ["install", "develop"]):
 
 from setuptools import setup, find_packages
 
-from gpu_support import apply_gpu_config, detect_graphics_cards, get_gpu_data as detect_gpu_data
+from gpu_support import (
+    apply_gpu_config,
+    detect_graphics_cards,
+    get_gpu_data as detect_gpu_data,
+    recommended_setup_onnx_variant,
+)
 
 def force_install(reqs, no_deps=False):
     cmd = [sys.executable, "-m", "pip", "install"]
@@ -115,63 +120,60 @@ def setup_pyla():
         if ver >= 8.9: # 40-Series Ada
             return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"], "CUDA 12.4 (Ada)"
         return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu121"], "CUDA 12.1 (Standard)"
-    
-    # NVIDIA BRANCH (Series 10-50)
-    if target == "nvidia":
-        print(f"\n NVIDIA: {name} detected.")
-        if auto_setup:
-            print("\nAuto setup: installing DirectML GPU acceleration for stable Windows NVIDIA systems.")
-            install_onnxruntime_variant("onnxruntime-directml")
-            onnx_installed = True
-            onnx_variant = "directml"
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
-        elif ask_user("Install DirectML GPU acceleration? (recommended; stable on most Windows NVIDIA systems)"):
-            install_onnxruntime_variant("onnxruntime-directml")
-            onnx_installed = True
-            onnx_variant = "directml"
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
-        elif ask_user("Install NVIDIA CUDA acceleration? (advanced; only if CUDA/cuDNN is installed correctly)"):
+
+    def install_acceleration_variant(variant):
+        nonlocal status_pytorch, status_accel, onnx_installed, onnx_variant
+        if variant == "cuda":
             torch_cmd, status_accel = nvidia_cuda_torch_command()
             force_install(torch_cmd)
             install_onnxruntime_variant("onnxruntime-gpu")
-            onnx_installed = True
-            onnx_variant = "cuda"
             status_pytorch = "CUDA Edition"
+            onnx_variant = "cuda"
+        elif variant == "directml":
+            install_onnxruntime_variant("onnxruntime-directml")
+            status_pytorch = "DirectML Edition"
+            status_accel = "DirectML"
+            onnx_variant = "directml"
+        elif variant == "openvino":
+            install_onnxruntime_variant("onnxruntime-openvino")
+            status_pytorch = "OpenVINO Edition"
+            status_accel = "OpenVINO"
+            onnx_variant = "openvino"
+        else:
+            return False
+        onnx_installed = True
+        return True
+
+    if auto_setup:
+        auto_variant = recommended_setup_onnx_variant(target, cards)
+        print(f"\nAuto setup: installing {auto_variant} acceleration for {name}.")
+        if auto_variant != "cpu":
+            install_acceleration_variant(auto_variant)
+
+    # NVIDIA BRANCH (Series 10-50)
+    elif target == "nvidia":
+        print(f"\n NVIDIA: {name} detected.")
+        if ask_user("Install NVIDIA CUDA acceleration? (recommended for NVIDIA GPUs)"):
+            install_acceleration_variant("cuda")
+        elif ask_user("Install DirectML GPU acceleration instead? (stable fallback on Windows)"):
+            install_acceleration_variant("directml")
 
     # INTEL BRANCH (OpenVINO)
     elif target == "intel":
         print(f"\n Intel: {name} detected.")
-        if auto_setup or ask_user("Install DirectML GPU acceleration? (recommended for most Windows Intel GPUs)"):
-            install_onnxruntime_variant("onnxruntime-directml")
-            onnx_installed = True
-            onnx_variant = "directml"
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
+        if ask_user("Install DirectML GPU acceleration? (recommended for most Windows Intel GPUs)"):
+            install_acceleration_variant("directml")
         elif ask_user("Install Intel OpenVINO acceleration instead?"):
-            install_onnxruntime_variant("onnxruntime-openvino")
-            onnx_installed = True
-            onnx_variant = "openvino"
-            status_pytorch = "OpenVINO Edition"
-            status_accel = "OpenVINO"
+            install_acceleration_variant("openvino")
 
     # AMD BRANCH (DirectML)
     elif "amd" in target:
         print(f"\n AMD: {name} detected.")
-        if auto_setup or ask_user("Install AMD DirectML acceleration?"):
-            install_onnxruntime_variant("onnxruntime-directml")
-            onnx_installed = True
-            onnx_variant = "directml"
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
+        if ask_user("Install AMD DirectML acceleration?"):
+            install_acceleration_variant("directml")
 
-    elif auto_setup or ask_user("Install DirectML GPU acceleration? (works on many Windows GPUs)"):
-        install_onnxruntime_variant("onnxruntime-directml")
-        onnx_installed = True
-        onnx_variant = "directml"
-        status_pytorch = "DirectML Edition"
-        status_accel = "DirectML"
+    elif ask_user("Install DirectML GPU acceleration? (works on many Windows GPUs)"):
+        install_acceleration_variant("directml")
 
     # FALLBACK BRANCH (If user skipped acceleration or has a generic CPU)
     if not onnx_installed:

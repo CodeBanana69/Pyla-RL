@@ -9,6 +9,7 @@ from gpu_support import (
     normalize_runtime_variant,
     primary_vendor,
     recommended_directml_device_id,
+    recommended_setup_onnx_variant,
 )
 
 
@@ -36,6 +37,15 @@ class GpuSupportTests(unittest.TestCase):
             auto_candidate_variants([("nvidia", "NVIDIA GeForce RTX 4070")]),
             ["directml", "cuda", "cpu"],
         )
+
+    def test_recommended_setup_variant_for_nvidia_is_cuda(self):
+        self.assertEqual(recommended_setup_onnx_variant("nvidia"), "cuda")
+
+    def test_recommended_setup_variant_for_amd_is_directml(self):
+        self.assertEqual(recommended_setup_onnx_variant("amd_windows"), "directml")
+
+    def test_recommended_setup_variant_for_cpu_only_is_cpu(self):
+        self.assertEqual(recommended_setup_onnx_variant("cpu", []), "cpu")
 
     @patch("gpu_support._wmic_video_controllers", return_value=[
         "Intel UHD Graphics",

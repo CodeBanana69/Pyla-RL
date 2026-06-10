@@ -131,13 +131,29 @@ def normalize_preferred_device(preferred_device):
     return preferred_device
 
 
-def recommended_onnx_variant(vendor=None):
-    vendor = vendor or primary_vendor()
-    if vendor == "nvidia":
+def recommended_setup_onnx_variant(target=None, cards=None):
+    """Pick the ONNX runtime variant for unattended setup.exe / auto install."""
+    cards = cards if cards is not None else detect_graphics_cards()
+    target_key = str(target or primary_vendor(cards) or "cpu").strip().lower()
+    if target_key == "nvidia":
+        return "cuda"
+    if target_key in ("amd_windows", "amd") or "amd" in target_key:
         return "directml"
-    if vendor in ("amd", "intel"):
+    if target_key == "intel":
+        return "directml"
+    if cards and primary_vendor(cards) != "cpu":
         return "directml"
     return "cpu"
+
+
+def recommended_onnx_variant(vendor=None):
+    cards = detect_graphics_cards()
+    vendor = vendor or primary_vendor(cards)
+    if vendor == "nvidia":
+        return "cuda"
+    if vendor in ("amd", "intel"):
+        return "directml"
+    return recommended_setup_onnx_variant(vendor, cards)
 
 
 def list_directml_adapters(cards=None):
@@ -189,7 +205,8 @@ def auto_candidate_variants(cards=None):
 
 
 def detect_runtime_variant():
-    return auto_candidate_variants()[0]
+    cards = detect_graphics_cards()
+    return recommended_setup_onnx_variant(primary_vendor(cards), cards)
 
 
 def normalize_runtime_variant(variant):
