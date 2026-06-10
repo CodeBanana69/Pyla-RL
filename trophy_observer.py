@@ -14,6 +14,7 @@ class TrophyObserver:
         self.last_sent_index = len(self.match_history)
         self.win_streak = 0
         self.match_counter = 0  # New counter for the number of matches
+        self.last_match_record = None
         self.trophy_lose_ranges = [(49, 0), (299, 1), (599, 2), (799, 3), (999, 4), (1099, 5), (1199, 6), (1299, 7),
                                    (1499, 8), (1799, 9), (3999, 10), (float("inf"), 15)]
         self.trophy_win_ranges = [(1999, 10), (2499, 8), (2799, 6), (2999, 4), (3099, 2), (float("inf"), 1)]
@@ -71,9 +72,21 @@ class TrophyObserver:
     def save_history(self):
         self.match_history.to_csv(self.history_file, index=False)
 
+    @staticmethod
+    def _display_result(game_result):
+        raw = str(game_result or "").strip().lower()
+        if "showdown" in raw:
+            try:
+                place = int(raw.split("_")[-1])
+            except (TypeError, ValueError):
+                return raw
+            return {0: "1st", 1: "2nd", 2: "3rd", 3: "4th"}.get(place, raw)
+        return raw
+
     def add_trophies(self, game_result, current_brawler, playstyle_info, power_level=None):
         print(f"Found game result!: {game_result} win streak: {self.win_streak}")
         old = self.current_trophies
+        display_result = self._display_result(game_result)
         if game_result == "victory":
             self.win_streak += 1
             trophy_delta = self.calc_win_increment()
@@ -98,6 +111,14 @@ class TrophyObserver:
             print("Catastrophic failure")
             trophy_delta = 0
         self.current_trophies += trophy_delta
+        self.last_match_record = {
+            "brawler": current_brawler,
+            "result": display_result,
+            "started_trophies": old,
+            "trophy_delta": trophy_delta,
+            "trophies": self.current_trophies,
+            "win_streak": self.win_streak,
+        }
 
         print(f"Trophies : {old} -> {self.current_trophies}")
         print("Current wins:", self.current_wins)

@@ -58,18 +58,13 @@ else:
     else:
         movement = get_enemy_spacing_movement(player_data, player_pos, enemy_coords, enemy_distance, brawler, walls)
 
-        if is_super_ready and persistent_data["time_since_holding_attack"] is None:
-            super_type = brawler_info['super_type']
-            enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "super")
-            if should_use_super_on_enemy(brawler, super_type, enemy_distance, attack_range, super_range, enemy_hittable):
-                if is_hypercharge_ready:
-                    use_hypercharge()
-                use_super()
+        if persistent_data["time_since_holding_attack"] is None:
+            try_use_super_on_enemy(brawler, brawler_info, player_pos, enemy_coords, enemy_distance, walls)
 
         if enemy_distance <= attack_range:
             enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
             if enemy_hittable:
-                if is_gadget_ready and persistent_data["time_since_holding_attack"] is None:
+                if should_use_gadget_on_enemy(brawler, player_data, enemy_data, walls):
                     use_gadget()
                 if not must_brawler_hold_attack:
                     attack()

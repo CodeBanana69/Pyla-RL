@@ -180,7 +180,7 @@ def _ping_content(event_type: str, settings: dict[str, Any]) -> str:
         should_ping = should_ping or (_match_count % every_matches == 0)
 
     every_minutes = _as_float(settings.get("ping_every_x_minutes", 0))
-    if every_minutes > 0:
+    if event_type == "regular_minutes_ping" and every_minutes > 0:
         now = time.time()
         if now - _last_minute_ping >= every_minutes * 60:
             _last_minute_ping = now
@@ -319,7 +319,16 @@ async def async_notify_user(
     details = dict(details or {})
     ping = _ping_content(event_type, settings)
 
-    if event_type == "match" and not (_config_bool(settings.get("send_match_summary"), False) or ping):
+    if event_type == "regular_matches_ping":
+        return False
+
+    if event_type == "regular_minutes_ping":
+        if _as_float(settings.get("ping_every_x_minutes", 0)) <= 0:
+            return False
+
+    if event_type == "match" and not (
+        _config_bool(settings.get("send_match_summary"), False) or ping
+    ):
         return False
 
     details["event_type"] = event_type

@@ -978,6 +978,30 @@ def _notification_message(message_type: str, stage_manager) -> str:
     return messages.get(message_type, "Notification")
 
 
+def build_match_notification_details(stage_manager, match_record: dict) -> dict:
+    details = dict(match_record or {})
+    queue = getattr(stage_manager, "brawlers_pick_data", None) or []
+    trophy_observer = getattr(stage_manager, "Trophy_observer", None)
+    if queue:
+        current = queue[0]
+        details.setdefault("brawler", current.get("brawler", ""))
+        details.setdefault("target", current.get("push_until", ""))
+        details["brawlers_left"] = len(queue)
+        if trophy_observer is not None:
+            details.setdefault("trophies", trophy_observer.current_trophies)
+            details.setdefault("wins", trophy_observer.current_wins)
+            details.setdefault("win_streak", trophy_observer.win_streak)
+        if len(queue) > 1:
+            details.setdefault("next_up", queue[1].get("brawler", ""))
+    try:
+        from gui.instance_config import instance_context_for_notifications
+
+        details.update(instance_context_for_notifications())
+    except Exception:
+        pass
+    return details
+
+
 def build_notification_details(message_type, stage_manager) -> dict:
     details = {"message": _notification_message(message_type, stage_manager)}
     queue = getattr(stage_manager, "brawlers_pick_data", None) or []
@@ -1010,12 +1034,15 @@ def build_notification_details(message_type, stage_manager) -> dict:
     return details
 
 
-def notify_user(message_type, screenshot, stage_manager) -> None:
+def notify_user(message_type, screenshot, stage_manager, *, match_record=None) -> None:
     import asyncio
 
     if isinstance(stage_manager, dict):
         details = stage_manager
         event_type = message_type
+    elif message_type == "match" and match_record is not None:
+        details = build_match_notification_details(stage_manager, match_record)
+        event_type = "match"
     else:
         details = build_notification_details(message_type, stage_manager)
         event_type = _map_notification_event_type(message_type)

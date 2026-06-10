@@ -71,18 +71,18 @@ TUTORIAL_TOPICS: list[dict[str, str]] = [
         "Settings",
         "1. Accept the free-use license in About.\n"
         "2. Tune performance profile and debug options.\n"
-        "3. Open cfg folder for advanced TOML edits.\n"
-        "4. Restart the bot after changing runtime settings.",
+        "3. Spacing Aggression purple circle = target hug distance in Debug Screen.\n"
+        "4. After Round controls lobby return vs Play Again on wins.",
         "docs/tutorials/settings-and-performance.md",
     ),
     _topic(
         "discord",
         "Discord Notifications",
         "Discord",
-        "1. Webhook URL sends match/status notifications only.\n"
-        "2. Remote slash commands need a bot token.\n"
-        "3. Restrict control to your user ID and channel.\n"
-        "4. Restart Pyla-RL after changing Discord settings.",
+        "1. Webhook URL + Send Match Summary posts a report after each game.\n"
+        "2. Ping Every X Matches mentions you on match summaries (optional).\n"
+        "3. Heartbeat Every X Minutes is optional; leave at 0 to avoid status spam.\n"
+        "4. Remote slash commands need a bot token (separate from webhooks).",
         "docs/tutorials/discord.md",
     ),
     _topic(
