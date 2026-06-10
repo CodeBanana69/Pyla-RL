@@ -1,9 +1,12 @@
 ﻿import math
+import os
+import queue
 import random
+import threading
 import time
+
 import cv2
 import numpy as np
-import os
 
 from detect import Detect
 try:
@@ -13,12 +16,24 @@ except ImportError:
     early_access = False
     def add_advanced_visuals(a, b):
         return None
+from core.integration import migrate_bot_config
 from state_finder import get_state
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, interpret_pyla_code, \
     count_mask_pixels, JOYSTICK_RADIUS, clamp, debug_beep, config_bool
-
+from visual_debug_window import (
+    log_visual_debug_startup,
+    opencv_highgui_available,
+    show_visual_debug_frame,
+)
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
+CLOSE_TILE_CROP_SIZE = 640
+CLOSE_TILE_MODEL_PATH = "models/closeTileDetector.onnx"
+visual_debug = str(load_toml_as_dict("cfg/general_config.toml").get("visual_debug", "no")).lower() in (
+    "yes",
+    "true",
+    "1",
+)
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
@@ -29,7 +44,7 @@ PLAYER_HIT_CIRCLE_RADIUS = 53
 class Play:
 
     def __init__(self, main_info_model, tile_detector_model, close_tile_detector_model, window_controller, pyla_code):
-        bot_config = load_toml_as_dict("cfg/bot_config.toml")
+        bot_config = migrate_bot_config(load_toml_as_dict("cfg/bot_config.toml"))
         time_config = load_toml_as_dict("cfg/time_tresholds.toml")
         self.fix_movement_keys = {
             "delay_to_trigger": bot_config["unstuck_movement_delay"],
@@ -58,25 +73,43 @@ class Play:
         self.is_super_ready = False
         self.window_controller = window_controller
         self.TILE_SIZE = bot_config.get("perceived_tile_size", 32)
-        self.centered_wall_detection = config_bool(bot_config.get("centered_wall_detection"), False)
-        self.centered_wall_crop_size = 640
-
-        bot_config = load_toml_as_dict("cfg/bot_config.toml")
-        time_config = load_toml_as_dict("cfg/time_tresholds.toml")
+        self.close_tile_detector_enabled = (
+            config_bool(bot_config.get("close_tile_detector_enabled"), False)
+            or config_bool(bot_config.get("centered_wall_detection"), False)
+        )
+        self.centered_wall_detection = self.close_tile_detector_enabled
+        self.centered_wall_crop_size = CLOSE_TILE_CROP_SIZE
         self.verbose_debug = config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False)
         if self.verbose_debug:
             if not os.path.exists("debug_frames"):
                 os.makedirs("debug_frames")
         self.Detect_main_info = Detect(main_info_model, classes=['enemy', 'teammate', 'player'])
         self.tile_detector_model_classes = bot_config["wall_model_classes"]
-        self.Detect_tile_detector = None if self.centered_wall_detection else Detect(
+        self.Detect_tile_detector = Detect(
             tile_detector_model,
-            classes=self.tile_detector_model_classes
+            classes=self.tile_detector_model_classes,
         )
-        self.Detect_centered_tile_detector = Detect(
-            close_tile_detector_model,
-            classes=self.tile_detector_model_classes
-        ) if self.centered_wall_detection else None
+        close_model_path = close_tile_detector_model
+        if self.close_tile_detector_enabled and not os.path.exists(close_model_path):
+            close_model_path = CLOSE_TILE_MODEL_PATH
+        self.Detect_close_tile_detector = None
+        if self.close_tile_detector_enabled:
+            if os.path.exists(close_model_path):
+                self.Detect_close_tile_detector = Detect(
+                    close_model_path,
+                    classes=self.tile_detector_model_classes,
+                )
+                self._log_tile_detection_mode(
+                    f"Close tile wall detector enabled ({close_model_path}, {CLOSE_TILE_CROP_SIZE}x{CLOSE_TILE_CROP_SIZE} crop).",
+                )
+            else:
+                print(
+                    f"WARNING: {close_model_path} not found; close tile detector disabled, using full-frame walls."
+                )
+                self.close_tile_detector_enabled = False
+                self.centered_wall_detection = False
+        self.Detect_centered_tile_detector = self.Detect_close_tile_detector
+        self.last_tile_detection_debug = None
 
         self.time_since_walls_checked = 0
         self.time_since_player_last_found = time.time()
@@ -108,6 +141,23 @@ class Play:
         self._evasion_active = False
         self.match_intent_summary = ""
         self.refresh_enemy_spacing_config()
+        general_config = load_toml_as_dict("cfg/general_config.toml")
+        global visual_debug
+        visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
+        self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
+        self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
+        self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
+        self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
+        self._visual_debug_next_frame_at = 0.0
+        self._visual_debug_next_enqueue_at = 0.0
+        self._visual_debug_lock = threading.Lock()
+        self._visual_debug_payload = None
+        self._visual_debug_display_queue = queue.Queue(maxsize=1)
+        self._visual_debug_thread = None
+        self._visual_debug_stop = False
+        if visual_debug:
+            opencv_highgui_available()
+            log_visual_debug_startup()
 
     @staticmethod
     def get_entity_pos(entity):
@@ -921,21 +971,69 @@ class Play:
             return True
         return False
 
-    def get_centered_wall_crop(self, frame, player_data=None):
-        frame_height, frame_width = frame.shape[:2]
-        crop_size = self.centered_wall_crop_size
+    @staticmethod
+    def _log_tile_detection_mode(message: str) -> None:
+        try:
+            import runtime_log
+            runtime_log.log_info("startup", message)
+        except Exception:
+            print(message)
 
-        if player_data:
-            center_x, center_y = self.get_entity_pos(player_data[0])
-        else:
-            center_x, center_y = frame_width / 2, frame_height / 2
+    def _log_tile_detection_event(self, message: str, key: str) -> None:
+        try:
+            import runtime_log
+            runtime_log.log_once(key, 8.0, runtime_log.LEVEL_INFO, "perf", message)
+        except Exception:
+            print(message)
 
-        crop_x1 = int(clamp(round(center_x - crop_size / 2), 0, frame_width - crop_size))
-        crop_y1 = int(clamp(round(center_y - crop_size / 2), 0, frame_height - crop_size))
+    def _set_tile_detection_debug(self, source, crop=None, fallback=None):
+        self.last_tile_detection_debug = {
+            "enabled": bool(self.close_tile_detector_enabled),
+            "source": source,
+            "crop": list(crop) if crop else None,
+            "fallback": fallback,
+        }
+
+    @staticmethod
+    def crop_close_tile_region(frame, player_pos, crop_size=CLOSE_TILE_CROP_SIZE):
+        if frame is None or player_pos is None:
+            return None, 0, 0
+        height, width = frame.shape[:2]
+        if width < crop_size or height < crop_size:
+            return None, 0, 0
+        center_x, center_y = int(player_pos[0]), int(player_pos[1])
+        half = crop_size // 2
+        crop_x1 = max(0, min(center_x - half, width - crop_size))
+        crop_y1 = max(0, min(center_y - half, height - crop_size))
         crop_x2 = crop_x1 + crop_size
         crop_y2 = crop_y1 + crop_size
-
         return frame[crop_y1:crop_y2, crop_x1:crop_x2], crop_x1, crop_y1
+
+    def get_centered_wall_crop(self, frame, player_data=None):
+        player_pos = self._resolve_player_pos(player_data)
+        if player_pos is None:
+            frame_height, frame_width = frame.shape[:2]
+            player_pos = (frame_width / 2, frame_height / 2)
+        crop, crop_x1, crop_y1 = self.crop_close_tile_region(frame, player_pos, self.centered_wall_crop_size)
+        if crop is None:
+            return frame, 0, 0
+        return crop, crop_x1, crop_y1
+
+    @staticmethod
+    def _resolve_player_pos(player_data):
+        if player_data is None:
+            return None
+        if (
+            isinstance(player_data, (list, tuple))
+            and len(player_data) == 2
+            and not isinstance(player_data[0], (list, tuple, np.ndarray))
+        ):
+            return int(player_data[0]), int(player_data[1])
+        if isinstance(player_data, (list, tuple)) and player_data:
+            first = player_data[0]
+            if isinstance(first, (list, tuple, np.ndarray)) and len(first) >= 4:
+                return Play.get_entity_pos(first)
+        return None
 
     @staticmethod
     def offset_tile_data(tile_data, offset_x, offset_y):
@@ -950,16 +1048,54 @@ class Play:
             ]
         return offset_data
 
-    def get_tile_data(self, frame, player_data=None):
-        if self.centered_wall_detection and self.Detect_centered_tile_detector is not None:
-            crop, offset_x, offset_y = self.get_centered_wall_crop(frame, player_data)
-            tile_data = self.Detect_centered_tile_detector.detect_objects(
-                crop,
-                conf_tresh=self.wall_detection_confidence
-            )
-            return self.offset_tile_data(tile_data, offset_x, offset_y)
+    offset_tile_boxes = offset_tile_data
 
-        tile_data = self.Detect_tile_detector.detect_objects(frame, conf_tresh=self.wall_detection_confidence)
+    def get_tile_data(self, frame, player_data=None):
+        player_pos = self._resolve_player_pos(player_data)
+        if (
+            self.close_tile_detector_enabled
+            and self.Detect_close_tile_detector is not None
+            and player_pos is not None
+        ):
+            crop, crop_x, crop_y = self.crop_close_tile_region(frame, player_pos)
+            if crop is not None:
+                crop_box = [crop_x, crop_y, crop_x + CLOSE_TILE_CROP_SIZE, crop_y + CLOSE_TILE_CROP_SIZE]
+                tile_data = self.Detect_close_tile_detector.detect_objects(
+                    crop,
+                    conf_tresh=self.wall_detection_confidence,
+                )
+                self._set_tile_detection_debug("close", crop=crop_box)
+                self._log_tile_detection_event(
+                    f"Wall detection using close tile model ({CLOSE_TILE_MODEL_PATH}).",
+                    "wall-detection:close",
+                )
+                return self.offset_tile_data(tile_data, crop_x, crop_y)
+            self._set_tile_detection_debug("full", fallback="crop_failed")
+            self._log_tile_detection_event(
+                "Close tile crop failed; falling back to full-frame wall detector.",
+                "wall-detection:fallback-crop",
+            )
+        elif self.close_tile_detector_enabled:
+            if player_pos is None:
+                self._set_tile_detection_debug("full", fallback="no_player")
+                self._log_tile_detection_event(
+                    "No player position for close tile crop; using full-frame wall detector.",
+                    "wall-detection:fallback-no-player",
+                )
+            else:
+                self._set_tile_detection_debug("full", fallback="model_unavailable")
+        else:
+            self._set_tile_detection_debug("full")
+
+        tile_data = self.Detect_tile_detector.detect_objects(
+            frame,
+            conf_tresh=self.wall_detection_confidence,
+        )
+        if self.close_tile_detector_enabled:
+            self._log_tile_detection_event(
+                "Wall detection using full-frame tileDetector.onnx.",
+                "wall-detection:full",
+            )
         return tile_data
 
     def process_tile_data(self, tile_data):
@@ -976,12 +1112,227 @@ class Play:
         movement, updated_globals = interpret_pyla_code(self.pyla_code, self.context)
         return movement
 
-    def publish_debug_view(self, frame, data, state, movement=None):
-        if not hasattr(self.window_controller, "debug_view"):
-            return
+    def _copy_visual_debug_data(self, data):
+        copied = {}
+        for key, value in (data or {}).items():
+            if isinstance(value, list):
+                copied[key] = [
+                    list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
+                    for item in value
+                ]
+            elif isinstance(value, dict):
+                if key == "close_tile_debug":
+                    copied[key] = dict(value)
+                else:
+                    copied[key] = dict(value)
+            else:
+                copied[key] = value
+        return copied
 
+    def _ensure_visual_debug_thread(self):
+        if self._visual_debug_thread and self._visual_debug_thread.is_alive():
+            return
+        self._visual_debug_stop = False
+        self._visual_debug_thread = threading.Thread(
+            target=self._visual_debug_loop,
+            name="PylaVisualDebug",
+            daemon=True,
+        )
+        self._visual_debug_thread.start()
+
+    def _enqueue_visual_debug_display(self, img):
+        while True:
+            try:
+                self._visual_debug_display_queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self._visual_debug_display_queue.put_nowait(img)
+        except queue.Full:
+            pass
+
+    def pump_visual_debug_display(self):
+        if not visual_debug:
+            return
+        try:
+            img = self._visual_debug_display_queue.get_nowait()
+        except queue.Empty:
+            return
+        show_visual_debug_frame(img)
+
+    def queue_visual_debug(self, frame, data, brawler=None):
+        now = time.time()
+        frame_delay = 1.0 / self.visual_debug_max_fps
+        if now < self._visual_debug_next_enqueue_at:
+            return
+        self._visual_debug_next_enqueue_at = now + frame_delay
+        self._ensure_visual_debug_thread()
+        payload = (
+            frame.copy() if isinstance(frame, np.ndarray) else np.array(frame),
+            self._copy_visual_debug_data(data),
+            brawler,
+        )
+        with self._visual_debug_lock:
+            self._visual_debug_payload = payload
+
+    def _visual_debug_loop(self):
+        frame_delay = 1.0 / self.visual_debug_max_fps
+        while not self._visual_debug_stop:
+            loop_started = time.time()
+            with self._visual_debug_lock:
+                payload = self._visual_debug_payload
+                self._visual_debug_payload = None
+            if payload is not None:
+                try:
+                    self.show_visual_debug(*payload, respect_throttle=False)
+                except Exception as exc:
+                    print(f"Visual debug renderer error: {exc}")
+            sleep_for = frame_delay - (time.time() - loop_started)
+            if sleep_for > 0:
+                time.sleep(min(sleep_for, frame_delay))
+
+    def show_visual_debug(self, frame, data, brawler=None, respect_throttle=True):
+        now = time.time()
+        if respect_throttle and now < self._visual_debug_next_frame_at:
+            return
+        if respect_throttle:
+            self._visual_debug_next_frame_at = now + (1.0 / self.visual_debug_max_fps)
+
+        scale = self.visual_debug_scale
+        if scale < 0.999:
+            img = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        else:
+            img = frame.copy() if isinstance(frame, np.ndarray) else np.array(frame)
+
+        def s(value):
+            return int(value * scale)
+
+        def sp(point):
+            return s(point[0]), s(point[1])
+
+        status = data.get("status") or data.get("state")
+        if status:
+            cv2.putText(
+                img,
+                str(status),
+                (8, max(24, s(24))),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.5, 0.7 * scale),
+                (255, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
+
+        colors = {
+            "player": (0, 255, 0),
+            "teammate": (0, 0, 255),
+            "enemy": (255, 0, 0),
+            "wall": (128, 128, 128),
+            "bush": (0, 180, 60),
+        }
+        boxes_drawn = 0
+        for key, color in colors.items():
+            boxes = data.get(key)
+            if not boxes:
+                continue
+            for box in boxes:
+                if boxes_drawn >= self.visual_debug_max_boxes:
+                    break
+                if len(box) < 4:
+                    continue
+                x1, y1, x2, y2 = map(int, box[:4])
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
+                if key != "wall":
+                    cv2.putText(
+                        img,
+                        key,
+                        sp((x1, max(y1 - 6, 0))),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        max(0.35, 0.5 * scale),
+                        color,
+                        1,
+                    )
+                boxes_drawn += 1
+
+        players = data.get("player") or []
+        if players:
+            px, py = self.get_entity_pos(players[0])
+            center = sp((px, py))
+            attack_range = s(int(data.get("attack_range") or 0))
+            super_range = s(int(data.get("super_range") or 0))
+            if attack_range > 0:
+                cv2.circle(img, center, attack_range, (160, 32, 240), 2)
+            if super_range > 0:
+                cv2.circle(img, center, super_range, (255, 255, 0), 2)
+
+        movement = data.get("movement")
+        if movement and players:
+            px, py = self.get_entity_pos(players[0])
+            mx, my = float(movement[0]), float(movement[1])
+            cv2.arrowedLine(
+                img,
+                sp((px, py)),
+                sp((px + mx * 80, py + my * 80)),
+                (0, 255, 255),
+                2,
+                tipLength=0.2,
+            )
+
+        joystick = data.get("joystick")
+        if joystick and len(joystick) >= 2:
+            jx, jy = int(joystick[0]), int(joystick[1])
+            radius = s(int(data.get("joystick_radius") or 50))
+            cv2.circle(img, sp((jx, jy)), radius, (255, 255, 255), 1)
+
+        close_tile_debug = data.get("close_tile_debug")
+        if close_tile_debug:
+            crop = close_tile_debug.get("crop")
+            if crop and len(crop) >= 4:
+                x1, y1, x2, y2 = map(int, crop[:4])
+                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), (0, 220, 255), max(2, s(2)))
+            source = close_tile_debug.get("source", "full")
+            fallback = close_tile_debug.get("fallback")
+            if source == "close":
+                label = "Tile: close 640x640"
+                label_color = (0, 220, 255)
+            elif fallback:
+                label = f"Tile: full ({str(fallback).replace('_', ' ')})"
+                label_color = (255, 200, 80)
+            else:
+                label = "Tile: full"
+                label_color = (200, 200, 200)
+            cv2.putText(
+                img,
+                label,
+                (s(8), s(36)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.35, 0.5 * scale),
+                label_color,
+                max(1, s(1)),
+                cv2.LINE_AA,
+            )
+
+        intent = getattr(self, "match_intent_summary", "")
+        if intent:
+            cv2.putText(
+                img,
+                intent[:96],
+                (8, img.shape[0] - 12),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                max(0.4, 0.55 * scale),
+                (255, 255, 255),
+                1,
+                cv2.LINE_AA,
+            )
+
+        self._enqueue_visual_debug_display(img)
+
+    def publish_debug_view(self, frame, data, state, movement=None):
         self.frame = frame
-        advanced_visuals = bool(getattr(self.window_controller.debug_view, "advanced_visuals", False))
+        advanced_visuals = self.advanced_visuals
+        debug_view = getattr(self.window_controller, "debug_view", None)
+        if debug_view is not None:
+            advanced_visuals = bool(getattr(debug_view, "advanced_visuals", advanced_visuals))
         debug_data = {
             "state": state,
             "player": [],
@@ -1022,8 +1373,20 @@ class Play:
 
         if movement is not None:
             debug_data["movement"] = [float(movement[0]), float(movement[1])]
+        if self.last_tile_detection_debug:
+            debug_data["close_tile_debug"] = dict(self.last_tile_detection_debug)
 
-        self.window_controller.debug_view.publish(frame, debug_data)
+        if visual_debug:
+            if not data:
+                debug_data["status"] = f"No detections ({state})"
+            else:
+                debug_data["state"] = state
+            self.queue_visual_debug(frame, debug_data, self.current_brawler)
+            return
+
+        if debug_view is None:
+            return
+        debug_view.publish(frame, debug_data)
 
     def main(self, frame, brawler, main):
         current_time = time.time()

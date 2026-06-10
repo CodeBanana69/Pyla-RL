@@ -7,8 +7,12 @@ import sys
 import threading
 import time
 import traceback
+import warnings
 from collections import deque
 from pathlib import Path
+
+# requests<2.34 warns when urllib3>=2.7 is installed; harmless but noisy on every import.
+warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*", module="requests")
 
 
 def repair_numpy_before_cv2_import():
@@ -609,31 +613,34 @@ def pyla_main(data):
                     if row.get("automatically_pick"):
                         brawler_name = row["brawler"]
                         runtime_log.log_info("queue", f"Picking brawler automatically: {brawler_name}")
-                        result = self.lobby_automator.select_brawler(
-                            brawler_name,
-                            self.get_latest_state,
-                            runtime_control=self.runtime_control,
-                        )
-                        while result in ("failed", "error"):
-                            if self.ping_when_stuck:
-                                notify_user(
-                                    "bot_failed_brawler_selection",
-                                    self.window_controller.screenshot(),
-                                    self.Stage_manager,
+                        self.lobby_automator.selecting_brawler = True
+                        try:
+                            picked = self.lobby_automator.select_brawler(brawler_name)
+                            attempts = 0
+                            max_attempts = len(self.Stage_manager.brawlers_pick_data)
+                            while not picked and attempts < max_attempts:
+                                if self.ping_when_stuck:
+                                    notify_user(
+                                        "bot_failed_brawler_selection",
+                                        self.window_controller.screenshot(),
+                                        self.Stage_manager,
+                                    )
+                                failed = self.Stage_manager.brawlers_pick_data.pop(0)
+                                self.Stage_manager.brawlers_pick_data.append(failed)
+                                brawler_name = self.Stage_manager.brawlers_pick_data[0]["brawler"]
+                                self.Stage_manager.quit_shop()
+                                picked = self.lobby_automator.select_brawler(brawler_name)
+                                attempts += 1
+                            if picked:
+                                self.update_trophy_observer()
+                            else:
+                                runtime_log.log_warn(
+                                    "queue",
+                                    f"Automatic brawler pick failed for {brawler_name}; continuing with current selection.",
                                 )
-                            failed = self.Stage_manager.brawlers_pick_data.pop(0)
-                            self.Stage_manager.brawlers_pick_data.append(failed)
-                            brawler_name = self.Stage_manager.brawlers_pick_data[0]["brawler"]
-                            result = self.lobby_automator.select_brawler(
-                                brawler_name,
-                                self.get_latest_state,
-                                runtime_control=self.runtime_control,
-                            )
-                        if result not in ("aborted", "stuck"):
-                            self.picked_first_brawler = True
-                            self.update_trophy_observer()
-                    else:
-                        self.picked_first_brawler = True
+                        finally:
+                            self.lobby_automator.selecting_brawler = False
+                    self.picked_first_brawler = True
 
                 now = time.time()
                 frame_start = time.perf_counter() if self.max_ips else None
@@ -696,6 +703,7 @@ def pyla_main(data):
                         brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
                         self.Play.current_brawler = brawler
                         self.Play.main(frame, brawler, self)
+                        self.Play.pump_visual_debug_display()
                         c += 1
                     time.sleep(0.005)
                     continue
@@ -705,6 +713,7 @@ def pyla_main(data):
                 brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
                 self.Play.current_brawler = brawler
                 self.Play.main(frame, brawler, self)
+                self.Play.pump_visual_debug_display()
                 c += 1
 
                 if self.max_ips and frame_start is not None:

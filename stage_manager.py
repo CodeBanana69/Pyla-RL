@@ -150,33 +150,38 @@ class StageManager:
 
             next_brawler_name = self.brawlers_pick_data[0]['brawler']
             if self.brawlers_pick_data[0]["automatically_pick"]:
-                select_brawler = self.Lobby_automation.select_brawler(next_brawler_name, self.get_latest_state, runtime_control=self.runtime_control)
-                while select_brawler in ["failed", "error"]:
-                    if self.ping_when_stuck:
-                        screenshot = self.window_controller.screenshot()
-                        notify_user("bot_failed_brawler_selection", screenshot, self)
-                        print(f"Skipping {select_brawler}")
-                    if self._should_stop() or self._should_pause():
-                        return
-                    if len(self.brawlers_pick_data) < 1:
-                        print("No more brawlers selected for pushing in the menu. Bot will now pause itself until closed.")
-                        screenshot = self.window_controller.screenshot()
-                        notify_user("completed", screenshot, self)
-                        print("Bot stopping: all targets completed with no more brawlers.")
-                        self.window_controller.release_movement()
-                        self.window_controller.close()
-                        sys.exit(0)
-                    current_brawler = self.brawlers_pick_data.pop(0)
-                    self.brawlers_pick_data.append(current_brawler)
-                    next_brawler_name = self.brawlers_pick_data[0]['brawler']
-                    self.quit_shop()
-                    select_brawler = self.Lobby_automation.select_brawler(next_brawler_name, runtime_control=self.runtime_control)
-                if select_brawler == "aborted" or select_brawler == "stuck":
+                self.Lobby_automation.selecting_brawler = True
+                try:
+                    selected = self.Lobby_automation.select_brawler(next_brawler_name)
+                    attempts = 0
+                    while not selected and attempts < len(self.brawlers_pick_data):
+                        if self.ping_when_stuck:
+                            screenshot = self.window_controller.screenshot()
+                            notify_user("bot_failed_brawler_selection", screenshot, self)
+                            print(f"Skipping {next_brawler_name}")
+                        if self._should_stop() or self._should_pause():
+                            return
+                        if len(self.brawlers_pick_data) < 1:
+                            print("No more brawlers selected for pushing in the menu. Bot will now pause itself until closed.")
+                            screenshot = self.window_controller.screenshot()
+                            notify_user("completed", screenshot, self)
+                            print("Bot stopping: all targets completed with no more brawlers.")
+                            self.window_controller.release_movement()
+                            self.window_controller.close()
+                            sys.exit(0)
+                        current_brawler = self.brawlers_pick_data.pop(0)
+                        self.brawlers_pick_data.append(current_brawler)
+                        next_brawler_name = self.brawlers_pick_data[0]['brawler']
+                        self.quit_shop()
+                        selected = self.Lobby_automation.select_brawler(next_brawler_name)
+                        attempts += 1
+                finally:
+                    self.Lobby_automation.selecting_brawler = False
+                if not selected:
                     return
-                if select_brawler == "success":
-                    self.Trophy_observer.change_trophies(self.brawlers_pick_data[0]['trophies'])
-                    self.Trophy_observer.current_wins = self.brawlers_pick_data[0]['wins'] if self.brawlers_pick_data[0]['wins'] != "" else 0
-                    self.Trophy_observer.win_streak = self.brawlers_pick_data[0]['win_streak']
+                self.Trophy_observer.change_trophies(self.brawlers_pick_data[0]['trophies'])
+                self.Trophy_observer.current_wins = self.brawlers_pick_data[0]['wins'] if self.brawlers_pick_data[0]['wins'] != "" else 0
+                self.Trophy_observer.win_streak = self.brawlers_pick_data[0]['win_streak']
             else:
                 self.Trophy_observer.change_trophies(self.brawlers_pick_data[0]['trophies'])
                 self.Trophy_observer.current_wins = self.brawlers_pick_data[0]['wins'] if self.brawlers_pick_data[0]['wins'] != "" else 0
@@ -273,8 +278,24 @@ class StageManager:
         print("Game has ended", current_state)
 
     def quit_shop(self):
-        self.window_controller.click(100*self.window_controller.width_ratio, 60*self.window_controller.height_ratio)
-        time.sleep(1)
+        if getattr(getattr(self, "Lobby_automation", None), "selecting_brawler", False):
+            return
+        now = time.time()
+        last_escape = getattr(self, "_last_shop_escape_at", 0.0)
+        if now - last_escape < 1.0:
+            return
+        self._last_shop_escape_at = now
+        if hasattr(self.window_controller, "press_escape") and self.window_controller.press_escape():
+            time.sleep(0.35)
+            return
+        if hasattr(self.window_controller, "android_back") and self.window_controller.android_back():
+            time.sleep(0.35)
+            return
+        self.window_controller.click(
+            100 * self.window_controller.width_ratio,
+            60 * self.window_controller.height_ratio,
+        )
+        time.sleep(0.35)
 
     def close_pop_up(self):
         screenshot = self.window_controller.screenshot()

@@ -954,17 +954,80 @@ def hash_playstyle(playstyle_info):
     return hashlib.sha256(str(playstyle_info).encode("utf-8")).hexdigest()
 
 
+def _map_notification_event_type(message_type: str) -> str:
+    if message_type == "brawler_goal":
+        return "brawler_complete"
+    return message_type
+
+
+def _notification_message(message_type: str, stage_manager) -> str:
+    queue = getattr(stage_manager, "brawlers_pick_data", None) or []
+    current = queue[0] if queue else {}
+    brawler = str(current.get("brawler", "") or "brawler")
+    messages = {
+        "completed": "Pyla has completed all its targets!",
+        "bot_is_stuck": "Your bot is currently stuck; attempted to restart Brawl Stars.",
+        "brawler_goal": f"Pyla completed brawler goal for {brawler}!",
+        "regular_minutes_ping": "Pyla is still running.",
+        "regular_matches_ping": "Pyla is still running.",
+        "bot_failed_brawler_selection": (
+            f"Pyla failed to select the brawler {brawler} after multiple attempts. "
+            "Try changing the OCR Scale Down setting or select it manually and restart."
+        ),
+    }
+    return messages.get(message_type, "Notification")
+
+
+def build_notification_details(message_type, stage_manager) -> dict:
+    details = {"message": _notification_message(message_type, stage_manager)}
+    queue = getattr(stage_manager, "brawlers_pick_data", None) or []
+    trophy_observer = getattr(stage_manager, "Trophy_observer", None)
+    if queue:
+        current = queue[0]
+        details["brawler"] = current.get("brawler", "")
+        details["target"] = current.get("push_until", "")
+        details["brawlers_left"] = len(queue)
+        if trophy_observer is not None:
+            details["trophies"] = trophy_observer.current_trophies
+            details["wins"] = trophy_observer.current_wins
+            details["win_streak"] = trophy_observer.win_streak
+        if len(queue) > 1:
+            details["next_up"] = queue[1].get("brawler", "")
+            try:
+                from gui.remote_formatting import format_queue_preview_names
+
+                preview = format_queue_preview_names(queue[1:3])
+                if preview:
+                    details["queue_preview"] = preview
+            except Exception:
+                pass
+    try:
+        from gui.instance_config import instance_context_for_notifications
+
+        details.update(instance_context_for_notifications())
+    except Exception:
+        pass
+    return details
+
+
 def notify_user(message_type, screenshot, stage_manager) -> None:
     import asyncio
+
+    if isinstance(stage_manager, dict):
+        details = stage_manager
+        event_type = message_type
+    else:
+        details = build_notification_details(message_type, stage_manager)
+        event_type = _map_notification_event_type(message_type)
 
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(async_notify_user(message_type, screenshot, stage_manager))
+            asyncio.create_task(async_notify_user(event_type, screenshot, details=details))
             return
     except RuntimeError:
         pass
-    asyncio.run(async_notify_user(message_type, screenshot, stage_manager))
+    asyncio.run(async_notify_user(event_type, screenshot, details=details))
 
 
 def debug_beep():
