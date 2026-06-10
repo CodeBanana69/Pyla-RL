@@ -23,6 +23,8 @@ def validate_config_value(section, key, value):
         "ocr_scale_down_factor",
         "enemy_spacing_blend",
         "enemy_spacing_tolerance",
+        "combat_dodge_blend",
+        "combat_dodge_jitter_degrees",
     }:
         number = float(text or "0")
         if number < 0:
@@ -32,6 +34,11 @@ def validate_config_value(section, key, value):
         blend = float(text or "0")
         if blend < 0 or blend > 1:
             raise ValueError("Spacing aggression must be between 0 and 1.")
+
+    if section == "settings" and key == "combat_dodge_blend":
+        blend = float(text or "0")
+        if blend < 0 or blend > 1:
+            raise ValueError("Dodge blend must be between 0 and 1.")
 
     if section == "discord" and key == "webhook_url" and text:
         if not re.match(r"^https://discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$", text):

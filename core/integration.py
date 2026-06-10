@@ -50,6 +50,9 @@ def migrate_bot_config(bot_config: dict | None = None) -> dict:
     bot_config.setdefault("enemy_spacing_blend", 0.35)
     bot_config.setdefault("enemy_spacing_tolerance", 40)
     bot_config.setdefault("enemy_spacing_hold_strafe", bot_config.get("strafe_while_attacking", "yes"))
+    bot_config.setdefault("combat_los_dodge_enabled", "yes")
+    bot_config.setdefault("combat_dodge_blend", 0.45)
+    bot_config.setdefault("combat_dodge_jitter_degrees", 18.0)
     return bot_config
 
 

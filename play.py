@@ -105,6 +105,7 @@ class Play:
         self.frame = None
         self._spacing_strafe_side = 1
         self._spacing_action = None
+        self._evasion_active = False
         self.match_intent_summary = ""
         self.refresh_enemy_spacing_config()
 
@@ -571,6 +572,84 @@ class Play:
         if hold_strafe is None:
             hold_strafe = bot_config.get("strafe_while_attacking", "yes")
         self.enemy_spacing_hold_strafe = config_bool(hold_strafe, True)
+        self.combat_los_dodge_enabled = config_bool(bot_config.get("combat_los_dodge_enabled"), True)
+        self.combat_dodge_blend = float(bot_config.get("combat_dodge_blend", 0.45))
+        self.combat_dodge_jitter_degrees = float(bot_config.get("combat_dodge_jitter_degrees", 18.0))
+
+    def apply_los_evasion_movement(self, brawler, data, movement):
+        self._evasion_active = False
+        if not getattr(self, "combat_los_dodge_enabled", True):
+            return movement
+        if not data or not data.get("player"):
+            return movement
+
+        base = self.movement_to_vector(movement)
+        if base is None:
+            return movement
+
+        player_data = data["player"][0]
+        player_pos = self.get_entity_pos(player_data)
+        walls = data.get("wall") or []
+        enemies = data.get("enemy") or []
+        if not self.is_there_enemy(enemies):
+            return movement
+
+        enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
+        if not enemy_result:
+            return movement
+        enemy_coords, _enemy_distance = enemy_result
+        if not self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack"):
+            return movement
+
+        blend = clamp(float(getattr(self, "combat_dodge_blend", 0.45)), 0.0, 1.0)
+        if blend <= 0:
+            return movement
+
+        jitter_degrees = float(getattr(self, "combat_dodge_jitter_degrees", 18.0))
+        direction_x = enemy_coords[0] - player_pos[0]
+        direction_y = enemy_coords[1] - player_pos[1]
+        toward_angle = math.atan2(direction_y, direction_x)
+        dodge_angle = (
+            toward_angle
+            + random.choice([-1, 1]) * (math.pi / 2)
+            + math.radians(random.uniform(-jitter_degrees, jitter_degrees))
+        )
+
+        random_move = self.get_random_movement()
+        dodge_vector = (
+            math.cos(dodge_angle) * JOYSTICK_RADIUS * 0.8 + random_move[0] * 0.2,
+            math.sin(dodge_angle) * JOYSTICK_RADIUS * 0.8 + random_move[1] * 0.2,
+        )
+        blended = (
+            base[0] * (1.0 - blend) + dodge_vector[0] * blend,
+            base[1] * (1.0 - blend) + dodge_vector[1] * blend,
+        )
+        magnitude = math.hypot(blended[0], blended[1])
+        if magnitude < 1:
+            return movement
+        scale = min(JOYSTICK_RADIUS, magnitude) / magnitude
+        blended = (blended[0] * scale, blended[1] * scale)
+
+        if not self.is_path_blocked(player_data, blended, walls):
+            self._evasion_active = True
+            self._spacing_action = "dodge"
+            return blended
+
+        flipped_angle = dodge_angle + math.pi
+        flipped = (
+            base[0] * (1.0 - blend) + math.cos(flipped_angle) * JOYSTICK_RADIUS * blend,
+            base[1] * (1.0 - blend) + math.sin(flipped_angle) * JOYSTICK_RADIUS * blend,
+        )
+        flip_mag = math.hypot(flipped[0], flipped[1])
+        if flip_mag >= 1:
+            flip_scale = min(JOYSTICK_RADIUS, flip_mag) / flip_mag
+            flipped = (flipped[0] * flip_scale, flipped[1] * flip_scale)
+            if not self.is_path_blocked(player_data, flipped, walls):
+                self._evasion_active = True
+                self._spacing_action = "dodge"
+                return flipped
+
+        return movement
 
     def get_effective_enemy_range(self, brawler):
         safe_range, attack_range, _ = self.get_brawler_range(brawler)
@@ -703,12 +782,17 @@ class Play:
                     "retreat": "Kiting back from enemy",
                     "hold": "Holding spacing",
                     "hold_strafe": "Holding spacing and strafing",
+                    "dodge": "Dodging under fire",
                 }
                 label = action_labels.get(action, "Engaging enemy")
                 in_range = enemy_distance <= attack_range
                 hittable = self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
                 dist = int(enemy_distance)
-                if in_range and hittable:
+                if getattr(self, "_evasion_active", False) and hittable:
+                    intent = f"{label} — enemy has line of sight at {dist}px"
+                    self.match_intent_summary = "Dodging"
+                    key = "match:dodge"
+                elif in_range and hittable:
                     intent = f"{label} — shooting at {dist}px (target {target}px)"
                     self.match_intent_summary = "Shooting"
                 elif in_range:
@@ -717,7 +801,8 @@ class Play:
                 else:
                     intent = f"{label} — {dist}px from enemy (target {target}px)"
                     self.match_intent_summary = label
-                key = f"match:{action}:{dist // 40}"
+                if not getattr(self, "_evasion_active", False):
+                    key = f"match:{action}:{dist // 40}"
 
         runtime_log.log_once(key, 2.5, runtime_log.LEVEL_INFO, "match", intent)
 
@@ -775,6 +860,7 @@ class Play:
                 'rotate_movement': self.rotate_movement
             }
         movement = self.get_movement()
+        movement = self.apply_los_evasion_movement(brawler, data, movement)
         self._update_match_intent(brawler, data)
         if self.movement_to_vector(movement) is None:
             self.window_controller.release_movement()

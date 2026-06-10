@@ -2561,6 +2561,21 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_hold_strafe"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_hold_strafe", value) } } }
                         }
                         FieldRow {
+                            label: "Dodge Under Fire"
+                            hint: "Random sideways jitter when an enemy has clear line of sight."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "combat_los_dodge_enabled"); onToggled: function(value) { root.saveValue("settings", "combat_los_dodge_enabled", value) } } }
+                        }
+                        FieldRow {
+                            label: "Dodge Blend"
+                            hint: "How much random dodge mixes into movement (0 = off, 1 = full dodge)."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_blend")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_blend", value) } }
+                        }
+                        FieldRow {
+                            label: "Dodge Jitter (deg)"
+                            hint: "Random angle wobble added to sideways dodge."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_jitter_degrees")); from: 5.0; to: 45.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_jitter_degrees", value) } }
+                        }
+                        FieldRow {
                             label: "Run For Minutes"
                             hint: "0 disables the session timer."
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "run_for_minutes")); onSaved: function(value) { root.saveValue("settings", "run_for_minutes", value) } }

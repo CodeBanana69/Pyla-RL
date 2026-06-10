@@ -94,6 +94,9 @@ class HubStateStore:
         "enemy_spacing_blend": ("bot", "float"),
         "enemy_spacing_tolerance": ("bot", "float"),
         "enemy_spacing_hold_strafe": ("bot", "yesno"),
+        "combat_los_dodge_enabled": ("bot", "yesno"),
+        "combat_dodge_blend": ("bot", "float"),
+        "combat_dodge_jitter_degrees": ("bot", "float"),
         "run_for_minutes": ("general", "int"),
         "emulator_autorestart": ("general", "yesno"),
         "scrcpy_max_width": ("general", "int"),
@@ -234,6 +237,9 @@ class HubStateStore:
             "enemy_spacing_hold_strafe",
             self.bot_config.get("strafe_while_attacking", "yes"),
         )
+        self.bot_config.setdefault("combat_los_dodge_enabled", "yes")
+        self.bot_config.setdefault("combat_dodge_blend", 0.45)
+        self.bot_config.setdefault("combat_dodge_jitter_degrees", 18.0)
 
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
@@ -445,6 +451,7 @@ class HubStateStore:
                 "bot_uses_gadgets",
                 "enemy_spacing_enabled",
                 "enemy_spacing_hold_strafe",
+                "combat_los_dodge_enabled",
                 "emulator_autorestart",
                 "super_debug",
                 "wall_stuck_debug",

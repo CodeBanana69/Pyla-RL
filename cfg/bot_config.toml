@@ -66,6 +66,7 @@ enemy_spacing_hold_strafe = "yes"
 strafe_while_attacking = "yes"
 strafe_interval = 1.6
 strafe_blend = 0.55
+combat_los_dodge_enabled = "yes"
 combat_dodge_blend = 0.45
 combat_dodge_jitter_degrees = 18.0
 lead_shots = "yes"
