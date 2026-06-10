@@ -21,6 +21,15 @@ class RuntimeLogTests(unittest.TestCase):
             handle.write("\n".join(lines) + "\n")
         return path
 
+    def test_startup_category_formats_banner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write_config(tmp, terminal_verbosity="normal")
+            runtime_log.configure(path)
+            buffer = io.StringIO()
+            with redirect_stdout(buffer):
+                runtime_log.log_info("startup", "Pyla-RL is free, open source, and must not be sold.")
+            self.assertIn("[Startup]", buffer.getvalue())
+
     def test_normal_verbosity_hides_movement_trace(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self.write_config(

@@ -2541,6 +2541,26 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "bot_uses_gadgets"); onToggled: function(value) { root.saveValue("settings", "bot_uses_gadgets", value) } } }
                         }
                         FieldRow {
+                            label: "Enemy Spacing"
+                            hint: "Maintain distance based on each brawler's safe and attack ranges."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_enabled"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_enabled", value) } } }
+                        }
+                        FieldRow {
+                            label: "Spacing Aggression"
+                            hint: "0 = kite at safe range, 1 = hug max attack range."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "enemy_spacing_blend")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "enemy_spacing_blend", value) } }
+                        }
+                        FieldRow {
+                            label: "Spacing Tolerance (px)"
+                            hint: "Dead zone around the target distance to reduce oscillation."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "enemy_spacing_tolerance")); from: 10.0; to: 120.0; onSaved: function(value) { root.saveValue("settings", "enemy_spacing_tolerance", value) } }
+                        }
+                        FieldRow {
+                            label: "Strafe In Range"
+                            hint: "Sideways drift while holding the ideal spacing band."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_hold_strafe"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_hold_strafe", value) } } }
+                        }
+                        FieldRow {
                             label: "Run For Minutes"
                             hint: "0 disables the session timer."
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "run_for_minutes")); onSaved: function(value) { root.saveValue("settings", "run_for_minutes", value) } }

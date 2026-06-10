@@ -1,9 +1,12 @@
 ﻿import hashlib
 import io
+import math
 import os
+import random
 import re
 import sys
 import time
+from pathlib import Path
 from io import BytesIO
 import ctypes
 import json
@@ -272,11 +275,18 @@ def refresh_brawl_stars_api_token_if_enabled(config, file_path="cfg/brawl_stars_
     return config
 
 
+class EasyOCRInitializationError(RuntimeError):
+    pass
+
+
 class DefaultEasyOCR:
     def __init__(self):
         import easyocr
 
-        self.reader = easyocr.Reader(['en'], verbose=False, gpu=False)
+        try:
+            self.reader = easyocr.Reader(['en'], verbose=False, gpu=False)
+        except Exception as exc:
+            raise EasyOCRInitializationError(f"EasyOCR initialization failed: {exc}") from exc
 
     def readtext(self, image_input):
         return self.reader.readtext(image_input)
@@ -367,6 +377,7 @@ def extract_text_strings(image_input):
 
 cfg_api_base_url = load_toml_as_dict("cfg/general_config.toml").get("api_base_url", "default")
 api_base_url = cfg_api_base_url if cfg_api_base_url != "default" else "localhost"
+PYLA_VERSION = str(load_toml_as_dict("cfg/general_config.toml").get("pyla_version", "pyla-rl"))
 brawlers_info_file_path = "cfg/brawlers_info.json"
 
 def count_hsv_pixels(cv_image, low_hsv, high_hsv):
@@ -375,11 +386,17 @@ def count_hsv_pixels(cv_image, low_hsv, high_hsv):
     return cv2.countNonZero(mask)
 
 def save_brawler_data(data):
-    """
-    Save the given data to a json file. As a list of dictionaries.
-    """
-    with open("latest_brawler_data.json", 'w') as f:
-        json.dump(data, f, indent=4)
+    """Save farm plan JSON for the active instance (if any)."""
+    try:
+        from core.integration import save_queue_data
+
+        save_queue_data(data)
+        return
+    except Exception:
+        pass
+    queue_path = resolve_project_path("latest_brawler_data.json")
+    with open(queue_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=4)
 
 
 def normalize_brawler_name(name):
@@ -788,6 +805,170 @@ def cprint(text: str, hex_color: str): #omg color!!!
         print(text)
 
 def get_dpi_scale():
-    user32 = ctypes.windll.user32
-    user32.SetProcessDPIAware()
-    return int(user32.GetDpiForSystem())
+    if sys.platform != "win32":
+        return 96
+    try:
+        return int(ctypes.windll.user32.GetDpiForSystem())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return 96
+
+
+def config_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def clamp(x, low, high):
+    if x < low:
+        return low
+    if x > high:
+        return high
+    return x
+
+
+JOYSTICK_RADIUS = 75
+
+SAFE_GLOBALS = {
+    "math": math,
+    "random": random,
+    "abs": abs,
+    "min": min,
+    "max": max,
+    "sum": sum,
+    "round": round,
+    "len": len,
+    "range": range,
+    "zip": zip,
+    "map": map,
+    "int": int,
+    "float": float,
+    "str": str,
+    "print": print,
+    "time_now": lambda: time.time(),
+    "random_int": random.randint,
+}
+
+
+def count_mask_pixels(mask, x1, y1, x2, y2):
+    height, width = mask.shape[:2]
+    x1 = max(0, min(width, int(x1)))
+    x2 = max(0, min(width, int(x2)))
+    y1 = max(0, min(height, int(y1)))
+    y2 = max(0, min(height, int(y2)))
+    if x1 >= x2 or y1 >= y2:
+        return 0
+    return cv2.countNonZero(mask[y1:y2, x1:x2])
+
+
+def clean_queue(data):
+    from core.integration import clean_queue as _clean_queue
+
+    return _clean_queue(data)
+
+
+def load_brawler_data():
+    try:
+        from core.integration import get_queue_path
+
+        queue_path = get_queue_path()
+        if not queue_path.exists():
+            return []
+        with open(queue_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except Exception:
+        queue_path = resolve_project_path("latest_brawler_data.json")
+        if not os.path.exists(queue_path):
+            return []
+        with open(queue_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+
+def interpret_pyla_code(pyla_code, context):
+    import traceback
+
+    safe_globals = SAFE_GLOBALS.copy()
+    safe_globals.update(context)
+    try:
+        exec(pyla_code, safe_globals)
+    except Exception:
+        print("Error executing .pyla code")
+        traceback.print_exc()
+        return None, safe_globals
+    return safe_globals.get("movement", None), safe_globals
+
+
+def load_all_brawlers_names():
+    brawler_names_path = Path(resolve_project_path("cfg/names.json"))
+    if not brawler_names_path.exists():
+        return {}
+    try:
+        with open(brawler_names_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"Error loading brawler names from {brawler_names_path}: {exc}")
+        return {}
+
+
+def load_pyla_script(filename):
+    import traceback
+
+    script_path = resolve_project_path(os.path.join("playstyles", filename))
+    try:
+        with open(script_path, "r", encoding="utf-8-sig") as handle:
+            metadata_header = handle.readline().strip()
+            metadata = json.loads(metadata_header) if metadata_header else {}
+            pyla_script = handle.read()
+        return metadata, pyla_script
+    except FileNotFoundError:
+        print(f"Error: The file {script_path} was not found.")
+        return {}, ""
+    except Exception as exc:
+        print(f"An error occurred while loading the .pyla script: {exc}")
+        traceback.print_exc()
+        return {}, ""
+
+
+def get_playstyles_list():
+    playstyles_dir = resolve_project_path("playstyles")
+    playstyles = []
+    if os.path.isdir(playstyles_dir):
+        for filename in os.listdir(playstyles_dir):
+            if filename.endswith(".pyla"):
+                metadata, _ = load_pyla_script(filename)
+                playstyles.append({"filename": filename, "metadata": metadata})
+    return playstyles
+
+
+def load_default_pyla_script():
+    config = load_toml_as_dict("cfg/bot_config.toml")
+    return load_pyla_script(config.get("current_playstyle", "team_showdown.pyla"))
+
+
+def hash_playstyle(playstyle_info):
+    return hashlib.sha256(str(playstyle_info).encode("utf-8")).hexdigest()
+
+
+def notify_user(message_type, screenshot, stage_manager) -> None:
+    import asyncio
+
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(async_notify_user(message_type, screenshot, stage_manager))
+            return
+    except RuntimeError:
+        pass
+    asyncio.run(async_notify_user(message_type, screenshot, stage_manager))
+
+
+def debug_beep():
+    import threading
+    import winsound
+
+    threading.Thread(target=lambda: winsound.Beep(1200, 500), daemon=True).start()

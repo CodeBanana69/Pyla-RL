@@ -56,6 +56,7 @@ class HubStateStore:
         "minimum_movement_delay": ("bot", "float"),
         "wall_detection_confidence": ("bot", "float"),
         "close_tile_detector_enabled": ("bot", "yesno"),
+        "centered_wall_detection": ("bot", "yesno"),
         "entity_detection_confidence": ("bot", "float"),
         "unstuck_movement_delay": ("bot", "float"),
         "unstuck_movement_hold_time": ("bot", "float"),
@@ -89,6 +90,10 @@ class HubStateStore:
         "used_threads": ("general", "str"),
         "play_again_on_win": ("bot", "yesno"),
         "bot_uses_gadgets": ("bot", "yesno"),
+        "enemy_spacing_enabled": ("bot", "yesno"),
+        "enemy_spacing_blend": ("bot", "float"),
+        "enemy_spacing_tolerance": ("bot", "float"),
+        "enemy_spacing_hold_strafe": ("bot", "yesno"),
         "run_for_minutes": ("general", "int"),
         "emulator_autorestart": ("general", "yesno"),
         "scrcpy_max_width": ("general", "int"),
@@ -214,10 +219,21 @@ class HubStateStore:
         self.bot_config.setdefault("gadget_pixels_minimum", 1100.0)
         self.bot_config.setdefault("hypercharge_pixels_minimum", 1800.0)
         self.bot_config.setdefault("post_match_action", "lobby")
-        self.bot_config.setdefault("current_playstyle", "default.pyla")
+        self.bot_config.setdefault("current_playstyle", "team_showdown.pyla")
+        self.bot_config.setdefault("centered_wall_detection", "no")
+        self.bot_config.setdefault("perceived_tile_size", 54)
+        if _to_bool(self.bot_config.get("close_tile_detector_enabled")):
+            self.bot_config["centered_wall_detection"] = "yes"
         self.bot_config.setdefault("showdown_playstyle_mode", "follow")
         self.bot_config.setdefault("play_again_on_win", "no")
         self.bot_config.setdefault("bot_uses_gadgets", "yes")
+        self.bot_config.setdefault("enemy_spacing_enabled", "yes")
+        self.bot_config.setdefault("enemy_spacing_blend", 0.35)
+        self.bot_config.setdefault("enemy_spacing_tolerance", 40)
+        self.bot_config.setdefault(
+            "enemy_spacing_hold_strafe",
+            self.bot_config.get("strafe_while_attacking", "yes"),
+        )
 
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
@@ -327,7 +343,7 @@ class HubStateStore:
         from performance_profile import PERFORMANCE_PROFILES
         from gui.brawler_queue import brawler_icon_uri, load_push_order, load_queue, queue_state_items
         from gui.official_source import read_build_info, verify_official_source
-        from utils import get_brawler_list
+        from utils import get_brawler_list, get_playstyles_list
 
         from gui.hub_tutorials import tutorial_topics
 
@@ -364,6 +380,14 @@ class HubStateStore:
                     for name in brawler_names
                 ],
                 "tutorials": tutorial_topics(),
+                "playstyles": [
+                    {
+                        "filename": item.get("filename", ""),
+                        "name": (item.get("metadata") or {}).get("name", item.get("filename", "")),
+                        "description": (item.get("metadata") or {}).get("description", ""),
+                    }
+                    for item in get_playstyles_list()
+                ],
             },
         })
         return state
@@ -419,6 +443,8 @@ class HubStateStore:
                 "capture_bad_vision_frames",
                 "play_again_on_win",
                 "bot_uses_gadgets",
+                "enemy_spacing_enabled",
+                "enemy_spacing_hold_strafe",
                 "emulator_autorestart",
                 "super_debug",
                 "wall_stuck_debug",

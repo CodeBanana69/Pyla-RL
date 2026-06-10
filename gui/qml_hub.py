@@ -1,6 +1,7 @@
-import sys
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from gui.hub_state import HubStateStore
@@ -49,6 +50,7 @@ class QmlHub:
             on_close_callback=None,
             settings_only=False,
     ):
+        os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window=false")
         ensure_pyside6_available()
         from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer
         from PySide6.QtGui import QGuiApplication, QIcon

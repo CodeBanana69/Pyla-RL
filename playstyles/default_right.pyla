@@ -1,77 +1,57 @@
-{"name": "Default Playstyle", "description": "OP main combat logic with fixed ability readiness", "brawlers": ["all"], "gamemodes": ["all"], "author": "OP main", "date": "2026-05-02"}
+﻿{"name": "Default - RIGHT", "description": "Default logic, when target is RIGHT", "brawlers": ["all"], "gamemodes": ["3v3", "5v5"], "author": "Official", "date": "2026-04-23"}
 def no_enemy_movement(player_data, walls):
-    preferred_movement = (0, -JOYSTICK_RADIUS)
+    preferred_movement = (JOYSTICK_RADIUS, 0)
+
     if not is_path_blocked(player_data, preferred_movement, walls):
         return preferred_movement
-    alternative_moves = [(0, -JOYSTICK_RADIUS), (-JOYSTICK_RADIUS, 0), (0, JOYSTICK_RADIUS), (JOYSTICK_RADIUS, 0)]
-    alternative_moves.remove(preferred_movement)
-    random.shuffle(alternative_moves)
-    for move in alternative_moves:
-        if not is_path_blocked(player_data, move, walls):
-            return move
-    return preferred_movement
-
-def teammate_or_default_movement():
-    closest_teammate_coords, _ = find_closest_teammate(teammate_data, player_pos, walls)
-    if not closest_teammate_coords:
-        return no_enemy_movement(player_data, walls)
-    direction_x = closest_teammate_coords[0] - player_pos[0]
-    direction_y = closest_teammate_coords[1] - player_pos[1]
-    move_horizontal = (direction_x, 0)
-    move_vertical = (0, direction_y)
-    move_diagonal = (direction_x, direction_y)
-    movement_options = [move_diagonal, move_vertical, move_horizontal]
-    for move in movement_options:
-        if not is_path_blocked(player_data, move, walls):
-            return move
-    return move_diagonal
-
-def avoid_poison_gas_movement():
-    counts = is_there_poison_gas(player_data)
-    if counts.get("up"):
-        return (0, JOYSTICK_RADIUS)
-    if counts.get("down"):
-        return (0, -JOYSTICK_RADIUS)
-    if counts.get("left"):
-        return (JOYSTICK_RADIUS, 0)
-    if counts.get("right"):
-        return (-JOYSTICK_RADIUS, 0)
-    return None
+    else:
+        # Try alternative movements
+        alternative_moves = [(0, -JOYSTICK_RADIUS), (-JOYSTICK_RADIUS, 0), (0, JOYSTICK_RADIUS), (JOYSTICK_RADIUS, 0)]
+        alternative_moves.remove(preferred_movement)
+        random.shuffle(alternative_moves)
+        for move in alternative_moves:
+            if not is_path_blocked(player_data, move, walls):
+                return move
+        return preferred_movement
 
 brawler_info = brawlers_info.get(brawler)
 if not brawler_info:
     raise ValueError(f"Brawler '{brawler}' not found in brawlers info.")
 must_brawler_hold_attack = must_brawler_hold_attack(brawler, brawlers_info)
+# if a brawler has been holding an attack for its max duration + the bot setting, then we release
 if must_brawler_hold_attack and persistent_data["time_since_holding_attack"] is not None and time.time() - persistent_data["time_since_holding_attack"] >= brawler_info['hold_attack'] + seconds_to_hold_attack_after_reaching_max:
     attack(touch_up=True, touch_down=False)
     persistent_data["time_since_holding_attack"] = None
 
 safe_range, attack_range, super_range = get_brawler_range(brawler)
-player_pos = get_player_pos(player_data)
-if debug:
-    print("found player pos:", player_pos)
-anti_poison_gas_movement = avoid_poison_gas_movement()
+player_pos = get_entity_pos(player_data)
+if debug: print("found player pos:", player_pos)
 if not is_there_enemy(enemy_data):
-    movement = anti_poison_gas_movement or teammate_or_default_movement()
+    movement = no_enemy_movement(player_data, walls)
 else:
     enemy_coords, enemy_distance = find_closest_enemy(enemy_data, player_pos, walls, "attack")
     if enemy_coords is None:
-        movement = anti_poison_gas_movement or teammate_or_default_movement()
+        movement = no_enemy_movement(player_data, walls)
     else:
-        if debug:
-            print("found enemy pos:", enemy_coords)
+        if debug: print("found enemy pos:", enemy_coords)
         movement = get_enemy_spacing_movement(player_data, player_pos, enemy_coords, enemy_distance, brawler, walls)
 
         if is_super_ready and persistent_data["time_since_holding_attack"] is None:
             super_type = brawler_info['super_type']
             enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "super")
-            if should_use_super_on_enemy(
-                brawler, super_type, enemy_distance, attack_range, super_range, enemy_hittable
-            ):
+
+            if (enemy_hittable and
+                    (enemy_distance <= super_range
+                     or super_type in ["spawnable", "other"]
+                     or (brawler in ["stu", "surge"] and super_type == "charge" and enemy_distance <= super_range + attack_range)
+                    )):
                 if is_hypercharge_ready:
                     use_hypercharge()
+
                 use_super()
 
+
+        # Attack if enemy is within attack range and hittable
         if enemy_distance <= attack_range:
             enemy_hittable = is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
             if enemy_hittable:

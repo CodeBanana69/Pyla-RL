@@ -37,6 +37,17 @@ key_coords_dict = {
     "F": (1360, 920),
 }
 
+# Upstream playstyle / stage_manager abstract key names.
+press_coords_dict = {
+    "hypercharge": (1400, 990),
+    "gadget": (1640, 990),
+    "attack": (1725, 800),
+    "proceed": (1660, 980),
+    "middle_got_it": (960, 980),
+    "super": (1510, 880),
+    "play_again": (1360, 920),
+}
+
 directions_xy_deltas_dict = {
     "w": (0, -150),
     "a": (-150, 0),
@@ -680,6 +691,10 @@ class WindowController:
             self.last_joystick_pos = (None, None)
             self.last_joystick_down_time = 0.0
             self.FRAME_STALE_TIMEOUT = 15.0
+            debug_settings = load_toml_as_dict("cfg/debug_settings.toml")
+            self.re_apply_movement = str(debug_settings.get("re_apply_movement", "yes")).strip().lower() in (
+                "1", "true", "yes", "on"
+            )
             self.start_scrcpy_client()
             atexit.register(self.close)
             print("Scrcpy client started successfully.")
@@ -1593,6 +1608,47 @@ class WindowController:
             time.sleep(step_delay)
             self.touch_move(int(cx), int(cy), pointer_id=self.PID_ATTACK)
         return self.touch_up(int(end_x), int(end_y), pointer_id=self.PID_ATTACK)
+
+    def move(self, x, y):
+        """Upstream-compatible vector joystick movement."""
+        if self.joystick_x is None or self.joystick_y is None:
+            return
+        target_x = self.joystick_x + x
+        target_y = self.joystick_y + y
+        re_apply = getattr(self, "re_apply_movement", True)
+        if not self.are_we_moving:
+            if not self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK):
+                return
+            self.touch_move(target_x, target_y, pointer_id=self.PID_JOYSTICK)
+            self.are_we_moving = True
+            self.last_joystick_pos = (target_x, target_y)
+            self.last_joystick_down_time = time.time()
+            return
+        if not re_apply and self.last_joystick_pos == (target_x, target_y):
+            return
+        self.touch_move(target_x, target_y, pointer_id=self.PID_JOYSTICK)
+        self.last_joystick_pos = (target_x, target_y)
+        self.last_joystick_down_time = time.time()
+
+    def release_movement(self):
+        self.stop_joystick()
+
+    def press(self, key, delay=0.02, touch_up=True, touch_down=True):
+        if key not in press_coords_dict:
+            return
+        x, y = press_coords_dict[key]
+        self.click(x * self.width_ratio, y * self.height_ratio, delay, touch_up=touch_up, touch_down=touch_down)
+
+    def reconnect_scrcpy(self, max_retries=3):
+        for attempt in range(1, max_retries + 1):
+            if self.restart_scrcpy_client():
+                return True
+            time.sleep(0.5 * attempt)
+        return False
+
+    def is_brawl_stars_running(self):
+        opened = self.foreground_package(timeout=3)
+        return opened == BRAWL_STARS_PACKAGE
 
     def close(self):
         if hasattr(self, 'scrcpy_client'):

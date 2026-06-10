@@ -21,10 +21,17 @@ def validate_config_value(section, key, value):
         "unstuck_movement_delay",
         "unstuck_movement_hold_time",
         "ocr_scale_down_factor",
+        "enemy_spacing_blend",
+        "enemy_spacing_tolerance",
     }:
         number = float(text or "0")
         if number < 0:
             raise ValueError(f"{key.replace('_', ' ')} cannot be negative.")
+
+    if section == "settings" and key == "enemy_spacing_blend":
+        blend = float(text or "0")
+        if blend < 0 or blend > 1:
+            raise ValueError("Spacing aggression must be between 0 and 1.")
 
     if section == "discord" and key == "webhook_url" and text:
         if not re.match(r"^https://discord(?:app)?\.com/api/webhooks/\d+/[\w-]+$", text):

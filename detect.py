@@ -1,4 +1,4 @@
-import os
+﻿import os
 import platform
 import warnings
 
@@ -221,6 +221,8 @@ def _postprocess_raw(raw_output, conf_thresh=0.6, iou_thresh=0.6):
 
 class Detect:
     def __init__(self, model_path, ignore_classes=None, classes=None, input_size=(640, 640)):
+        optimal_threads = get_optimal_threads()
+        cv2.setNumThreads(optimal_threads)
         self.preferred_device = load_toml_as_dict("cfg/general_config.toml")["cpu_or_gpu"]
         self.model_path = model_path
         self.classes = classes
@@ -353,7 +355,12 @@ class Detect:
             for row in detection:
                 x1, y1, x2, y2 = int(row[0]), int(row[1]), int(row[2]), int(row[3])
                 class_id = int(row[5])
-                class_name = self.classes[class_id]
+                if self.classes is None:
+                    class_name = str(class_id)
+                elif class_id < 0 or class_id >= len(self.classes):
+                    continue
+                else:
+                    class_name = self.classes[class_id]
 
                 if class_id in self.ignore_classes or class_name in self.ignore_classes:
                     continue

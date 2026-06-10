@@ -68,6 +68,29 @@ PERFORMANCE_PROFILES = {
             "wall_detection_interval_seconds": 1.0,
         },
     },
+    "quality_fullres": {
+        "description": "Full-resolution emulator capture for strong PCs (1920 native width).",
+        "general_config": {
+            "cpu_or_gpu": "auto",
+            "max_ips": 0,
+            "scrcpy_max_fps": 60,
+            "scrcpy_max_width": 0,
+            "scrcpy_bitrate": 4000000,
+            "onnx_cpu_threads": 4,
+            "used_threads": 4,
+            "duplicate_frame_replay_enabled": "yes",
+            "duplicate_frame_replay_max_ips": 25,
+            "duplicate_frame_replay_play_avg_limit": 0.22,
+        },
+        "bot_config": {
+            "entity_detection_confidence": 0.55,
+            "entity_detection_retry_confidence": 0.35,
+        },
+        "time_tresholds": {
+            "wall_detection": 1.0,
+            "wall_detection_interval_seconds": 1.0,
+        },
+    },
     "high_ips": {
         "description": "Maximum throughput: debug overlays off, fewer vision passes, tuned duplicate-frame replay.",
         "general_config": {

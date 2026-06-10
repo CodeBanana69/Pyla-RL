@@ -1,4 +1,3 @@
-# Timer thresholds (filename keeps legacy "tresholds" spelling for backward compatibility).
 state_check = 1.5
 no_detections = 10
 game_start = 0
@@ -6,7 +5,7 @@ idle = 5
 gadget = 0.1
 hypercharge = 0.1
 super = 0.1
-wall_detection = 1.0
+wall_detection = 0.25
 wall_detection_interval_seconds = 1.0
 no_detection_proceed = 8.5
 check_if_brawl_stars_crashed = 10
