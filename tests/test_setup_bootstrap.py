@@ -81,7 +81,7 @@ class SetupBootstrapTests(unittest.TestCase):
         source = Path("tools/setup_bootstrap.py").read_text(encoding="utf-8")
 
         self.assertIn("ensure_project_venv", source)
-        self.assertIn("verify_cv2_import", source)
+        self.assertIn("verify_runtime_imports", source)
         self.assertIn("venv_command + [\"setup.py\", \"--pyla-install\"]", source)
 
     def test_general_config_template_requires_first_run_wizard(self):
@@ -104,7 +104,8 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn('"numpy<2.0.0"', source)
         self.assertIn("PYLAAI_NUMPY_REPAIR", source)
         self.assertIn("ModuleNotFoundError", source)
-        self.assertIn("setup.exe", source)
+        launcher = Path("pyla-rl.bat").read_text(encoding="utf-8")
+        self.assertIn("setup.exe", launcher)
 
     def test_setup_splits_easyocr_from_core_batch(self):
         source = Path("setup.py").read_text(encoding="utf-8")
@@ -113,6 +114,7 @@ class SetupBootstrapTests(unittest.TestCase):
         core_end = source.index("]", core_start)
         core_block = source[core_start:core_end]
         self.assertNotIn("easyocr", core_block)
+        self.assertIn('"pandas>=2.0.0"', core_block)
         self.assertIn('force_install(["easyocr"], no_deps=True)', source)
         self.assertIn('"scikit-image"', source)
 

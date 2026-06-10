@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 RUN_BAT_NAME = "pyla-rl.bat"
+_RUNTIME_IMPORT_CHECK = "import cv2, pandas"
 LEGACY_BAT_NAMES = (
     "Run Pyla-RL.bat",
     "Run PylaAi-XXZ.bat",
@@ -34,22 +35,22 @@ echo.
 
 if exist "cfg\\pyla_python.txt" (
     set /p PYLA_PY=<cfg\\pyla_python.txt
-    "%PYLA_PY%" -c "import cv2" >nul 2>&1
+    "%PYLA_PY%" -c "{_RUNTIME_IMPORT_CHECK}" >nul 2>&1
     if not errorlevel 1 (
         set "PY=%PYLA_PY%"
         goto :run
     )
-    echo Pinned Python from setup is missing OpenCV; trying other interpreters...
+    echo Pinned Python from setup is missing required packages; trying other interpreters...
     echo.
 )
 
 if exist ".venv\\Scripts\\python.exe" (
-    ".venv\\Scripts\\python.exe" -c "import cv2" >nul 2>&1
+    ".venv\\Scripts\\python.exe" -c "{_RUNTIME_IMPORT_CHECK}" >nul 2>&1
     if not errorlevel 1 (
         set "PY=.venv\\Scripts\\python.exe"
         goto :run
     )
-    echo Found .venv but OpenCV is not installed there; trying other interpreters...
+    echo Found .venv but required packages are missing there; trying other interpreters...
     echo.
 )
 
@@ -83,14 +84,14 @@ pause
 exit /b 1
 
 :precheck
-%PY% -c "import cv2" >nul 2>&1
+%PY% -c "{_RUNTIME_IMPORT_CHECK}" >nul 2>&1
 if not errorlevel 1 goto :run
 
 :run
 echo Using: %PY%
 echo.
 
-%PY% -c "import cv2" >nul 2>&1
+%PY% -c "{_RUNTIME_IMPORT_CHECK}" >nul 2>&1
 if errorlevel 1 (
     echo Dependencies are not installed for this Python.
     echo.
@@ -173,6 +174,6 @@ def create_run_file(
     remove_legacy_launchers(project_dir)
 
     run_bat = project_dir / RUN_BAT_NAME
-    run_bat.write_text(_BAT_CONTENT, encoding="ascii")
+    run_bat.write_text(_BAT_CONTENT.format(_RUNTIME_IMPORT_CHECK=_RUNTIME_IMPORT_CHECK), encoding="ascii")
     print(f"Created {run_bat.name}")
     return run_bat

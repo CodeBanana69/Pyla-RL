@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.launcher_bat import candidate_python_commands
-from tools.python_runtime import probe_cv2, read_python_pin, setup_status_path
+from tools.python_runtime import probe_cv2, probe_runtime_imports, read_python_pin, setup_status_path
 
 
 def main() -> int:
@@ -22,6 +22,7 @@ def main() -> int:
     if pin:
         print(f"Pinned Python (cfg/pyla_python.txt): {pin}")
         print(f"  cv2: {probe_cv2([pin])}")
+        print(f"  runtime: {probe_runtime_imports([pin])}")
         print()
 
     status_path = setup_status_path(ROOT)
@@ -34,15 +35,18 @@ def main() -> int:
     if venv_python.exists():
         print(f".venv Python: {venv_python}")
         print(f"  cv2: {probe_cv2([str(venv_python)])}")
+        print(f"  runtime: {probe_runtime_imports([str(venv_python)])}")
         print()
 
     print("Launcher candidates:")
     for label, command in candidate_python_commands():
         print(f"  [{label}] {' '.join(command)}")
         print(f"    cv2: {probe_cv2(command)}")
+        print(f"    runtime: {probe_runtime_imports(command)}")
     print()
     print(f"Current interpreter: {sys.executable}")
     print(f"  cv2: {probe_cv2([sys.executable])}")
+    print(f"  runtime: {probe_runtime_imports([sys.executable])}")
     return 0
 
 

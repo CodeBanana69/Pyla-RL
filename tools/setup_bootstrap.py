@@ -326,24 +326,26 @@ def main():
 
     from tools.hub_first_run import ensure_hub_first_run_wizard
     from tools.launcher_bat import create_run_file
-    from tools.python_runtime import verify_cv2_import, write_setup_status
+    from tools.python_runtime import verify_runtime_imports, write_setup_status
 
     try:
-        cv2_info = verify_cv2_import(venv_command)
+        runtime_info = verify_runtime_imports(venv_command)
     except RuntimeError as exc:
         print("")
         print(str(exc))
         print("")
         print("Setup did not finish cleanly. Try running:")
+        print(f'  "{venv_executable}" -m pip install pandas>=2.0.0')
         print(f'  "{venv_executable}" -m pip install --force-reinstall --no-deps opencv-python==4.8.0.76')
         print(f'  "{venv_executable}" tools\\check_runtime.py')
         input("Press Enter to close...")
         return 1
 
+    versions = runtime_info.get("versions") or {}
     write_setup_status(
         project_dir,
         python_executable=venv_executable,
-        cv2_version=str(cv2_info.get("cv2", "")),
+        cv2_version=str(versions.get("cv2", "")),
     )
     ensure_hub_first_run_wizard(project_dir)
     create_run_file(project_dir, python_executable=venv_executable)

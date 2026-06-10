@@ -64,6 +64,45 @@ def verify_cv2_import(python_command: list[str]) -> dict:
     return result
 
 
+def probe_runtime_imports(python_command: list[str]) -> dict:
+    script = (
+        "import json, sys\n"
+        "errors = []\n"
+        "versions = {}\n"
+        "for module_name, attr in (('cv2', '__version__'), ('pandas', '__version__')):\n"
+        "    try:\n"
+        "        module = __import__(module_name)\n"
+        "        versions[module_name] = getattr(module, attr, 'ok')\n"
+        "    except Exception as exc:\n"
+        "        errors.append(f'{module_name}: {exc}')\n"
+        "print(json.dumps({\n"
+        "    'ok': not errors,\n"
+        "    'executable': sys.executable,\n"
+        "    'versions': versions,\n"
+        "    'error': '; '.join(errors),\n"
+        "}))\n"
+    )
+    try:
+        output = subprocess.check_output(
+            python_command + ["-c", script],
+            stderr=subprocess.STDOUT,
+            text=True,
+        ).strip()
+        return json.loads(output.splitlines()[-1])
+    except Exception as exc:
+        return {"ok": False, "executable": " ".join(python_command), "error": str(exc)}
+
+
+def verify_runtime_imports(python_command: list[str]) -> dict:
+    result = probe_runtime_imports(python_command)
+    if not result.get("ok"):
+        raise RuntimeError(
+            f"Required runtime packages are missing for {result.get('executable')}: "
+            f"{result.get('error', 'unknown error')}"
+        )
+    return result
+
+
 def write_setup_status(project_dir: Path, *, python_executable: str, cv2_version: str) -> Path:
     status_path = setup_status_path(project_dir)
     status_path.parent.mkdir(parents=True, exist_ok=True)
