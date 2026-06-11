@@ -1,4 +1,4 @@
-personal_webhook = ""
+﻿personal_webhook = ""
 discord_id = ""
 super_debug = "no"
 visual_debug = "yes"
@@ -46,3 +46,5 @@ duplicate_frame_replay_play_avg_limit = 0.22
 terminal_verbosity = "normal"
 movement_debug = "no"
 terminal_summary_seconds = 5
+ui_theme = "dark"
+ui_animations = "yes"
