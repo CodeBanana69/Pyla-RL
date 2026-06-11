@@ -619,7 +619,7 @@ class LobbyAutomation:
 
     def _select_brawler_on_open_grid(self, brawler, *, max_scrolls=None, sort_applied=False):
         if max_scrolls is None:
-            max_scrolls = int(self._timing("default_max_scrolls", 40))
+            max_scrolls = int(self._timing("default_max_scrolls", 90))
         general_config = load_toml_as_dict("cfg/general_config.toml")
         debug_enabled = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
         try:
@@ -633,7 +633,7 @@ class LobbyAutomation:
         if len(target_key) <= 5:
             grid_ocr_scale = max(grid_ocr_scale, 0.95)
         if sort_applied:
-            max_scrolls = min(max_scrolls, int(self._timing("sorted_max_scrolls", 40)))
+            max_scrolls = min(max_scrolls, int(self._timing("sorted_max_scrolls", 90)))
 
         same_screen_attempts = 0
         max_same_screen_attempts = 3

@@ -36,7 +36,7 @@ pick_verify_delay = 0.35
 detail_back_delay = 0.25
 select_confirm_delay = 0.35
 lobby_return_poll = 0.35
-sorted_max_scrolls = 40
-default_max_scrolls = 40
+sorted_max_scrolls = 90
+default_max_scrolls = 90
 starr_nova_dismiss_delay = 0.35
 
