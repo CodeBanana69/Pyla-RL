@@ -4,7 +4,6 @@
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/CodeBanana69/Pyla-RL)
 [![Focus](https://img.shields.io/badge/mode-Showdown%20(trio)-FF9F0A)](README.md#features)
-[![CI](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
 [![GitHub stars](https://img.shields.io/github/stars/CodeBanana69/Pyla-RL?style=social)](https://github.com/CodeBanana69/Pyla-RL)
 
