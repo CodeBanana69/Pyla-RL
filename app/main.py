@@ -11,6 +11,13 @@ import warnings
 from collections import deque
 from pathlib import Path
 
+_APP_DIR = Path(__file__).resolve().parent
+_INSTALL_ROOT = _APP_DIR.parent
+for _path in (_APP_DIR, _INSTALL_ROOT):
+    _entry = str(_path)
+    if _path.is_dir() and _entry not in sys.path:
+        sys.path.insert(0, _entry)
+
 # requests<2.34 warns when urllib3>=2.7 is installed; harmless but noisy on every import.
 warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*", module="requests")
 
