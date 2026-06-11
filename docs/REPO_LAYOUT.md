@@ -3,7 +3,7 @@
 [![Pyla-RL](https://img.shields.io/badge/repo-Pyla--RL-8E8E93)](https://github.com/CodeBanana69/Pyla-RL)
 [![CI](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml)
 
-Quick map of where code and data live in Pyla-RL. Project overview: [README](README.md).
+Quick map of where code and data live in Pyla-RL. Project overview: [README](../README.md).
 
 ## Install root (what you see after extract)
 
@@ -12,7 +12,7 @@ Quick map of where code and data live in Pyla-RL. Project overview: [README](REA
 | `setup.exe` | One-click Windows setup |
 | `updater.exe` | GitHub update installer |
 | `pyla-rl.bat` | Canonical launcher |
-| [`README.md`](../README.md) | Short pointer to full docs |
+| [`README.md`](../README.md) | GitHub landing page and project overview |
 | [`app/`](../app/) | Runtime Python modules (`main.py`, `play.py`, …) |
 | [`bin/`](../bin/) | Bundled `adb.exe` and DLLs |
 | [`cfg/`](../cfg/) | Config templates and machine settings |
@@ -21,7 +21,7 @@ Quick map of where code and data live in Pyla-RL. Project overview: [README](REA
 | [`instances/`](../instances/) | Per-bot farm plans (multi-instance) |
 | [`tools/`](../tools/) | Setup helpers, diagnostics, dev scripts |
 | [`tests/`](../tests/) | Unit tests |
-| [`docs/`](.) | Full README, tutorials, changelog |
+| [`docs/`](.) | Tutorials, changelog, assets |
 
 ## Entry points
 
