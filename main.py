@@ -781,7 +781,7 @@ def pyla_main(data):
             try:
                 if not self.window_controller.is_brawl_stars_running():
                     runtime_log.log_warn("recovery", "Brawl Stars is not in foreground; restarting...")
-                    self.window_controller.device.app_start(self.window_controller.BRAWL_STARS_PACKAGE)
+                    self.window_controller.device.app_start(self.window_controller.brawl_stars_package)
                     time.sleep(3)
                 self.time_since_checked_if_brawl_stars_crashed = now
             except AdbError:
