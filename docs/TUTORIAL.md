@@ -6,6 +6,8 @@
 
 Step-by-step guides for every major feature. Quick summaries are also available in the Hub **Help** tab and via **?** buttons on each tab.
 
+**See it in action:** Hub and control-window screenshots on the main [README](../README.md#screenshots).
+
 Back to the main [README](../README.md) for install links, badges, and feature overview.
 
 ## Setup and running

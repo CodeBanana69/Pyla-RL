@@ -5,6 +5,8 @@
 
 ## Install
 
+![Pyla-RL Hub Overview](../assets/hub-overview.png)
+
 1. Download or clone Pyla-RL from [GitHub](https://github.com/CodeBanana69/Pyla-RL) (see badges and links on the [main README](../../README.md)).
 2. Run `setup.exe` in the project folder.
 3. Wait for Python 3.11 and dependencies to install.
