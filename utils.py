@@ -438,6 +438,21 @@ def resolve_brawler_name_alias(name):
     normalized = normalize_brawler_name(name)
     return load_brawler_name_aliases().get(normalized, normalized)
 
+
+def resolve_brawler_info_key(name, brawlers_info=None):
+    brawlers_info = brawlers_info or load_brawlers_info()
+    if not name:
+        return name
+    if name in brawlers_info:
+        return name
+    needle = normalize_brawler_name(name)
+    if not needle:
+        return name
+    for key in brawlers_info:
+        if normalize_brawler_name(key) == needle:
+            return key
+    return name
+
 def get_config_player_tag(config):
     tag = str(config.get("player_tag", "")).strip()
     if tag and tag.upper() != "#YOURTAG":

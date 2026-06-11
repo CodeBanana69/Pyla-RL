@@ -191,6 +191,11 @@ class TestBrawlerDetailVerification(unittest.TestCase):
         screenshot = np.zeros((540, 960, 3), dtype=np.uint8)
         self.assertFalse(self.automation._verify_brawler_detail_card(screenshot, "jacky"))
 
+    def test_r_t_target_key_preserves_hyphen(self):
+        self.assertEqual(self.automation._brawler_target_key("rt"), "r-t")
+        self.assertEqual(self.automation._brawler_target_key("R-T"), "r-t")
+        self.assertTrue(self.automation._is_confident_grid_name_match("r-t", "r-t"))
+
     def test_short_brawler_names_require_exact_grid_match(self):
         self.automation.known_brawler_names.add("bo")
         self.assertTrue(self.automation._is_confident_grid_name_match("bo", "bo"))

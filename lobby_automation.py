@@ -19,6 +19,7 @@ from utils import (
     count_hsv_pixels,
     load_toml_as_dict,
     load_brawlers_info,
+    normalize_brawler_name,
     resolve_brawler_name_alias,
 )
 
@@ -365,6 +366,7 @@ class LobbyAutomation:
 
     def _normalize_grid_label(self, raw_text):
         normalized = self.resolve_ocr_typos(self.normalize_ocr_name(raw_text))
+        normalized = self._ocr_name_from_brawler_ref(normalized)
         if len(normalized) <= 4:
             fixed = normalized.translate(self._ocr_digit_fixes())
             fixed = self.resolve_ocr_typos(fixed)
@@ -627,8 +629,7 @@ class LobbyAutomation:
         except (TypeError, ValueError):
             ocr_scale = 0.65
         ocr_scale = max(0.35, min(1.0, ocr_scale))
-        target_key = self.normalize_ocr_name(brawler)
-        target_key = self.resolve_ocr_typos(target_key)
+        target_key = self._brawler_target_key(brawler)
         grid_ocr_scale = max(ocr_scale, 0.75)
         if len(target_key) <= 5:
             grid_ocr_scale = max(grid_ocr_scale, 0.95)
@@ -847,10 +848,22 @@ class LobbyAutomation:
 
         return resolve_brawler_name_alias(potential_brawler_name)
 
+    def _ocr_name_from_brawler_ref(self, brawler: str) -> str:
+        requested = normalize_brawler_name(str(brawler or ""))
+        if not requested:
+            return self.normalize_ocr_name(brawler)
+        for name in load_brawlers_info().keys():
+            if normalize_brawler_name(name) == requested:
+                return self.normalize_ocr_name(name)
+        return self.normalize_ocr_name(brawler)
+
+    def _brawler_target_key(self, brawler: str) -> str:
+        return self._ocr_name_from_brawler_ref(brawler)
+
     @staticmethod
     def normalize_ocr_name(value: str) -> str:
         normalized = str(value).lower()
-        for symbol in [' ', '-', '.', "&", "'", "`", "_"]:
+        for symbol in [' ', '.', "&", "'", "`", "_"]:
             normalized = normalized.replace(symbol, "")
         return normalized
 

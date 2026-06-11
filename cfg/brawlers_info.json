@@ -548,7 +548,7 @@
         "ignore_walls_for_supers": true,
         "hold_attack": 0
     },
-    "rt": {
+    "r-t": {
         "safe_range": 393.0,
         "attack_range": 640.0,
         "super_type": "spawnable",

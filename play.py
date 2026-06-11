@@ -18,7 +18,7 @@ except ImportError:
         return None
 from core.integration import migrate_bot_config
 from state_finder import get_state
-from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, interpret_pyla_code, \
+from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, resolve_brawler_info_key, interpret_pyla_code, \
     count_mask_pixels, JOYSTICK_RADIUS, clamp, debug_beep, config_bool
 from visual_debug_window import (
     log_visual_debug_startup,
@@ -858,6 +858,7 @@ class Play:
     @staticmethod
     def can_attack_through_walls(brawler, skill_type, brawlers_info=None):
         if not brawlers_info: brawlers_info = load_brawlers_info()
+        brawler = resolve_brawler_info_key(brawler, brawlers_info)
         if skill_type == "attack":
             return brawlers_info[brawler]['ignore_walls_for_attacks']
         elif skill_type == "super":
@@ -867,6 +868,7 @@ class Play:
     @staticmethod
     def must_brawler_hold_attack(brawler, brawlers_info=None):
         if not brawlers_info: brawlers_info = load_brawlers_info()
+        brawler = resolve_brawler_info_key(brawler, brawlers_info)
         return brawlers_info[brawler]['hold_attack'] > 0
 
     @staticmethod
@@ -1185,6 +1187,11 @@ class Play:
     def get_brawler_range(self, brawler):
         if self.brawler_ranges is None:
             self.brawler_ranges = self.load_brawler_ranges(self.brawlers_info)
+        if brawler in self.brawler_ranges:
+            return self.brawler_ranges[brawler]
+        resolved = resolve_brawler_info_key(brawler, self.brawlers_info)
+        if resolved in self.brawler_ranges:
+            return self.brawler_ranges[resolved]
         return self.brawler_ranges[brawler]
 
     def refresh_enemy_spacing_config(self):
