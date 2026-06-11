@@ -25,6 +25,7 @@ from utils import (
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 gray_pixels_treshold = load_toml_as_dict("./cfg/bot_config.toml")['idle_pixels_minimum']
+GRID_OCR_MIN_CONFIDENCE = 0.2
 
 
 class LobbyAutomation:
@@ -220,11 +221,31 @@ class LobbyAutomation:
     @staticmethod
     def _load_known_brawler_names():
         try:
-            return {
+            names = {
                 LobbyAutomation.normalize_ocr_name(name)
                 for name in load_brawlers_info().keys()
                 if name
             }
+            from utils import load_brawler_name_aliases
+
+            load_brawler_name_aliases()
+            try:
+                import json
+                from pathlib import Path
+
+                raw_aliases = json.loads(
+                    Path("cfg/names.json").read_text(encoding="utf-8")
+                )
+            except Exception:
+                raw_aliases = {}
+            for canonical, aliases in raw_aliases.items():
+                if canonical:
+                    names.add(LobbyAutomation.normalize_ocr_name(canonical))
+                if isinstance(aliases, list):
+                    for alias in aliases:
+                        if alias:
+                            names.add(LobbyAutomation.normalize_ocr_name(alias))
+            return names
         except Exception:
             return set()
 
@@ -370,20 +391,30 @@ class LobbyAutomation:
         if len(normalized) <= 4:
             fixed = normalized.translate(self._ocr_digit_fixes())
             fixed = self.resolve_ocr_typos(fixed)
+            fixed = self._ocr_name_from_brawler_ref(fixed)
             if fixed in self.known_brawler_names:
                 return fixed
         return normalized
 
-    def _is_confident_grid_name_match(self, detected_name, target_name):
-        if not detected_name or not target_name:
+    def _detected_name_closer_to_other_brawler(self, detected_name, target_name):
+        known = getattr(self, "known_brawler_names", None)
+        if not known:
             return False
-        if detected_name == target_name:
-            return True
-        max_len = max(len(detected_name), len(target_name))
-        if max_len <= 5:
-            limit = 1
-            return self.bounded_edit_distance(detected_name, target_name, limit) <= limit
-        return self.names_match(detected_name, target_name)
+        target_norm = normalize_brawler_name(target_name)
+        target_score = self.name_match_score(detected_name, target_name)
+        for known_name in known:
+            if known_name == target_name:
+                continue
+            if normalize_brawler_name(known_name) == target_norm:
+                continue
+            if self.name_match_score(detected_name, known_name) > target_score + 0.08:
+                return True
+        return False
+
+    def _is_confident_grid_name_match(self, detected_name, target_name):
+        if not self.names_match(detected_name, target_name):
+            return False
+        return not self._detected_name_closer_to_other_brawler(detected_name, target_name)
 
     @staticmethod
     def _grid_page_signature(entries):
@@ -409,6 +440,8 @@ class LobbyAutomation:
             raw_text = str(entry.get("text", "")).strip()
             if not raw_text:
                 continue
+            if float(entry.get("confidence", 0) or 0) < GRID_OCR_MIN_CONFIDENCE:
+                continue
             detected_name = self._normalize_grid_label(raw_text)
             if not detected_name:
                 continue
@@ -423,6 +456,8 @@ class LobbyAutomation:
             for entry in entries:
                 raw_text = str(entry.get("text", "")).strip()
                 if not raw_text:
+                    continue
+                if float(entry.get("confidence", 0) or 0) < GRID_OCR_MIN_CONFIDENCE:
                     continue
                 detected_name = self._normalize_grid_label(raw_text)
                 if not detected_name:
@@ -862,8 +897,8 @@ class LobbyAutomation:
 
     @staticmethod
     def normalize_ocr_name(value: str) -> str:
-        normalized = str(value).lower()
-        for symbol in [' ', '.', "&", "'", "`", "_"]:
+        normalized = str(value).lower().strip()
+        for symbol in (" ", ".", "&", "'", "`", "_", "[", "]", "(", ")", "@", "#", "|", "!", "·"):
             normalized = normalized.replace(symbol, "")
         return normalized
 
@@ -893,17 +928,26 @@ class LobbyAutomation:
             return False
         if detected_name == target_name:
             return True
-        min_sub_len = max(3, len(target_name) - 1)
-        if (
-            len(target_name) >= 4
-            and len(detected_name) >= min_sub_len
-            and (target_name in detected_name or detected_name in target_name)
-        ):
+        if normalize_brawler_name(detected_name) == normalize_brawler_name(target_name):
             return True
-        limit = 1 if len(target_name) <= 5 else 2
+        if len(target_name) <= 2 or len(detected_name) <= 2:
+            return False
+        shorter, longer = (
+            (target_name, detected_name)
+            if len(target_name) <= len(detected_name)
+            else (detected_name, target_name)
+        )
+        if len(shorter) >= 4 and shorter in longer and len(shorter) / len(longer) >= 0.72:
+            return True
+        if len(target_name) <= 4:
+            limit = 1
+            if cls.bounded_edit_distance(detected_name, target_name, limit) > limit:
+                return False
+            return detected_name[0] == target_name[0]
+        limit = 2 if len(target_name) >= 8 else 1
         if cls.bounded_edit_distance(detected_name, target_name, limit) <= limit:
             return True
-        return SequenceMatcher(None, detected_name, target_name).ratio() >= 0.84
+        return len(target_name) >= 5 and SequenceMatcher(None, detected_name, target_name).ratio() >= 0.84
 
     @classmethod
     def name_match_score(cls, detected_name: str, target_name: str) -> float:
