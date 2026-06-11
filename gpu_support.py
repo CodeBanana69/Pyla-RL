@@ -52,6 +52,56 @@ def _wmic_video_controllers():
     return names
 
 
+def _cim_video_controllers():
+    if platform.system() != "Windows":
+        return []
+    try:
+        output = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }",
+            ],
+            encoding="utf-8",
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except Exception:
+        return []
+
+    names = []
+    for line in output.splitlines():
+        name = _normalize_name(line)
+        if name:
+            names.append(name)
+    return names
+
+
+def _enumerate_video_controller_names():
+    names = _wmic_video_controllers()
+    if names:
+        return names
+    return _cim_video_controllers()
+
+
+def _prefer_discrete_gpu_name(names, vendor):
+    matching = [name for name in names if _classify_vendor(name) == vendor]
+    if not matching:
+        return None
+    discrete_markers = ("geforce", "quadro", "rtx ", "gtx ", " rx ", "arc ", "iris xe")
+    for name in matching:
+        lower = f" {_normalize_name(name).lower()} "
+        if any(marker in lower for marker in discrete_markers):
+            return name
+    for name in matching:
+        lower = _normalize_name(name).lower()
+        if "radeon" in lower and "(tm) graphics" in lower:
+            continue
+        return name
+    return matching[0]
+
+
 def detect_graphics_cards():
     cards = []
     seen = set()
@@ -70,7 +120,7 @@ def detect_graphics_cards():
     except Exception:
         pass
 
-    for name in _wmic_video_controllers():
+    for name in _enumerate_video_controller_names():
         if name in seen or _is_virtual_gpu(name):
             continue
         vendor = _classify_vendor(name)
@@ -93,6 +143,12 @@ def primary_vendor(cards=None):
 def primary_gpu_name(cards=None):
     cards = cards if cards is not None else detect_graphics_cards()
     vendor = primary_vendor(cards)
+    if vendor == "cpu":
+        return "Generic CPU"
+    controller_names = _enumerate_video_controller_names()
+    preferred_name = _prefer_discrete_gpu_name(controller_names, vendor)
+    if preferred_name:
+        return preferred_name
     for card_vendor, name in cards:
         if card_vendor == vendor:
             return name
@@ -200,7 +256,7 @@ def recommended_onnx_variant(vendor=None):
 
 def list_directml_adapters(cards=None):
     adapters = []
-    for index, name in enumerate(_wmic_video_controllers()):
+    for index, name in enumerate(_enumerate_video_controller_names()):
         if _is_virtual_gpu(name):
             continue
         adapters.append({"index": index, "name": name, "vendor": _classify_vendor(name)})

@@ -87,6 +87,28 @@ class GpuSupportTests(unittest.TestCase):
         best = select_best_runtime_result(results, cards)
         self.assertEqual(best["variant"], "directml")
 
+    @patch("gpu_support._wmic_video_controllers", return_value=[])
+    @patch(
+        "gpu_support._cim_video_controllers",
+        return_value=["AMD Radeon RX 7900 XT", "AMD Radeon(TM) Graphics"],
+    )
+    def test_detect_graphics_cards_uses_cim_when_wmic_missing(self, *_):
+        from gpu_support import detect_graphics_cards, get_gpu_data, primary_gpu_name
+
+        cards = detect_graphics_cards()
+        self.assertEqual(primary_vendor(cards), "amd")
+        self.assertEqual(
+            cards,
+            [
+                ("amd", "AMD Radeon RX 7900 XT"),
+                ("amd", "AMD Radeon(TM) Graphics"),
+            ],
+        )
+        self.assertEqual(primary_gpu_name(cards), "AMD Radeon RX 7900 XT")
+        target, _ver, name = get_gpu_data()
+        self.assertEqual(target, "amd_windows")
+        self.assertEqual(name, "AMD Radeon RX 7900 XT")
+
     def test_gpu_help_message_for_amd_missing_provider(self):
         message = gpu_help_message("missing_gpu_provider", "amd")
         self.assertIn("directml", message.lower())
