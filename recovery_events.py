@@ -8,7 +8,7 @@ EVENTS_PATH = Path("logs/recovery_events.jsonl")
 _recent_alerts = {}
 
 
-def log_recovery(event_type, detail="", notice="", session_id=None, path=None):
+def log_recovery(event_type, detail="", notice="", session_id=None, path=None, screenshot_path=""):
     events_path = Path(path or EVENTS_PATH)
     events_path.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -17,6 +17,7 @@ def log_recovery(event_type, detail="", notice="", session_id=None, path=None):
         "detail": str(detail or ""),
         "notice": str(notice or ""),
         "session_id": session_id or str(os.getpid()),
+        "screenshot_path": str(screenshot_path or ""),
     }
     with events_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, ensure_ascii=True) + "\n")

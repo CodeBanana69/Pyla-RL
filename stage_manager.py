@@ -4,7 +4,13 @@ import time
 import cv2
 import numpy as np
 
-from state_finder import get_prestige_next_button_center, get_state, is_in_prestige_reward
+from state_finder import (
+    get_prestige_next_button_center,
+    get_skin_reward_continue_button_center,
+    get_skin_reward_equip_button_center,
+    get_state,
+    is_in_prestige_reward,
+)
 from trophy_observer import TrophyObserver
 from core.integration import get_webhook_settings, on_queue_file_changed
 from runtime_log import log_debug, log_info, log_warn
@@ -71,7 +77,8 @@ class StageManager:
             'star_drop_demonic': lambda: self.click_star_drop("demonic"),
             'star_drop_starr_nova': lambda: self.click_star_drop("starr_nova"),
             'prestige_reward': self.handle_prestige_reward,
-            'trophy_reward': lambda: self.window_controller.press("proceed"),
+            'trophy_reward': self.handle_trophy_reward,
+            'reward_unlock': self.handle_reward_unlock,
             'starr_nova_event': lambda: self.window_controller.press("middle_got_it"),
             'end_draw': self.end_game,
             'end_victory': self.end_game,
@@ -100,6 +107,7 @@ class StageManager:
         self.last_match_api_sync_ok = None
         self.last_recorded_result_time = 0.0
         self.stop_after_post_match_rewards = False
+        self._stuck_nudge_sent: set[str] = set()
 
     def _should_stop(self):
         return bool(self.runtime_control and self.runtime_control.should_stop())
@@ -463,6 +471,35 @@ class StageManager:
             attempts += 1
         return screenshot if current_state == "lobby" else None
 
+    def click_skin_reward_button(self):
+        screenshot = self.window_controller.screenshot()
+        screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+        equip_center = get_skin_reward_equip_button_center(screenshot_bgr)
+        if equip_center is not None:
+            print("Skin reward unlock detected; clicking EQUIP NOW.")
+            self.window_controller.keys_up(list("wasd"))
+            self.window_controller.click(*equip_center, delay=0.08)
+            return True
+
+        continue_center = get_skin_reward_continue_button_center(screenshot_bgr)
+        if continue_center is not None:
+            print("Skin reward unlock detected; clicking CONTINUE.")
+            self.window_controller.keys_up(list("wasd"))
+            self.window_controller.click(*continue_center, delay=0.08)
+            return True
+        return False
+
+    def handle_trophy_reward(self):
+        if self.click_skin_reward_button():
+            return
+        self.window_controller.press_key("Q")
+
+    def handle_reward_unlock(self):
+        if self.click_skin_reward_button():
+            return
+        print("Reward unlock detected; pressing continue.")
+        self.window_controller.press_key("Q")
+
     def handle_prestige_reward(self):
         if not self.can_handle_prestige_reward_screen():
             print("Prestige reward ignored; no recent recorded trophy result allows this reward screen.")
@@ -568,6 +605,7 @@ class StageManager:
                 notify_user("brawler_goal", screenshot, self)
             print(f'Bot has reached the target trophies/wins for {self.brawlers_pick_data[0]["brawler"]}, moving on to the next one in the list.', value, push_current_brawler_till)
             self.brawlers_pick_data.pop(0)
+            self._clear_instance_session_state()
 
             next_brawler_name = self.brawlers_pick_data[0]['brawler']
             if self.brawlers_pick_data[0]["automatically_pick"]:
@@ -640,6 +678,48 @@ class StageManager:
         if not match_record:
             return
         notify_user("match", screenshot, self, match_record=match_record)
+        self._maybe_notify_stuck_brawler(screenshot)
+
+    def _maybe_notify_stuck_brawler(self, screenshot):
+        queue = getattr(self, "brawlers_pick_data", None) or []
+        if not queue:
+            return
+        brawler = normalize_brawler_name(queue[0].get("brawler", "")).lower()
+        if not brawler or brawler in self._stuck_nudge_sent:
+            return
+        try:
+            from farm_analytics import brawler_stats, stuck_brawlers
+
+            if brawler not in stuck_brawlers():
+                return
+            stats = brawler_stats().get(brawler, {})
+            win_rate = float(stats.get("win_rate", 0) or 0)
+            target = queue[0].get("push_until", 1000)
+            notify_user(
+                "recovery_alert",
+                screenshot,
+                {
+                    "brawler": brawler,
+                    "detail": f"{brawler} win rate is {win_rate * 100:.0f}% over recent matches.",
+                    "notice": f"Consider skipping {brawler} or lowering push target ({target}).",
+                    "event_type": "stuck_brawler",
+                },
+            )
+            self._stuck_nudge_sent.add(brawler)
+        except Exception:
+            pass
+
+    def _clear_instance_session_state(self):
+        try:
+            import os
+
+            instance_id = str(os.environ.get("PYLA_INSTANCE_ID", "") or "").strip()
+            if instance_id:
+                from gui.session_state import clear_session_state
+
+                clear_session_state(instance_id)
+        except Exception:
+            pass
 
     @staticmethod
     def _is_win_result(result):

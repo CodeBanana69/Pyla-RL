@@ -108,6 +108,7 @@ class HubStateStore:
         "visual_debug_max_boxes": ("general", "int"),
         "super_debug": ("general", "yesno"),
         "wall_stuck_debug": ("general", "yesno"),
+        "performance_autotune": ("general", "yesno"),
     }
     DISCORD_FIELDS = {
         "webhook_url": "str",
@@ -126,6 +127,8 @@ class HubStateStore:
         "discord_control_guild_id": "str",
         "notify_on_recovery": "bool",
         "recovery_alert_threshold": "int",
+        "daily_digest_enabled": "bool",
+        "daily_digest_hour": "int",
     }
     TELEGRAM_FIELDS = {
         "enabled": "bool",
@@ -162,6 +165,8 @@ class HubStateStore:
         "low_ips_app_restart_after": "int",
         "low_ips_emulator_restart_after": "int",
         "lobby_stuck_restart": "float",
+        "lobby_after_match_confirm_seconds": "float",
+        "post_match_reward_window_seconds": "float",
         "visual_freeze_restart": "float",
         "global_freeze_restart": "float",
         "emulator_restart_cooldown": "float",
@@ -191,6 +196,7 @@ class HubStateStore:
         self.telegram_config_path = telegram_config_path
         self.brawl_stars_api_base_config_path = brawl_stars_api_base_config_path
         self.brawl_stars_api_config_path = brawl_stars_api_config_path
+        self.editing_instance_id = ""
         self.bot_config = load_toml_as_dict(bot_config_path)
         self.general_config = load_toml_as_dict(general_config_path)
         self.time_tresholds = load_toml_as_dict(time_tresholds_path)
@@ -295,6 +301,10 @@ class HubStateStore:
         self.discord_config.setdefault("discord_control_guild_id", "")
         self.discord_config.setdefault("notify_on_recovery", False)
         self.discord_config.setdefault("recovery_alert_threshold", 3)
+        self.discord_config.setdefault("daily_digest_enabled", False)
+        self.discord_config.setdefault("daily_digest_hour", 20)
+
+        self.general_config.setdefault("performance_autotune", "no")
 
         self.telegram_config.setdefault("enabled", False)
         self.telegram_config.setdefault("bot_token", "")
@@ -328,6 +338,8 @@ class HubStateStore:
         self.time_tresholds.setdefault("low_ips_app_restart_after", 1)
         self.time_tresholds.setdefault("low_ips_emulator_restart_after", 6)
         self.time_tresholds.setdefault("lobby_stuck_restart", 120.0)
+        self.time_tresholds.setdefault("lobby_after_match_confirm_seconds", 3.0)
+        self.time_tresholds.setdefault("post_match_reward_window_seconds", 120.0)
         self.time_tresholds.setdefault("visual_freeze_restart", 45.0)
         self.time_tresholds.setdefault("global_freeze_restart", 60.0)
         self.time_tresholds.setdefault("emulator_restart_cooldown", 180.0)
@@ -403,13 +415,27 @@ class HubStateStore:
         return state
 
     def _multi_instance_state(self):
-        from gui.instance_config import is_multi_instance_enabled, load_instances_config
+        from gui.instance_config import (
+            get_default_instance_id,
+            is_auto_restart_crashed_enabled,
+            is_multi_instance_enabled,
+            is_multi_instance_setup_dismissed,
+            list_available_emulator_instances,
+            list_unassigned_emulator_instances,
+            load_instances_config,
+        )
         from gui.instance_registry import list_instances
 
         config = load_instances_config()
+        editing_id = self.editing_instance_id or get_default_instance_id()
         return {
             "enabled": is_multi_instance_enabled(),
             "defaultInstance": str(config.get("multi_instance", {}).get("default_instance", "") or ""),
+            "editingInstanceId": editing_id,
+            "setupWizardDismissed": is_multi_instance_setup_dismissed(),
+            "autoRestartCrashed": is_auto_restart_crashed_enabled(),
+            "availableEmulators": list_available_emulator_instances(),
+            "unassignedEmulators": list_unassigned_emulator_instances(),
             "instances": list_instances(),
         }
 
@@ -420,15 +446,84 @@ class HubStateStore:
             ensure_multi_instance_profiles()
         return set_multi_instance_enabled(enabled)
 
-    def save_instance_profile(self, instance_id: str, profile: dict):
-        from gui.instance_config import upsert_instance_profile
+    def set_auto_restart_crashed(self, enabled: bool):
+        from gui.instance_config import set_auto_restart_crashed
 
-        return upsert_instance_profile(instance_id, profile)
+        return set_auto_restart_crashed(enabled)
+
+    def save_instance_profile(self, instance_id: str, profile: dict):
+        from gui.instance_config import copy_queue, upsert_instance_profile
+
+        saved = upsert_instance_profile(instance_id, profile)
+        if _to_bool(profile.get("copy_farm_plan")):
+            copy_from = str(profile.get("copy_farm_plan_from") or "default").strip() or "default"
+            copy_queue(copy_from, saved["id"])
+        return saved
 
     def delete_instance_profile(self, instance_id: str):
         from gui.instance_config import delete_instance_profile
 
         return delete_instance_profile(instance_id)
+
+    def set_editing_instance_id(self, instance_id: str):
+        from gui.instance_config import get_instance_profile
+
+        instance_id = str(instance_id or "").strip()
+        if instance_id and not get_instance_profile(instance_id):
+            raise ValueError(f"Unknown instance '{instance_id}'.")
+        self.editing_instance_id = instance_id
+        return self.ui_state()
+
+    def dismiss_multi_instance_setup(self):
+        from gui.instance_config import set_multi_instance_setup_dismissed
+
+        set_multi_instance_setup_dismissed(True)
+        return self.ui_state()
+
+    def save_instance_local_settings(self, instance_id: str, payload: dict):
+        from gui.instance_config import (
+            get_instance_profile,
+            load_instance_local_settings,
+            save_instance_local_settings,
+            set_instance_player_tag,
+        )
+
+        profile = get_instance_profile(instance_id)
+        if not profile:
+            raise ValueError(f"Unknown instance '{instance_id}'.")
+        local = load_instance_local_settings(instance_id)
+        player_tag = str(payload.get("player_tag", payload.get("playerTag", "")) or "").strip()
+        if player_tag:
+            set_instance_player_tag(instance_id, player_tag)
+        local["player"] = {"tag": player_tag or str((local.get("player") or {}).get("tag", ""))}
+        local["discord"] = {
+            "webhook_url": str(payload.get("discord_webhook_url", payload.get("discordWebhookUrl", "")) or "").strip(),
+            "discord_id": str(payload.get("discord_id", payload.get("discordId", "")) or "").strip(),
+        }
+        local["telegram"] = {
+            "notification_chat_id": str(
+                payload.get("telegram_notification_chat_id", payload.get("telegramNotificationChatId", "")) or ""
+            ).strip(),
+        }
+        save_instance_local_settings(instance_id, local)
+        return get_instance_profile(instance_id)
+
+    def copy_instance_farm_plan(self, instance_id: str, from_instance_id: str | None = "default"):
+        from gui.instance_config import copy_queue, get_instance_profile
+
+        if not get_instance_profile(instance_id):
+            raise ValueError(f"Unknown instance '{instance_id}'.")
+        if not copy_queue(from_instance_id, instance_id):
+            raise ValueError("Source farm plan is empty.")
+        return self.ui_state()
+
+    def _active_queue_path(self):
+        from gui.instance_config import get_default_instance_id, get_queue_path, is_multi_instance_enabled
+
+        if is_multi_instance_enabled():
+            instance_id = self.editing_instance_id or get_default_instance_id()
+            return get_queue_path(instance_id)
+        return Path("latest_brawler_data.json")
 
     def state_json(self, preflight=None, correct_zoom=True):
         return json.dumps(self.ui_state(preflight=preflight, correct_zoom=correct_zoom))
@@ -460,6 +555,7 @@ class HubStateStore:
                 "emulator_autorestart",
                 "super_debug",
                 "wall_stuck_debug",
+                "performance_autotune",
             }:
                 value = _to_bool(value)
             data[key] = value
@@ -471,8 +567,25 @@ class HubStateStore:
         return data
 
     def _history_state(self):
+        from farm_analytics import brawler_stats, stuck_brawlers
         from gui.brawler_queue import brawler_icon_uri
         from match_journal import read_recent_matches
+
+        analytics_stats = brawler_stats()
+        stuck_set = set(stuck_brawlers())
+        efficiency_items = []
+        for brawler, stats in analytics_stats.items():
+            efficiency_items.append({
+                "brawler": brawler,
+                "trophiesPerHour": stats.get("trophies_per_hour", 0),
+                "winRate": round(float(stats.get("win_rate", 0) or 0) * 100, 1),
+                "matches": stats.get("matches", 0),
+                "stuck": brawler in stuck_set,
+                "icon": brawler_icon_uri(brawler),
+            })
+        efficiency_items.sort(
+            key=lambda item: (-float(item.get("trophiesPerHour", 0) or 0), -int(item.get("matches", 0) or 0), item.get("brawler", "")),
+        )
 
         items = []
         total_wins = 0
@@ -522,6 +635,7 @@ class HubStateStore:
             "items": items,
             "summary": summary,
             "recent": recent,
+            "efficiency": efficiency_items,
         }
 
     def update_config(self, section, key, value):
@@ -576,28 +690,32 @@ class HubStateStore:
 
     def load_queue(self):
         from gui.brawler_queue import load_queue
-        return load_queue()
+
+        return load_queue(self._active_queue_path())
 
     def save_queue(self, queue):
         from gui.brawler_queue import save_queue
-        return save_queue(queue)
+
+        return save_queue(queue, self._active_queue_path())
 
     def sort_queue(self, *, mode="cups_desc"):
         from gui.brawler_queue import QUEUE_SORT_MODES, load_queue, persist_queue, sort_queue
 
-        queue = sort_queue(load_queue(), mode=mode)
+        path = self._active_queue_path()
+        queue = sort_queue(load_queue(path), mode=mode)
         if not queue:
             raise ValueError("Farm plan is empty.")
-        persist_queue(queue)
+        persist_queue(queue, path)
         return queue, mode if mode in QUEUE_SORT_MODES else "cups_desc"
 
     def sort_queue_by_trophies(self, *, descending=True):
         from gui.brawler_queue import load_queue, persist_queue, sort_queue_by_trophies
 
-        queue = sort_queue_by_trophies(load_queue(), descending=descending)
+        path = self._active_queue_path()
+        queue = sort_queue_by_trophies(load_queue(path), descending=descending)
         if not queue:
             raise ValueError("Farm plan is empty.")
-        persist_queue(queue)
+        persist_queue(queue, path)
         return queue
 
     def build_push_all(self, target_trophies):
@@ -611,7 +729,7 @@ class HubStateStore:
         )
         if not queue:
             raise ValueError("No brawlers below the target trophy count.")
-        persist_queue(queue)
+        persist_queue(queue, self._active_queue_path())
         return queue
 
     def reset_match_history(self):

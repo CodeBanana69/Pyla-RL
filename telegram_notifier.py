@@ -31,6 +31,7 @@ EVENT_TITLES = {
     "completed": "All targets complete",
     "bot_is_stuck": "Bot needs attention",
     "recovery_alert": "Recovery alert",
+    "daily_digest": "Daily digest",
     "test": "Telegram test",
 }
 
@@ -89,6 +90,39 @@ def load_telegram_settings() -> dict[str, Any]:
     settings.setdefault("allow_multiple_notification_chat_ids", False)
     settings.setdefault("remote_control_enabled", True)
     settings.setdefault("poll_timeout_seconds", 25)
+    return settings
+
+
+def load_instance_telegram_settings(instance_id: str | None = None) -> dict[str, Any]:
+    import os as _os
+
+    from gui.instance_config import legacy_instance_profile_secrets, load_instance_local_settings
+
+    instance_id = str(instance_id or _os.environ.get("PYLA_INSTANCE_ID", "")).strip()
+    if not instance_id:
+        return load_telegram_settings()
+
+    settings = dict(load_telegram_settings())
+    local = load_instance_local_settings(instance_id)
+    legacy = legacy_instance_profile_secrets(instance_id)
+    telegram_local = dict(local.get("telegram") or {})
+
+    bot_token = str(
+        telegram_local.get("bot_token")
+        or legacy.get("telegram_bot_token")
+        or ""
+    ).strip()
+    if bot_token:
+        settings["bot_token"] = bot_token
+
+    chat_id = str(
+        telegram_local.get("notification_chat_id")
+        or legacy.get("telegram_notification_chat_id")
+        or ""
+    ).strip()
+    if chat_id:
+        settings["notification_chat_ids"] = _as_chat_ids(chat_id)
+
     return settings
 
 
@@ -188,6 +222,13 @@ def _format_message(event_type: str, details: dict[str, Any]) -> str:
         lines = [f"<b>{_format_title(event_type, details)}</b>", format_brawler_complete_description(details).replace("**", "")]
     elif event_type == "recovery_alert":
         lines = [f"<b>{_format_title(event_type, details)}</b>", format_recovery_description(details)]
+    elif event_type == "daily_digest":
+        from daily_digest import format_daily_digest_text
+
+        lines = [
+            f"<b>{_format_title(event_type, details)}</b>",
+            str(details.get("message") or format_daily_digest_text(details)),
+        ]
     else:
         lines = [f"<b>{_format_title(event_type, details)}</b>"]
         message = str(details.get("message") or details.get("reason") or "").strip()
@@ -302,7 +343,7 @@ async def async_notify_user(
     screenshot: Any = None,
     details: dict[str, Any] | None = None,
 ) -> bool:
-    settings = load_telegram_settings()
+    settings = load_instance_telegram_settings()
     if not _config_bool(settings.get("enabled"), False):
         return False
     token = settings.get("bot_token", "")

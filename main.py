@@ -63,7 +63,7 @@ from runtime_control import (
 )
 from runtime_metrics import metrics_path_for_pid, write_metrics
 from stage_manager import StageManager
-from state_finder import get_state
+from state_finder import get_state, is_in_brawl_pass, is_in_star_road
 from telegram_control import TelegramControlServer
 from time_management import TimeManagement
 from core.integration import (
@@ -134,6 +134,206 @@ def apply_play_order(queue_data):
     return ordered
 
 
+OUT_OF_MATCH_REWARD_STATES = {"prestige_reward", "trophy_reward"}
+TROPHY_REWARD_FOLLOWUP_STATES = {"reward_unlock"}
+STAR_DROP_STATES = {
+    "star_drop",
+    "daily_star_drop",
+    "nova_star_drop",
+    "star_drop_regular",
+    "star_drop_angelic",
+    "star_drop_demonic",
+    "star_drop_starr_nova",
+}
+MATCH_RESULT_STATES = {
+    "end_victory",
+    "end_defeat",
+    "end_draw",
+    "end_1st",
+    "end_2nd",
+    "end_3rd",
+    "end_4th",
+    "end_trio_showdown_0",
+    "end_trio_showdown_1",
+    "end_trio_showdown_2",
+    "end_trio_showdown_3",
+}
+STUCK_RECOVERY_STATES = {
+    "lobby",
+    "reward_unlock",
+    "trophy_reward",
+    "prestige_reward",
+    "brawler_selection",
+}
+
+
+def normalize_detected_state(
+        detected_state,
+        previous_state=None,
+        lobby_seen_since_match=False,
+        match_launch_pending=False,
+        match_result_seen=False,
+        trophy_result_recorded=False,
+        recent_trophy_change=False,
+        prestige_reward_allowed=True,
+        exact_star_drop_after_match=False,
+):
+    if detected_state == "match_making":
+        if previous_state in {"lobby", "match_making"} or match_launch_pending:
+            return detected_state
+        return previous_state or "match"
+    if detected_state in STAR_DROP_STATES:
+        allowed_context = (
+            previous_state in MATCH_RESULT_STATES
+            or previous_state in OUT_OF_MATCH_REWARD_STATES
+            or previous_state in TROPHY_REWARD_FOLLOWUP_STATES
+            or previous_state in STAR_DROP_STATES
+            or (detected_state == "nova_star_drop" and previous_state == "match" and match_result_seen)
+            or (exact_star_drop_after_match and previous_state == "match")
+            or (trophy_result_recorded and match_result_seen)
+        )
+        if allowed_context and not match_launch_pending:
+            return detected_state
+        return previous_state or "match"
+    if detected_state in TROPHY_REWARD_FOLLOWUP_STATES:
+        if (
+            previous_state in {"trophy_reward", "reward_unlock"}
+            or (previous_state != "lobby" and match_result_seen)
+        ):
+            return detected_state
+        return previous_state or "match"
+    if detected_state in OUT_OF_MATCH_REWARD_STATES:
+        if detected_state == "prestige_reward" and not prestige_reward_allowed:
+            return previous_state or "match"
+        allowed_context = (
+            previous_state in MATCH_RESULT_STATES
+            or previous_state in OUT_OF_MATCH_REWARD_STATES
+            or previous_state in TROPHY_REWARD_FOLLOWUP_STATES
+            or (previous_state == "lobby" and lobby_seen_since_match)
+            or (trophy_result_recorded and match_result_seen)
+            or (previous_state == "match" and recent_trophy_change)
+        )
+        if not allowed_context:
+            return previous_state or "match"
+        if match_launch_pending and previous_state not in MATCH_RESULT_STATES:
+            return "match"
+    return detected_state
+
+
+def should_accept_lobby_after_match(pending_for, confirm_seconds):
+    return pending_for >= confirm_seconds
+
+
+def apply_in_match_overlay_guard(
+        state,
+        detected_state,
+        previous_state,
+        *,
+        allow_panel_escape=False,
+):
+    if (
+        previous_state == "match"
+        and detected_state in {"brawler_selection", "shop"}
+        and state == detected_state
+    ):
+        if allow_panel_escape and detected_state == "shop":
+            return "shop"
+        return "match"
+    return state
+
+
+def _log_stuck_recovery(worker, event_type: str, detail: str, step: str):
+    from gui.recovery_screenshots import save_recovery_screenshot
+    from recovery_events import log_recovery
+
+    screenshot_path = ""
+    try:
+        screenshot_path = save_recovery_screenshot(worker.window_controller.screenshot(), step)
+    except Exception:
+        pass
+    log_recovery(event_type, detail=detail, screenshot_path=screenshot_path)
+
+
+def run_stuck_recovery(worker, state):
+    now = time.time()
+    if state == "match" or getattr(worker, "in_cooldown", False):
+        worker.stuck_since = None
+        worker.stuck_app_restart_count = 0
+        if state != "lobby":
+            worker.lobby_entered_at = None
+        return False
+
+    if state not in STUCK_RECOVERY_STATES:
+        worker.stuck_since = None
+        if state != "lobby":
+            worker.lobby_entered_at = None
+        return False
+
+    if worker.stuck_since is None:
+        worker.stuck_since = now
+    if state == "lobby" and worker.lobby_entered_at is None:
+        worker.lobby_entered_at = now
+
+    stuck_age = now - worker.stuck_since
+
+    if now - worker.last_stuck_recovery_press >= worker.lobby_start_retry_interval:
+        import runtime_log
+
+        runtime_log.log_info("recovery", f"Stuck recovery: retrying in {state}.")
+        worker.window_controller.keys_up(list("wasd"))
+        if state in worker.Stage_manager.states:
+            try:
+                worker.Stage_manager.do_state(state, None)
+            except Exception as exc:
+                runtime_log.log_warn("recovery", f"Stuck recovery state handler failed: {exc}")
+        worker.window_controller.press_key("Q")
+        worker.last_stuck_recovery_press = now
+        if state == "lobby":
+            worker.last_lobby_start_press = now
+
+    if stuck_age < worker.lobby_stuck_restart_seconds:
+        return False
+
+    if now - worker.last_stuck_recovery_at < worker.lobby_stuck_restart_seconds:
+        return False
+
+    worker.last_stuck_recovery_at = now
+    if worker.stuck_app_restart_count < 2:
+        worker.stuck_app_restart_count += 1
+        import runtime_log
+
+        runtime_log.log_warn(
+            "recovery",
+            f"Stuck in {state} for {stuck_age:.1f}s; restarting Brawl Stars "
+            f"(attempt {worker.stuck_app_restart_count}).",
+        )
+        _log_stuck_recovery(worker, "app_restart", f"state={state}", "app_restart")
+        if getattr(worker, "ping_when_stuck", False):
+            notify_user("bot_is_stuck", worker.window_controller.screenshot(), worker.Stage_manager)
+        if worker.restart_brawl_stars():
+            worker.stuck_since = now
+        return True
+
+    if not getattr(worker.window_controller, "emulator_autorestart", False):
+        return False
+
+    import runtime_log
+
+    runtime_log.log_warn(
+        "recovery",
+        f"Stuck in {state} after app restarts; restarting emulator profile.",
+    )
+    _log_stuck_recovery(worker, "emulator_restart", f"state={state}", "emulator_restart")
+    if getattr(worker, "ping_when_stuck", False):
+        notify_user("bot_is_stuck", worker.window_controller.screenshot(), worker.Stage_manager)
+    if worker.window_controller.restart_emulator_profile():
+        worker.stuck_since = None
+        worker.stuck_app_restart_count = 0
+        worker.lobby_entered_at = None
+        return True
+    return False
+
+
 def pyla_main(data):
     import runtime_log
     from gui.instance_config import get_active_instance_id, instance_context_for_notifications
@@ -156,6 +356,10 @@ def pyla_main(data):
             self.window_controller = window_controller.WindowController()
             queue = normalize_queue(data)
             queue = apply_play_order(queue)
+            if self.instance_id:
+                from gui.session_state import apply_session_resume_to_queue
+
+                queue = apply_session_resume_to_queue(queue, self.instance_id)
             if not queue:
                 raise ValueError("No valid brawler data found. Add a brawler configuration in the Hub before starting.")
             save_queue_data(queue)
@@ -201,9 +405,33 @@ def pyla_main(data):
             self.cooldown_start_time = 0
             self.cooldown_duration = 3 * 60
             self.picked_first_brawler = False
+            time_thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
             self.check_if_brawl_stars_crashed_timer = float(
-                load_toml_as_dict("cfg/time_tresholds.toml").get("check_if_brawl_stars_crashed", 60)
+                time_thresholds.get("check_if_brawl_stars_crashed", 60)
             )
+            self.lobby_start_retry_interval = float(time_thresholds.get("lobby_start_retry", 8.0))
+            self.lobby_stuck_restart_seconds = float(time_thresholds.get("lobby_stuck_restart", 120.0))
+            self.post_match_reward_window_seconds = float(
+                time_thresholds.get("post_match_reward_window_seconds", 120.0)
+            )
+            self.lobby_after_match_confirm_seconds = float(
+                time_thresholds.get("lobby_after_match_confirm_seconds", 3.0)
+            )
+            self.post_match_reward_until = 0.0
+            self.reward_chain_seen = False
+            self.lobby_seen_since_match = False
+            self.match_launch_pending = False
+            self.pending_lobby_since = None
+            self.pending_lobby_notice = 0.0
+            self.last_ignored_prestige_state_time = 0.0
+            self.last_ignored_star_drop_state_time = 0.0
+            self.guarded_state = None
+            self.stuck_since = None
+            self.last_stuck_recovery_press = 0.0
+            self.stuck_app_restart_count = 0
+            self.last_stuck_recovery_at = 0.0
+            self.lobby_entered_at = None
+            self.last_lobby_start_press = 0.0
             self.time_since_checked_if_brawl_stars_crashed = time.time()
             self.last_processed_frame_id = -1
             self.ips_ema = None
@@ -212,6 +440,10 @@ def pyla_main(data):
             self.perf_last_frame_time = time.time()
             self.perf_last_frame_id = -1
             self.ips_history = deque(maxlen=45)
+            from performance_autotuner import PerformanceAutoTuner
+
+            self.performance_autotuner = PerformanceAutoTuner(target_ips=float(self.max_ips or 0))
+            self._last_digest_sent_at = 0.0
 
             self.window_controller.screenshot()
             self.start_state_checker()
@@ -332,11 +564,116 @@ def pyla_main(data):
             if state is None:
                 return
             self.set_latest_state(state)
+            self.guarded_state = state
             runtime_log.log_info("state", format_state_label(state))
             on_queue_file_changed(self.Stage_manager)
             self.Stage_manager.do_state(state, None)
             if state != "match":
                 self.Play.time_since_last_proceeding = time.time()
+
+        def apply_state_context_guard(self, detected_state, previous_state, *, allow_panel_escape=False):
+            now = time.time()
+            if detected_state in MATCH_RESULT_STATES or (
+                detected_state and str(detected_state).startswith("end_")
+            ):
+                self.post_match_reward_until = now + self.post_match_reward_window_seconds
+
+            trophy_result_recorded = (
+                0 < now - getattr(self.Stage_manager, "last_recorded_result_time", 0.0)
+                <= self.post_match_reward_window_seconds
+            )
+            recent_trophy_change = self.Stage_manager.had_recent_trophy_change(seconds=30.0)
+            reward_chain_active = (
+                self.reward_chain_seen
+                or previous_state is None
+                or previous_state in OUT_OF_MATCH_REWARD_STATES
+            )
+            post_match_context_active = (
+                trophy_result_recorded
+                or now <= self.post_match_reward_until
+                or reward_chain_active
+            )
+            state = normalize_detected_state(
+                detected_state,
+                previous_state=previous_state,
+                lobby_seen_since_match=self.lobby_seen_since_match,
+                match_launch_pending=self.match_launch_pending,
+                match_result_seen=post_match_context_active,
+                trophy_result_recorded=trophy_result_recorded,
+                recent_trophy_change=recent_trophy_change,
+                prestige_reward_allowed=self.Stage_manager.can_handle_prestige_reward_screen(),
+                exact_star_drop_after_match=detected_state in STAR_DROP_STATES,
+            )
+            if (
+                previous_state == "match"
+                and detected_state in {"brawler_selection", "shop"}
+                and state == detected_state
+            ):
+                state = apply_in_match_overlay_guard(
+                    state,
+                    detected_state,
+                    previous_state,
+                    allow_panel_escape=allow_panel_escape,
+                )
+            if detected_state != "lobby":
+                self.pending_lobby_since = None
+
+            if state == "lobby" and previous_state == "match":
+                if self.pending_lobby_since is None:
+                    self.pending_lobby_since = now
+                    self.pending_lobby_notice = 0.0
+                pending_for = now - self.pending_lobby_since
+                if not should_accept_lobby_after_match(
+                    pending_for,
+                    self.lobby_after_match_confirm_seconds,
+                ):
+                    if now - self.pending_lobby_notice >= 5.0:
+                        runtime_log.log_info(
+                            "state",
+                            "Ignoring lobby detection until it is stable after match "
+                            f"({pending_for:.1f}/{self.lobby_after_match_confirm_seconds:.1f}s).",
+                        )
+                        self.pending_lobby_notice = now
+                    return "match"
+                self.pending_lobby_since = None
+
+            if detected_state in OUT_OF_MATCH_REWARD_STATES and state != detected_state:
+                if now - self.last_ignored_prestige_state_time >= 5.0:
+                    runtime_log.log_info(
+                        "state",
+                        f"Ignoring {detected_state} detection until a match result or lobby is confirmed.",
+                    )
+                    self.last_ignored_prestige_state_time = now
+            if detected_state in STAR_DROP_STATES and state != detected_state:
+                if now - self.last_ignored_star_drop_state_time >= 5.0:
+                    runtime_log.log_info(
+                        "state",
+                        "Ignoring star_drop detection because no post-match reward chain is active.",
+                    )
+                    self.last_ignored_star_drop_state_time = now
+
+            if state == "match":
+                self.lobby_seen_since_match = False
+                self.match_launch_pending = False
+                if previous_state == "lobby":
+                    self.post_match_reward_until = 0.0
+                    self.reward_chain_seen = False
+            elif state == "lobby":
+                self.lobby_seen_since_match = True
+                self.match_launch_pending = False
+                self.reward_chain_seen = False
+            elif state == "match_making":
+                self.match_launch_pending = True
+            elif (
+                state in OUT_OF_MATCH_REWARD_STATES
+                or state in STAR_DROP_STATES
+                or state in TROPHY_REWARD_FOLLOWUP_STATES
+            ):
+                self.reward_chain_seen = True
+            return state
+
+        def handle_stuck_recovery(self, state):
+            return run_stuck_recovery(self, state)
 
         def wait_while_paused(self):
             self.window_controller.release_movement()
@@ -359,9 +696,30 @@ def pyla_main(data):
 
         def manage_time_tasks(self, frame):
             if self.Time_management.state_check():
-                state = self.get_latest_state()
+                screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                allow_panel_escape = (
+                    is_in_brawl_pass(screenshot_bgr) or is_in_star_road(screenshot_bgr)
+                )
+                detected_state = get_state(frame)
+                previous_state = self.guarded_state
+                state = self.apply_state_context_guard(
+                    detected_state,
+                    previous_state,
+                    allow_panel_escape=allow_panel_escape,
+                )
+                if previous_state == "match" and state != "match":
+                    if hasattr(self.Play, "reset_match_control_state"):
+                        self.Play.reset_match_control_state()
+                elif previous_state != "match" and state == "match":
+                    if hasattr(self.Play, "reset_match_control_state"):
+                        self.Play.reset_match_control_state()
+                    if previous_state in {"lobby", "match_making"}:
+                        self.Stage_manager.reset_prestige_reward_gate()
                 if state is not None:
                     self.handle_detected_state(state)
+                if state == "lobby":
+                    self.match_launch_pending = True
+                self.handle_stuck_recovery(state)
             if self.Time_management.no_detections_check():
                 now = time.time()
                 for key, value in self.Play.time_since_detections.items():
@@ -428,7 +786,9 @@ def pyla_main(data):
             self.window_controller.close()
             if self.instance_id:
                 from gui.instance_registry import remove_manifest
+                from gui.session_state import clear_session_state
 
+                clear_session_state(self.instance_id)
                 remove_manifest(self.instance_id)
 
         def pump_remote_commands(self):
@@ -581,6 +941,21 @@ def pyla_main(data):
                 return False
             return time.time() - frame_time <= 0.35
 
+        def _maybe_send_daily_digest(self):
+            from daily_digest import build_daily_digest, format_daily_digest_text, should_send_digest
+
+            if not should_send_digest(last_sent_at=float(getattr(self, "_last_digest_sent_at", 0) or 0)):
+                return
+            payload = build_daily_digest(instance_id=self.instance_id or None)
+            text = format_daily_digest_text(payload)
+            notify_user(
+                "daily_digest",
+                None,
+                self.Stage_manager,
+                details={"message": text, **payload},
+            )
+            self._last_digest_sent_at = time.time()
+
         def main(self):
             s_time = time.time()
             c = 0
@@ -591,8 +966,14 @@ def pyla_main(data):
                     break
 
                 self.pump_remote_commands()
+                if hasattr(self, "performance_autotuner"):
+                    self.performance_autotuner.observe_ips(self.ips_history)
+                    if self.get_latest_state() == "lobby":
+                        self.performance_autotuner.apply_pending_adjustment(self.window_controller)
+                self._maybe_send_daily_digest()
                 if self.instance_id:
                     from gui.instance_registry import update_manifest_heartbeat
+                    from gui.session_state import persist_worker_session
 
                     update_manifest_heartbeat(
                         self.instance_id,
@@ -600,6 +981,7 @@ def pyla_main(data):
                         state_path=self.control_window.state_path,
                         metrics_path=self.metrics_path,
                     )
+                    persist_worker_session(self)
 
                 if self.get_latest_state() == "lobby":
                     if self.should_pause():
@@ -729,6 +1111,7 @@ def pyla_main(data):
 def run_instance_worker(instance_id: str):
     from gui.instance_config import apply_instance_overrides, set_active_instance
     from gui.brawler_queue import load_queue
+    from gui.session_state import apply_session_resume_to_queue
 
     set_active_instance(instance_id)
     profile = apply_instance_overrides(instance_id)
@@ -737,6 +1120,7 @@ def run_instance_worker(instance_id: str):
     queue = load_queue()
     if not queue:
         raise RuntimeError(f"Instance '{instance_id}' has an empty farm plan.")
+    queue = apply_session_resume_to_queue(queue, instance_id)
     pyla_main(queue)
 
 

@@ -70,6 +70,7 @@ EVENT_COLORS = {
     "completed": 0x30D158,
     "bot_is_stuck": 0xFF453A,
     "recovery_alert": 0xFF9F0A,
+    "daily_digest": 0x5865F2,
     "test": 0x8E8E93,
 }
 
@@ -79,6 +80,7 @@ EVENT_FOOTERS = {
     "completed": "Queue Complete",
     "bot_is_stuck": "Needs Attention",
     "recovery_alert": "Recovery Alert",
+    "daily_digest": "Daily Digest",
     "test": "Webhook Test",
 }
 
@@ -148,6 +150,39 @@ def load_webhook_settings() -> dict[str, Any]:
     return webhook_config
 
 
+def load_instance_discord_settings(instance_id: str | None = None) -> dict[str, Any]:
+    import os as _os
+
+    from gui.instance_config import get_instance_profile, legacy_instance_profile_secrets, load_instance_local_settings
+
+    instance_id = str(instance_id or _os.environ.get("PYLA_INSTANCE_ID", "")).strip()
+    if not instance_id:
+        return load_webhook_settings()
+
+    settings = dict(load_webhook_settings())
+    local = load_instance_local_settings(instance_id)
+    legacy = legacy_instance_profile_secrets(instance_id)
+    discord_local = dict(local.get("discord") or {})
+
+    webhook = normalize_discord_webhook_url(
+        discord_local.get("webhook_url")
+        or legacy.get("webhook_url")
+        or ""
+    )
+    if webhook:
+        settings["webhook_url"] = webhook
+
+    discord_id = str(
+        discord_local.get("discord_id")
+        or legacy.get("discord_id")
+        or ""
+    ).strip().strip("<@!>")
+    if discord_id:
+        settings["discord_id"] = discord_id
+
+    return settings
+
+
 def _as_int(value, default=0):
     try:
         return int(value)
@@ -215,6 +250,10 @@ def _title_and_description(event_type: str, details: dict[str, Any]) -> tuple[st
         return "Attention Required", reason
     if event_type == "recovery_alert":
         return "Recovery Alert", format_recovery_description(details)
+    if event_type == "daily_digest":
+        from daily_digest import format_daily_digest_text
+
+        return "Daily Digest", str(details.get("message") or format_daily_digest_text(details))
     if event_type == "test":
         return "Webhook Test", "Connection verified."
     return "Pyla Update", str(details.get("message") or "Bot event received.")
@@ -303,7 +342,7 @@ async def async_notify_user(
 ) -> bool:
     global _last_error
     _last_error = ""
-    settings = load_webhook_settings()
+    settings = load_instance_discord_settings()
     webhook_url = settings["webhook_url"]
     if not webhook_url:
         _last_error = "No webhook URL configured."

@@ -105,6 +105,30 @@ class InstanceConfigTests(unittest.TestCase):
         self.assertEqual(profiles["ld-2"]["emulator_port"], 16384)
         self.assertEqual(profiles["default"]["emulator_port"], 16416)
 
+    @patch("utils.resolve_project_path")
+    @patch("gui.instance_config.resolve_project_path")
+    def test_port_for_profile_index_ldplayer(self, mock_resolve, mock_utils_resolve):
+        mock_resolve.side_effect = lambda path: str(self.root / path)
+        mock_utils_resolve.side_effect = lambda path: str(self.root / path)
+
+        from gui.instance_config import infer_profile_index, port_for_profile_index
+
+        self.assertEqual(port_for_profile_index("ldplayer", 3), 5561)
+        self.assertEqual(infer_profile_index("ldplayer", 5561), "3")
+
+    @patch("utils.resolve_project_path")
+    @patch("gui.instance_config.resolve_project_path")
+    def test_compute_instance_readiness_needs_farm_plan(self, mock_resolve, mock_utils_resolve):
+        mock_resolve.side_effect = lambda path: str(self.root / path)
+        mock_utils_resolve.side_effect = lambda path: str(self.root / path)
+
+        from gui.instance_config import compute_instance_readiness, ensure_multi_instance_profiles
+
+        ensure_multi_instance_profiles()
+        clear_toml_cache()
+        readiness = compute_instance_readiness("default")
+        self.assertEqual(readiness["status"], "needs_farm_plan")
+
 
 if __name__ == "__main__":
     unittest.main()

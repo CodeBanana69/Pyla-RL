@@ -59,10 +59,10 @@ TUTORIAL_TOPICS: list[dict[str, str]] = [
         "multi-instance",
         "Multi-Instance",
         "Instances",
-        "1. Enable Multi-Instance on the Instances tab.\n"
-        "2. Add instances with unique emulator ports.\n"
-        "3. Put each farm plan in instances/<id>/latest_brawler_data.json.\n"
-        "4. Start each worker from Instances (not Overview START).",
+        "1. Enable Multi-Instance on the Instances tab and follow the quick setup panel.\n"
+        "2. Scan emulators and Quick add unassigned instances (or use Manual Add).\n"
+        "3. Set each instance farm plan from the Farm Plan tab instance selector.\n"
+        "4. Start all ready, then Align windows. Use Overview START only in single-instance mode.",
         "docs/tutorials/multi-instance.md",
     ),
     _topic(

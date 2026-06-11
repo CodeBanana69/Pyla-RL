@@ -55,14 +55,17 @@ def _resolution_status(width, height):
     return False, f"Detected {width}x{height} — 1920x1080 recommended"
 
 
-def _check_item(item_id, label, ok, detail, severity="required"):
-    return {
+def _check_item(item_id, label, ok, detail, severity="required", fix=None):
+    item = {
         "id": item_id,
         "label": label,
         "ok": bool(ok),
         "severity": severity,
         "detail": detail,
     }
+    if fix and not ok:
+        item["fix"] = fix
+    return item
 
 
 def _resolve_emulator_settings(general, emulator=None, port=None):
@@ -178,6 +181,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         adb_ok,
         adb_result.get("detail") if adb_ok else adb_result.get("detail", "ADB check failed"),
         "required",
+        fix={"action": "reconnect_adb", "label": "Reconnect ADB"} if not adb_ok else None,
     ))
 
     selected_status = emulator_status.get(selected_emulator.lower(), {})
@@ -196,6 +200,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         process_ok,
         process_detail,
         "recommended",
+        fix={"action": "start_emulator", "label": "Start Emulator"} if not process_ok else None,
     ))
 
     package = str(general.get("brawl_stars_package", "com.supercell.brawlstars"))
@@ -210,6 +215,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         foreground_ok,
         "In foreground" if foreground_ok else "Open Brawl Stars on the emulator before START",
         "recommended",
+        fix={"action": "launch_game", "label": "Launch Game"} if not foreground_ok else None,
     ))
 
     resolution_ok = False
@@ -229,6 +235,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         resolution_ok,
         resolution_detail,
         "recommended",
+        fix={"action": "set_resolution", "label": "Resolution Help"} if not resolution_ok else None,
     ))
 
     checks.append(_check_item(

@@ -53,8 +53,15 @@ ApplicationWindow {
         { id: "target_desc", label: "Target high \u2192 low" },
         { id: "target_asc", label: "Target low \u2192 high" },
         { id: "name_asc", label: "Name A \u2192 Z" },
-        { id: "name_desc", label: "Name Z \u2192 A" }
+        { id: "name_desc", label: "Name Z \u2192 A" },
+        { id: "efficiency", label: "Best trophies/hour" }
     ]
+
+    function healthColor(status) {
+        if (status === "good") return theme.ok
+        if (status === "degraded") return theme.accent
+        return theme.danger
+    }
 
     function parseTrophyTarget(value) {
         var parsed = parseInt(String(value || "").trim())
@@ -89,10 +96,17 @@ ApplicationWindow {
     property int queueDragSource: -1
     property int queueDropTarget: -1
     property bool showAddInstanceForm: false
+    property bool showMultiInstanceSetup: false
+    property bool showAdvancedInstanceForm: false
     property string instanceFormId: ""
     property string instanceFormName: ""
     property string instanceFormEmulator: "ldplayer"
     property string instanceFormPort: "5555"
+    property string instanceFormPlayerTag: ""
+    property string instanceFormEmulatorName: ""
+    property string pendingInstanceAction: ""
+    property string pendingInstanceActionLabel: ""
+    property string pendingInstanceActionId: ""
 
     function reloadHubState() {
         if (!hubBridge) {
@@ -222,7 +236,76 @@ ApplicationWindow {
             root.showWizard = true
             root.wizardStep = root.licenseAccepted ? 1 : 0
         }
+        if (result.action) {
+            root.pendingInstanceAction = result.action
+            root.pendingInstanceActionLabel = result.actionLabel || ""
+            root.pendingInstanceActionId = result.instanceId || ""
+        } else if (result.ok) {
+            root.pendingInstanceAction = ""
+            root.pendingInstanceActionLabel = ""
+            root.pendingInstanceActionId = ""
+        }
         return result
+    }
+
+    function readinessColor(status) {
+        if (status === "ready") return theme.ok
+        if (status === "port_conflict") return theme.danger
+        return theme.accent
+    }
+
+    function readinessLabel(item) {
+        if (!item || !item.readiness) return "Unknown"
+        const status = item.readiness.status || ""
+        if (status === "ready") return "Ready"
+        if (status === "needs_farm_plan") return "Needs farm plan"
+        if (status === "port_conflict") return "Port conflict"
+        if (status === "no_emulator") return "No emulator"
+        return item.readiness.message || status
+    }
+
+    function editInstanceFarmPlan(instanceId) {
+        applyBridgeResult(hubBridge.setEditingInstance(instanceId))
+        activeTab = "Farm Plan"
+    }
+
+    function runPendingInstanceAction() {
+        const action = pendingInstanceAction
+        const instanceId = pendingInstanceActionId
+        pendingInstanceAction = ""
+        pendingInstanceActionLabel = ""
+        pendingInstanceActionId = ""
+        if (action === "edit_farm_plan" && instanceId) {
+            editInstanceFarmPlan(instanceId)
+        } else if (action === "enable_multi_instance") {
+            applyBridgeResult(hubBridge.setMultiInstanceEnabled(true))
+        } else if (action === "rescan_emulators") {
+            applyBridgeResult(hubBridge.listAvailableEmulators())
+        }
+    }
+
+    function quickAddUnassignedInstances() {
+        applyBridgeResult(hubBridge.quickAddInstances(JSON.stringify({ copy_farm_plan_from: "default" })))
+    }
+
+    function dismissMultiInstanceSetup() {
+        showMultiInstanceSetup = false
+        applyBridgeResult(hubBridge.dismissMultiInstanceSetup())
+    }
+
+    function copyInstanceFarmPlan(instanceId) {
+        applyBridgeResult(hubBridge.copyInstanceFarmPlan(JSON.stringify({ id: instanceId, from_id: "default" })))
+    }
+
+    function saveInstanceNotifications(instanceId, localSettings) {
+        const payload = {
+            id: instanceId,
+            player_tag: (localSettings && localSettings.player_tag) ? localSettings.player_tag : "",
+            discord_webhook_url: (localSettings && localSettings.discord_webhook_url) ? localSettings.discord_webhook_url : "",
+            discord_id: (localSettings && localSettings.discord_id) ? localSettings.discord_id : "",
+            telegram_notification_chat_id: (localSettings && localSettings.telegram_notification_chat_id) ? localSettings.telegram_notification_chat_id : ""
+        }
+        applyBridgeResult(hubBridge.saveInstanceLocalSettings(JSON.stringify(payload)))
     }
 
     function tutorialTopic(id) {
@@ -273,17 +356,35 @@ ApplicationWindow {
             name: instanceFormName.trim() || instanceFormId.trim(),
             emulator: instanceFormEmulator,
             emulator_port: parseInt(instanceFormPort, 10) || 5555,
-            enabled: true
+            emulator_instance_name: instanceFormEmulatorName.trim(),
+            player_tag: instanceFormPlayerTag.trim(),
+            enabled: true,
+            copy_farm_plan: true,
+            copy_farm_plan_from: "default"
         }
         const result = applyBridgeResult(hubBridge.saveInstanceProfile(JSON.stringify(payload)))
         if (result.ok) {
             showAddInstanceForm = false
+            showAdvancedInstanceForm = false
             instanceFormId = ""
             instanceFormName = ""
             instanceFormEmulator = "ldplayer"
             instanceFormPort = "5555"
+            instanceFormPlayerTag = ""
+            instanceFormEmulatorName = ""
         }
         return result
+    }
+
+    function pickDetectedEmulator(item) {
+        if (!item) return
+        instanceFormEmulator = item.emulator || "ldplayer"
+        instanceFormPort = String(item.adb_port || "5555")
+        instanceFormEmulatorName = item.name || ""
+        instanceFormName = item.name || instanceFormName
+        if (!instanceFormId.trim()) {
+            instanceFormId = String(item.emulator || "emu") + "-" + String(item.index || 0)
+        }
     }
 
     function setInstanceFormEmulator(value) {
@@ -1804,6 +1905,48 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
+                visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                implicitHeight: farmInstanceColumn.implicitHeight + 20
+                radius: 10
+                color: theme.panel
+                border.width: 1
+                border.color: theme.borderSoft
+                ColumnLayout {
+                    id: farmInstanceColumn
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+                    Text {
+                        text: "EDITING FARM PLAN FOR"
+                        color: theme.text
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Repeater {
+                            model: (hubState.multiInstance && hubState.multiInstance.instances) ? hubState.multiInstance.instances : []
+                            delegate: ChoicePill {
+                                label: modelData.name
+                                selected: String(hubState.multiInstance.editingInstanceId || "") === String(modelData.id)
+                                onClicked: applyBridgeResult(hubBridge.setEditingInstance(modelData.id))
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: String(hubState.multiInstance.editingInstanceId || "") === String(hubState.multiInstance.defaultInstance || "default")
+                        text: "Other instances have their own farm plans — switch instance above."
+                        color: theme.faint
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
                 implicitHeight: pushAllColumn.implicitHeight + 24
                 radius: 10
                 color: theme.panel
@@ -2365,7 +2508,7 @@ ApplicationWindow {
                         tutorialId: "multi-instance"
                         Text {
                             Layout.fillWidth: true
-                            text: "Run multiple LDPlayer or MuMu bots in parallel. Each instance needs its own emulator port and farm plan."
+                            text: "Run multiple LDPlayer or MuMu bots in parallel. Discord/Telegram control uses one bot on those tabs; match alerts can be set per instance below."
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
@@ -2376,7 +2519,23 @@ ApplicationWindow {
                                 ToggleSwitch {
                                     checked: !!(hubState.multiInstance && hubState.multiInstance.enabled)
                                     onToggled: function(value) {
-                                        applyBridgeResult(hubBridge.setMultiInstanceEnabled(value))
+                                        const result = applyBridgeResult(hubBridge.setMultiInstanceEnabled(value))
+                                        if (value && result.ok && hubState.multiInstance && !hubState.multiInstance.setupWizardDismissed) {
+                                            root.showMultiInstanceSetup = true
+                                            applyBridgeResult(hubBridge.listAvailableEmulators())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        FieldRow {
+                            label: "Auto-Restart Crashed"
+                            visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
+                            CenterRow {
+                                ToggleSwitch {
+                                    checked: !!(hubState.multiInstance && hubState.multiInstance.autoRestartCrashed)
+                                    onToggled: function(value) {
+                                        applyBridgeResult(hubBridge.setAutoRestartCrashed(value))
                                     }
                                 }
                             }
@@ -2384,7 +2543,7 @@ ApplicationWindow {
                         Text {
                             Layout.fillWidth: true
                             visible: !(hubState.multiInstance && hubState.multiInstance.enabled)
-                            text: "Single-instance mode uses START on Overview. Enable this to run multiple LDPlayer or MuMu bots in parallel from this tab."
+                            text: "Single-instance mode uses START on Overview. Enable this to run multiple bots from this tab."
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
@@ -2392,15 +2551,46 @@ ApplicationWindow {
                         Text {
                             Layout.fillWidth: true
                             visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
-                            text: "Multi-instance mode is active. Start each bot with Start below instead of Overview START."
+                            text: "Multi-instance is active. Use Start all ready below instead of Overview START."
                             color: theme.ok
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
-                        HubButton {
-                            label: "Refresh Instances"
-                            secondary: true
-                            onClicked: applyBridgeResult(hubBridge.refreshInstances())
+                        ActionRow {
+                            HubButton { label: "Scan Emulators"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.listAvailableEmulators()) }
+                            HubButton { label: "Refresh"; secondary: true; onClicked: applyBridgeResult(hubBridge.refreshInstances()) }
+                            HubButton { label: "Start All Ready"; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.startAllReadyInstances()) }
+                            HubButton { label: "Stop All"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.stopAllInstances()) }
+                            HubButton { label: "Align Windows"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.alignWindows()) }
+                        }
+                        ActionRow {
+                            visible: root.pendingInstanceActionLabel !== ""
+                            HubButton {
+                                label: root.pendingInstanceActionLabel
+                                onClicked: root.runPendingInstanceAction()
+                            }
+                        }
+                    }
+
+                    FormPanel {
+                        title: "QUICK SETUP"
+                        visible: !!(hubState.multiInstance && hubState.multiInstance.enabled) && root.showMultiInstanceSetup && !hubState.multiInstance.setupWizardDismissed
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Step 1: Default instance created from your current settings.\nStep 2: Scan detected emulators.\nStep 3: Quick add unassigned emulators (copies Default farm plan)."
+                            color: theme.muted
+                            font.pixelSize: 11
+                            wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Unassigned emulators: " + String((hubState.multiInstance.unassignedEmulators || []).length)
+                            color: theme.faint
+                            font.pixelSize: 11
+                        }
+                        ActionRow {
+                            HubButton { label: "Quick Add All Unassigned"; onClicked: root.quickAddUnassignedInstances() }
+                            HubButton { label: "Done"; secondary: true; onClicked: root.dismissMultiInstanceSetup() }
                         }
                     }
 
@@ -2411,10 +2601,30 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             spacing: 10
                             ActionRow {
-                                HubButton {
-                                    label: showAddInstanceForm ? "Hide Form" : "Add Instance"
-                                    secondary: true
-                                    onClicked: showAddInstanceForm = !showAddInstanceForm
+                                HubButton { label: "Quick Add All Unassigned"; onClicked: root.quickAddUnassignedInstances() }
+                                HubButton { label: showAddInstanceForm ? "Hide Manual Form" : "Manual Add"; secondary: true; onClicked: showAddInstanceForm = !showAddInstanceForm }
+                            }
+                            Repeater {
+                                model: (hubState.multiInstance && hubState.multiInstance.unassignedEmulators) ? hubState.multiInstance.unassignedEmulators : []
+                                delegate: RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.display_emulator + " · " + modelData.name + " · port " + modelData.adb_port
+                                        color: theme.muted
+                                        font.pixelSize: 11
+                                        wrapMode: Text.WordWrap
+                                    }
+                                    HubButton {
+                                        label: "Use"
+                                        secondary: true
+                                        compact: true
+                                        onClicked: {
+                                            root.pickDetectedEmulator(modelData)
+                                            root.showAddInstanceForm = true
+                                        }
+                                    }
                                 }
                             }
                             ColumnLayout {
@@ -2422,54 +2632,50 @@ ApplicationWindow {
                                 spacing: 8
                                 visible: showAddInstanceForm
                                 FieldRow {
-                                    label: "Instance ID"
-                                    ConfigInput {
-                                        anchors.fill: parent
-                                        live: true
-                                        value: root.instanceFormId
-                                        onSaved: function(value) { root.instanceFormId = value }
+                                    label: "Detected Emulator"
+                                    visible: root.instanceFormEmulatorName !== ""
+                                    Text {
+                                        text: root.instanceFormEmulatorName + " · port " + root.instanceFormPort
+                                        color: theme.muted
+                                        font.pixelSize: 11
                                     }
+                                }
+                                FieldRow {
+                                    label: "Instance ID"
+                                    ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormId; onSaved: function(value) { root.instanceFormId = value } }
                                 }
                                 FieldRow {
                                     label: "Display Name"
-                                    ConfigInput {
-                                        anchors.fill: parent
-                                        live: true
-                                        value: root.instanceFormName
-                                        onSaved: function(value) { root.instanceFormName = value }
-                                    }
+                                    ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormName; onSaved: function(value) { root.instanceFormName = value } }
                                 }
                                 FieldRow {
-                                    label: "Emulator"
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        spacing: 8
-                                        HubButton {
-                                            label: "LDPlayer"
-                                            secondary: root.instanceFormEmulator !== "ldplayer"
-                                            onClicked: root.setInstanceFormEmulator("ldplayer")
-                                        }
-                                        HubButton {
-                                            label: "MuMu"
-                                            secondary: root.instanceFormEmulator !== "mumu"
-                                            onClicked: root.setInstanceFormEmulator("mumu")
+                                    label: "Player Tag"
+                                    ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormPlayerTag; onSaved: function(value) { root.instanceFormPlayerTag = value } }
+                                }
+                                HubButton {
+                                    label: showAdvancedInstanceForm ? "Hide Advanced" : "Advanced"
+                                    secondary: true
+                                    onClicked: showAdvancedInstanceForm = !showAdvancedInstanceForm
+                                }
+                                ColumnLayout {
+                                    visible: showAdvancedInstanceForm
+                                    spacing: 8
+                                    FieldRow {
+                                        label: "Emulator"
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            spacing: 8
+                                            HubButton { label: "LDPlayer"; secondary: root.instanceFormEmulator !== "ldplayer"; onClicked: root.setInstanceFormEmulator("ldplayer") }
+                                            HubButton { label: "MuMu"; secondary: root.instanceFormEmulator !== "mumu"; onClicked: root.setInstanceFormEmulator("mumu") }
                                         }
                                     }
-                                }
-                                FieldRow {
-                                    label: "ADB Port"
-                                    ConfigInput {
-                                        anchors.fill: parent
-                                        live: true
-                                        value: root.instanceFormPort
-                                        onSaved: function(value) { root.instanceFormPort = value }
+                                    FieldRow {
+                                        label: "ADB Port"
+                                        ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormPort; onSaved: function(value) { root.instanceFormPort = value } }
                                     }
                                 }
                                 ActionRow {
-                                    HubButton {
-                                        label: "Save Instance"
-                                        onClicked: root.saveNewInstance()
-                                    }
+                                    HubButton { label: "Save Instance"; onClicked: root.saveNewInstance() }
                                 }
                             }
                         }
@@ -2494,39 +2700,124 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         anchors.margins: 10
                                         spacing: 6
+                                        RowLayout {
+                                            spacing: 8
+                                            Rectangle {
+                                                width: 10
+                                                height: 10
+                                                radius: 5
+                                                color: root.healthColor((modelData.health && modelData.health.status) ? modelData.health.status : "good")
+                                                ToolTip.visible: healthTipHover.containsMouse
+                                                ToolTip.text: (modelData.health && modelData.health.message) ? modelData.health.message : "Health unknown"
+                                                MouseArea {
+                                                    id: healthTipHover
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                }
+                                            }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: modelData.name + " (" + modelData.id + ")"
+                                                color: theme.text
+                                                font.pixelSize: 13
+                                                font.bold: true
+                                            }
+                                        }
                                         Text {
-                                            text: modelData.name + " (" + modelData.id + ")"
-                                            color: theme.text
-                                            font.pixelSize: 13
+                                            text: root.readinessLabel(modelData)
+                                            color: root.readinessColor((modelData.readiness && modelData.readiness.status) ? modelData.readiness.status : "")
+                                            font.pixelSize: 11
                                             font.bold: true
                                         }
                                         Text {
-                                            text: String(modelData.emulator || "?").toUpperCase() + " · port " + modelData.emulator_port
+                                            text: String(modelData.emulator || "?").toUpperCase()
+                                                + (modelData.emulator_instance_name ? (" · " + modelData.emulator_instance_name) : "")
+                                                + " · port " + modelData.emulator_port
+                                                + " · " + String(modelData.queue_count || 0) + " brawler(s)"
                                                 + (modelData.running ? " · RUNNING" : " · stopped")
                                                 + (modelData.brawler ? " · " + modelData.brawler : "")
+                                                + (modelData.player_tag ? (" · " + modelData.player_tag) : "")
                                             color: theme.muted
                                             font.pixelSize: 11
                                             wrapMode: Text.WordWrap
                                             Layout.fillWidth: true
                                         }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+                                            visible: !!(modelData.health && modelData.health.recent_recoveries && modelData.health.recent_recoveries.length)
+                                            Text {
+                                                text: "Recent recoveries"
+                                                color: theme.faint
+                                                font.pixelSize: 10
+                                            }
+                                            Repeater {
+                                                model: (modelData.health && modelData.health.recent_recoveries) ? modelData.health.recent_recoveries.slice(0, 5) : []
+                                                delegate: Text {
+                                                    Layout.fillWidth: true
+                                                    text: String(modelData.event_type || "?") + ": " + String(modelData.detail || "")
+                                                    color: theme.muted
+                                                    font.pixelSize: 10
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                            }
+                                        }
                                         RowLayout {
                                             spacing: 8
+                                            HubButton { label: "Start"; visible: !modelData.running; onClicked: applyBridgeResult(hubBridge.startInstance(modelData.id)) }
+                                            HubButton { label: "Stop"; secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id)) }
+                                            HubButton { label: "Restart"; secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.restartInstance(modelData.id)) }
+                                            HubButton { label: "Edit Farm Plan"; secondary: true; onClicked: root.editInstanceFarmPlan(modelData.id) }
                                             HubButton {
-                                                label: "Start"
-                                                visible: !modelData.running
-                                                onClicked: applyBridgeResult(hubBridge.startInstance(modelData.id))
-                                            }
-                                            HubButton {
-                                                label: "Stop"
+                                                label: "Copy Default Plan"
                                                 secondary: true
-                                                visible: !!modelData.running
-                                                onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id))
+                                                visible: !!(modelData.readiness && modelData.readiness.status === "needs_farm_plan" && modelData.readiness.can_copy_default)
+                                                onClicked: root.copyInstanceFarmPlan(modelData.id)
                                             }
                                             HubButton {
                                                 label: "Delete"
                                                 secondary: true
                                                 visible: modelData.id !== String((hubState.multiInstance && hubState.multiInstance.defaultInstance) || "default")
                                                 onClicked: applyBridgeResult(hubBridge.deleteInstanceProfile(modelData.id))
+                                            }
+                                        }
+                                        Text {
+                                            text: "Match notifications (optional)"
+                                            color: theme.faint
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                        FieldRow {
+                                            label: "Webhook URL"
+                                            ConfigInput {
+                                                anchors.fill: parent
+                                                live: true
+                                                value: (modelData.local_settings && modelData.local_settings.discord_webhook_url) ? modelData.local_settings.discord_webhook_url : ""
+                                                onSaved: function(value) {
+                                                    const local = Object.assign({}, modelData.local_settings || {})
+                                                    local.discord_webhook_url = value
+                                                    root.saveInstanceNotifications(modelData.id, local)
+                                                }
+                                            }
+                                        }
+                                        FieldRow {
+                                            label: "Ping Discord ID"
+                                            ConfigInput {
+                                                anchors.fill: parent
+                                                live: true
+                                                value: (modelData.local_settings && modelData.local_settings.discord_id) ? modelData.local_settings.discord_id : ""
+                                                onSaved: function(value) {
+                                                    const local = Object.assign({}, modelData.local_settings || {})
+                                                    local.discord_id = value
+                                                    root.saveInstanceNotifications(modelData.id, local)
+                                                }
+                                            }
+                                        }
+                                        ActionRow {
+                                            HubButton {
+                                                label: "Test Webhook"
+                                                secondary: true
+                                                onClicked: applyBridgeResult(hubBridge.testInstanceWebhook(modelData.id))
                                             }
                                         }
                                     }
@@ -2592,6 +2883,12 @@ ApplicationWindow {
                                         color: theme.muted
                                         font.pixelSize: 11
                                         wrapMode: Text.WordWrap
+                                    }
+                                    HubButton {
+                                        visible: !!(modelData.fix && modelData.fix.action)
+                                        label: modelData.fix ? modelData.fix.label : "Fix"
+                                        secondary: true
+                                        onClicked: applyBridgeResult(hubBridge.runPreflightFix(modelData.fix.action))
                                     }
                                 }
                             }
@@ -3079,10 +3376,25 @@ ApplicationWindow {
                                 ChoicePill { label: "high-ips"; selected: root.performanceProfile === "high_ips"; onClicked: root.performanceProfile = "high_ips" }
                             }
                         }
+                        FieldRow {
+                            label: "Auto-Tune IPS"
+                            hint: "Step capture settings between matches when IPS stays below target."
+                            CenterRow {
+                                ToggleSwitch {
+                                    checked: root.boolValue("settings", "performance_autotune")
+                                    onToggled: function(value) { root.saveValue("settings", "performance_autotune", value) }
+                                }
+                            }
+                        }
                         ActionRow {
                             HubButton {
                                 label: "Apply Performance Mode"
                                 onClicked: root.runAction("profile-" + root.performanceProfile)
+                            }
+                            HubButton {
+                                label: "Calibrate"
+                                secondary: true
+                                onClicked: applyBridgeResult(hubBridge.calibratePerformance())
                             }
                         }
                     }
@@ -3105,6 +3417,8 @@ ApplicationWindow {
                         FieldRow { label: "Ping On Target"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_target_is_reached"); onToggled: function(value) { root.saveValue("discord", "ping_when_target_is_reached", value) } } } }
                         FieldRow { label: "Ping Every X Matches"; hint: "Mention your Discord ID on every Nth match summary (0 = no mention)."; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_match")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_match", value) } } }
                         FieldRow { label: "Heartbeat Every X Minutes"; hint: "Optional still-running ping (0 = off). Does not replace match summaries."; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_minutes")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_minutes", value) } } }
+                        FieldRow { label: "Daily Digest"; hint: "One summary message per day instead of noisy recovery pings."; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "daily_digest_enabled"); onToggled: function(value) { root.saveValue("discord", "daily_digest_enabled", value) } } } }
+                        FieldRow { label: "Digest Hour (0-23)"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "daily_digest_hour")); onSaved: function(value) { root.saveValue("discord", "daily_digest_hour", value) } } }
                     }
                     FormPanel {
                         title: "REMOTE CONTROL"
@@ -3245,6 +3559,55 @@ ApplicationWindow {
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Text { text: "Recent Matches"; color: theme.faint; font.pixelSize: 11 }
+                    FormPanel {
+                        title: "EFFICIENCY (LAST 7 DAYS)"
+                        visible: !!(hubState.history && hubState.history.efficiency && hubState.history.efficiency.length)
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Repeater {
+                                model: (hubState.history && hubState.history.efficiency) ? hubState.history.efficiency.slice(0, 12) : []
+                                delegate: Rectangle {
+                                    width: 150
+                                    height: modelData.stuck ? 92 : 78
+                                    radius: 8
+                                    color: theme.panel2
+                                    border.width: 1
+                                    border.color: modelData.stuck ? theme.danger : theme.borderSoft
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+                                        Text {
+                                            width: parent.width
+                                            text: modelData.brawler
+                                            color: theme.text
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            text: modelData.trophiesPerHour + " trophies/hr"
+                                            color: theme.ok
+                                            font.pixelSize: 11
+                                        }
+                                        Text {
+                                            text: modelData.winRate + "% win · " + modelData.matches + " matches"
+                                            color: theme.muted
+                                            font.pixelSize: 10
+                                        }
+                                        Text {
+                                            visible: !!modelData.stuck
+                                            text: "Stuck"
+                                            color: theme.danger
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 6

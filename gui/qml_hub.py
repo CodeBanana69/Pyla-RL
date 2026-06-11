@@ -113,13 +113,7 @@ class QmlHub:
                 self._queue_reload_timer.setInterval(300)
                 self._queue_reload_timer.timeout.connect(self.queueChanged.emit)
                 self._queue_watcher = QFileSystemWatcher()
-                from gui.brawler_queue import QUEUE_PATH
-
-                queue_path = Path(QUEUE_PATH).resolve()
-                if queue_path.exists():
-                    self._queue_watcher.addPath(str(queue_path))
-                else:
-                    self._queue_watcher.addPath(str(queue_path.parent.resolve()))
+                self._sync_queue_watcher()
                 self._queue_watcher.fileChanged.connect(self._on_queue_file_changed)
                 self._instances_timer = QTimer()
                 self._instances_timer.setInterval(2000)
@@ -164,18 +158,216 @@ class QmlHub:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
             @Slot(str, result=str)
+            def runPreflightFix(self, action):
+                try:
+                    from gui.preflight_fixes import run_preflight_fix
+
+                    emulator, port = self._preflight_emulator_args()
+                    ok, message = run_preflight_fix(action, emulator=emulator, port=port)
+                    self._preflight_cache = self._run_preflight()
+                    return json.dumps({
+                        "ok": ok,
+                        "message": message,
+                        "state": self._ui_state(),
+                    })
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(result=str)
+            def calibratePerformance(self):
+                try:
+                    from performance_autotuner import calibrate_performance_profile
+
+                    result = calibrate_performance_profile(seconds=2.0)
+                    self._store.general_config.clear()
+                    self._store.general_config.update(
+                        __import__("gui.hub_state", fromlist=["load_toml_as_dict"]).load_toml_as_dict(
+                            self._store.general_config_path
+                        )
+                    )
+                    profile = result.get("recommended_profile", "balanced")
+                    return json.dumps({
+                        "ok": True,
+                        "message": (
+                            f"Calibration complete. Recommended profile: {profile} "
+                            f"(best capture: {result.get('best_capture', '?')}). Restart bots to apply."
+                        ),
+                        "state": self._ui_state(),
+                    })
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(bool, result=str)
+            def setAutoRestartCrashed(self, enabled):
+                try:
+                    self._store.set_auto_restart_crashed(bool(enabled))
+                    self.instancesUpdated.emit()
+                    label = "enabled" if enabled else "disabled"
+                    return json.dumps({
+                        "ok": True,
+                        "message": f"Auto-restart on crash {label}.",
+                        "state": self._ui_state(),
+                    })
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            def _instance_response(self, ok, message, meta=None):
+                payload = {"ok": ok, "message": message, "state": self._ui_state()}
+                if meta:
+                    for key in ("action", "actionLabel", "instanceId"):
+                        if key in meta:
+                            payload[key] = meta[key]
+                if ok:
+                    self.instancesUpdated.emit()
+                return json.dumps(payload)
+
+            @Slot(str, result=str)
             def startInstance(self, instance_id):
                 if self._multi_instance_service is None:
-                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
-                ok, message = self._multi_instance_service.start_instance(instance_id)
-                return json.dumps({"ok": ok, "message": message, "state": self._ui_state()})
+                    return self._instance_response(False, "Multi-instance service is not running.")
+                ok, message, meta = self._multi_instance_service.start_instance(instance_id)
+                return self._instance_response(ok, message, meta)
 
             @Slot(str, result=str)
             def stopInstance(self, instance_id):
                 if self._multi_instance_service is None:
+                    return self._instance_response(False, "Multi-instance service is not running.")
+                ok, message, meta = self._multi_instance_service.stop_instance(instance_id)
+                return self._instance_response(ok, message, meta)
+
+            @Slot(str, result=str)
+            def restartInstance(self, instance_id):
+                if self._multi_instance_service is None:
+                    return self._instance_response(False, "Multi-instance service is not running.")
+                ok, message, meta = self._multi_instance_service.restart_instance(instance_id)
+                return self._instance_response(ok, message, meta)
+
+            @Slot(result=str)
+            def alignWindows(self):
+                if self._multi_instance_service is None:
                     return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
-                ok, message = self._multi_instance_service.stop_instance(instance_id)
+                ok, message = self._multi_instance_service.align_windows()
                 return json.dumps({"ok": ok, "message": message, "state": self._ui_state()})
+
+            @Slot(result=str)
+            def startAllReadyInstances(self):
+                if self._multi_instance_service is None:
+                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                results, message = self._multi_instance_service.start_all_ready()
+                self.instancesUpdated.emit()
+                return json.dumps({"ok": True, "message": message, "results": results, "state": self._ui_state()})
+
+            @Slot(result=str)
+            def stopAllInstances(self):
+                if self._multi_instance_service is None:
+                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                results, message = self._multi_instance_service.stop_all()
+                self.instancesUpdated.emit()
+                return json.dumps({"ok": True, "message": message, "results": results, "state": self._ui_state()})
+
+            @Slot(result=str)
+            def listAvailableEmulators(self):
+                if self._multi_instance_service is None:
+                    from gui.instance_config import list_available_emulator_instances, list_unassigned_emulator_instances
+
+                    payload = {
+                        "all": list_available_emulator_instances(),
+                        "unassigned": list_unassigned_emulator_instances(),
+                    }
+                else:
+                    payload = self._multi_instance_service.list_available_emulators()
+                return json.dumps({"ok": True, "emulators": payload, "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def quickAddInstances(self, payload_json):
+                try:
+                    payload = json.loads(payload_json or "{}")
+                    if self._multi_instance_service is None:
+                        from gui.instance_config import quick_add_emulator_instances
+
+                        created = quick_add_emulator_instances(
+                            payload.get("items"),
+                            copy_farm_plan_from=payload.get("copy_farm_plan_from", "default"),
+                        )
+                    else:
+                        created = self._multi_instance_service.quick_add_instances(payload)
+                    return json.dumps({
+                        "ok": True,
+                        "message": f"Added {len(created)} instance(s).",
+                        "created": created,
+                        "state": self._ui_state(),
+                    })
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def setEditingInstance(self, instance_id):
+                try:
+                    self._store.set_editing_instance_id(instance_id)
+                    self._sync_queue_watcher()
+                    self.queueChanged.emit()
+                    return json.dumps({"ok": True, "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def saveInstanceLocalSettings(self, payload_json):
+                try:
+                    payload = json.loads(payload_json or "{}")
+                    instance_id = payload.get("id", "")
+                    self._store.save_instance_local_settings(instance_id, payload)
+                    return json.dumps({"ok": True, "message": "Instance settings saved.", "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def copyInstanceFarmPlan(self, payload_json):
+                try:
+                    payload = json.loads(payload_json or "{}")
+                    self._store.copy_instance_farm_plan(
+                        payload.get("id", ""),
+                        payload.get("from_id", "default"),
+                    )
+                    self.queueChanged.emit()
+                    return json.dumps({"ok": True, "message": "Farm plan copied.", "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+
+            @Slot(result=str)
+            def dismissMultiInstanceSetup(self):
+                from gui.instance_config import set_multi_instance_setup_dismissed
+
+                set_multi_instance_setup_dismissed(True)
+                return json.dumps({"ok": True, "state": self._ui_state()})
+
+            @Slot(str, result=str)
+            def testInstanceWebhook(self, instance_id):
+                try:
+                    import asyncio
+
+                    from discord_notifier import async_send_test_notification, load_instance_discord_settings
+
+                    import os
+
+                    previous = os.environ.get("PYLA_INSTANCE_ID")
+                    os.environ["PYLA_INSTANCE_ID"] = str(instance_id).strip()
+                    try:
+                        settings = load_instance_discord_settings(instance_id)
+                        if not settings.get("webhook_url"):
+                            raise ValueError("No webhook URL configured for this instance.")
+                        sent = asyncio.run(async_send_test_notification())
+                    finally:
+                        if previous is None:
+                            os.environ.pop("PYLA_INSTANCE_ID", None)
+                        else:
+                            os.environ["PYLA_INSTANCE_ID"] = previous
+                    if not sent:
+                        from discord_notifier import last_discord_error
+
+                        raise ValueError(last_discord_error() or "Webhook test failed.")
+                    return json.dumps({"ok": True, "message": "Webhook test sent.", "state": self._ui_state()})
+                except Exception as exc:
+                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
             @Slot(str, result=str)
             def saveInstanceProfile(self, payload_json):
@@ -208,12 +400,20 @@ class QmlHub:
                     preflight = self._preflight_cache
                 return self._store.ui_state(preflight=preflight, correct_zoom=self._correct_zoom)
 
-            def _on_queue_file_changed(self, _path):
-                from gui.brawler_queue import QUEUE_PATH
+            def _active_queue_path(self):
+                return self._store._active_queue_path()
 
-                queue_path = str(Path(QUEUE_PATH).resolve())
-                if Path(queue_path).exists() and queue_path not in self._queue_watcher.files():
-                    self._queue_watcher.addPath(queue_path)
+            def _sync_queue_watcher(self):
+                queue_path = self._active_queue_path().resolve()
+                for watched in list(self._queue_watcher.files()):
+                    self._queue_watcher.removePath(watched)
+                if queue_path.exists():
+                    self._queue_watcher.addPath(str(queue_path))
+                elif queue_path.parent.exists():
+                    self._queue_watcher.addPath(str(queue_path.parent))
+
+            def _on_queue_file_changed(self, _path):
+                self._sync_queue_watcher()
                 self._queue_reload_timer.start()
 
             @Slot(result=bool)
@@ -416,6 +616,19 @@ class QmlHub:
                     self._store.bot_config.clear()
                     self._store.bot_config.update(result["bot_config"])
                     return f"Applied {result['profile']} profile. Restart the bot to use it."
+                if action == "calibrate-performance":
+                    from performance_autotuner import calibrate_performance_profile
+
+                    result = calibrate_performance_profile(seconds=2.0)
+                    self._store.general_config.clear()
+                    from gui.hub_state import load_toml_as_dict
+
+                    self._store.general_config.update(load_toml_as_dict(self._store.general_config_path))
+                    profile = result.get("recommended_profile", "balanced")
+                    return (
+                        f"Calibration complete. Recommended profile: {profile} "
+                        f"(best capture: {result.get('best_capture', '?')}). Restart bots to apply."
+                    )
                 if action == "preflight-check":
                     result = self._run_preflight()
                     lines = []
@@ -499,39 +712,43 @@ class QmlHub:
                 if action == "add-to-queue":
                     from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 
-                    queue = load_queue()
+                    queue_path = self._store._active_queue_path()
+                    queue = load_queue(queue_path)
                     queue.append(normalize_queue_row(payload))
-                    persist_queue(queue)
+                    persist_queue(queue, queue_path)
                     return f"Added {payload.get('brawler', 'brawler')} to farm plan."
                 if action == "remove-from-queue":
                     from gui.brawler_queue import load_queue, persist_queue
 
+                    queue_path = self._store._active_queue_path()
                     index = int(payload.get("index", -1))
-                    queue = load_queue()
+                    queue = load_queue(queue_path)
                     if index < 0 or index >= len(queue):
                         raise ValueError("Invalid queue index.")
                     removed = queue.pop(index)
-                    persist_queue(queue)
+                    persist_queue(queue, queue_path)
                     return f"Removed {removed.get('brawler', 'brawler')} from farm plan."
                 if action == "move-queue-item":
                     from gui.brawler_queue import load_queue, persist_queue
 
+                    queue_path = self._store._active_queue_path()
                     index = int(payload.get("index", -1))
                     direction = int(payload.get("direction", 0))
-                    queue = load_queue()
+                    queue = load_queue(queue_path)
                     target = index + direction
                     if index < 0 or index >= len(queue) or target < 0 or target >= len(queue):
                         raise ValueError("Cannot move queue item.")
                     item = queue.pop(index)
                     queue.insert(target, item)
-                    persist_queue(queue)
+                    persist_queue(queue, queue_path)
                     return "Queue order updated."
                 if action == "reorder-queue":
                     from gui.brawler_queue import load_queue, persist_queue
 
+                    queue_path = self._store._active_queue_path()
                     from_index = int(payload.get("fromIndex", -1))
                     to_index = int(payload.get("toIndex", -1))
-                    queue = load_queue()
+                    queue = load_queue(queue_path)
                     if from_index < 0 or from_index >= len(queue):
                         raise ValueError("Invalid source queue index.")
                     if to_index < 0 or to_index >= len(queue):
@@ -540,13 +757,14 @@ class QmlHub:
                         return "Queue order unchanged."
                     item = queue.pop(from_index)
                     queue.insert(to_index, item)
-                    persist_queue(queue)
+                    persist_queue(queue, queue_path)
                     return "Queue order updated."
                 if action == "update-queue-item":
                     from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 
+                    queue_path = self._store._active_queue_path()
                     index = int(payload.get("index", -1))
-                    queue = load_queue()
+                    queue = load_queue(queue_path)
                     if index < 0 or index >= len(queue):
                         raise ValueError("Invalid queue index.")
                     row = dict(queue[index])
@@ -555,7 +773,7 @@ class QmlHub:
                     if "automatically_pick" in payload:
                         row["automatically_pick"] = bool(payload.get("automatically_pick"))
                     queue[index] = normalize_queue_row(row)
-                    persist_queue(queue)
+                    persist_queue(queue, queue_path)
                     brawler = queue[index].get("brawler", "brawler")
                     return f"Updated {brawler} target to {queue[index]['push_until']} trophies."
                 if action == "open-brawler-picker":

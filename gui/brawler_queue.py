@@ -21,6 +21,7 @@ QUEUE_SORT_MODES = {
     "target_asc": "Target low to high",
     "name_asc": "Name A to Z",
     "name_desc": "Name Z to A",
+    "efficiency": "Best trophies/hour (analytics)",
 }
 
 
@@ -163,6 +164,10 @@ def sort_queue(queue, *, mode="cups_desc"):
             return (-gap, trophies, brawler)
         if sort_mode == "name_asc":
             return (brawler, -trophies)
+        if sort_mode == "efficiency":
+            from farm_analytics import efficiency_sort_key
+
+            return efficiency_sort_key(row)
         return (brawler,)
 
     if sort_mode == "name_desc":
@@ -327,6 +332,7 @@ def build_push_all_queue(target_trophies=1000, brawlers=None, priority_order=Non
     return data
 
 
-def persist_queue(data):
-    save_brawler_data(data)
-    return save_queue(data)
+def persist_queue(data, path=None):
+    if path is None:
+        save_brawler_data(data)
+    return save_queue(data, path)

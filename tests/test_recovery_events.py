@@ -23,6 +23,13 @@ class RecoveryEventTests(unittest.TestCase):
             recent = read_recent_events(limit=10, path=path)
             self.assertEqual(len(recent), 4)
 
+    def test_screenshot_path_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "recovery_events.jsonl"
+            log_recovery("app_restart", detail="state=lobby", screenshot_path="logs/recovery/1_app_restart.png", path=path)
+            events = read_recent_events(limit=1, path=path)
+            self.assertEqual(events[0]["screenshot_path"], "logs/recovery/1_app_restart.png")
+
 
 if __name__ == "__main__":
     unittest.main()

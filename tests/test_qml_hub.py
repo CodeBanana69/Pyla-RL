@@ -1,11 +1,14 @@
+import json
 import re
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import toml
 
 from gui.hub_state import HubStateStore
+from utils import clear_toml_cache
 
 
 class QmlHubStateTests(unittest.TestCase):
@@ -144,6 +147,86 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertFalse(toml.load(paths["api"])["auto_refresh_token"])
         self.assertFalse(toml.load(paths["api"])["sync_trophies_after_match"])
         self.assertEqual(toml.load(paths["timers"])["low_ips_app_restart_after"], 3)
+
+    @patch("utils.resolve_project_path")
+    @patch("gui.instance_config.resolve_project_path")
+    def test_editing_instance_uses_per_instance_queue(self, mock_resolve, mock_utils_resolve):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / "cfg").mkdir(parents=True, exist_ok=True)
+        (root / "instances" / "default").mkdir(parents=True, exist_ok=True)
+        (root / "instances" / "acc-1").mkdir(parents=True, exist_ok=True)
+        (root / "cfg" / "instances.toml").write_text(
+            toml.dumps({
+                "multi_instance": {"enabled": True, "default_instance": "default"},
+                "instances": {
+                    "default": {
+                        "name": "Default",
+                        "enabled": True,
+                        "emulator": "ldplayer",
+                        "emulator_port": 5555,
+                        "emulator_profile_index": "0",
+                        "queue_path": "instances/default/latest_brawler_data.json",
+                    },
+                    "acc-1": {
+                        "name": "Account 1",
+                        "enabled": True,
+                        "emulator": "ldplayer",
+                        "emulator_port": 5557,
+                        "emulator_profile_index": "1",
+                        "queue_path": "instances/acc-1/latest_brawler_data.json",
+                    },
+                },
+            }),
+            encoding="utf-8",
+        )
+        (root / "instances" / "default" / "latest_brawler_data.json").write_text("[]", encoding="utf-8")
+        (root / "instances" / "acc-1" / "latest_brawler_data.json").write_text(
+            json.dumps([{"brawler": "colt", "push_until": 1000}]),
+            encoding="utf-8",
+        )
+        mock_resolve.side_effect = lambda path: str(root / path)
+        mock_utils_resolve.side_effect = lambda path: str(root / path)
+        clear_toml_cache()
+        for name in (
+            "bot_config.toml",
+            "general_config.toml",
+            "time_tresholds.toml",
+            "match_history.toml",
+            "discord_config.toml",
+            "telegram_config.toml",
+            "telegram_config.local.toml",
+            "brawl_stars_api.toml",
+            "brawl_stars_api.local.toml",
+        ):
+            (root / name).write_text("", encoding="utf-8")
+
+        store = HubStateStore(
+            str(root / "bot_config.toml"),
+            str(root / "general_config.toml"),
+            str(root / "time_tresholds.toml"),
+            str(root / "match_history.toml"),
+            str(root / "discord_config.toml"),
+            str(root / "telegram_config.toml"),
+            str(root / "telegram_config.local.toml"),
+            str(root / "brawl_stars_api.toml"),
+            str(root / "brawl_stars_api.local.toml"),
+        )
+        store.set_editing_instance_id("acc-1")
+        queue = store.load_queue()
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["brawler"], "colt")
+
+    def test_multi_instance_bridge_and_qml_wired(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+        self.assertIn("def startAllReadyInstances(self):", bridge)
+        self.assertIn("def quickAddInstances(self", bridge)
+        self.assertIn("def setEditingInstance(self", bridge)
+        self.assertIn("EDITING FARM PLAN FOR", qml)
+        self.assertIn("Quick Add All Unassigned", qml)
+        self.assertIn("hubBridge.alignWindows()", qml)
 
     def test_reorder_queue_action_is_wired(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")

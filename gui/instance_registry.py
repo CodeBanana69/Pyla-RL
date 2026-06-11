@@ -8,11 +8,45 @@ from typing import Any
 
 from gui.instance_config import (
     MANIFEST_DIR,
+    compute_instance_readiness,
     get_instance_profile,
     list_instance_profiles,
+    load_instance_local_settings,
     normalize_instance_profile,
+    queue_brawler_count,
 )
+from recovery_events import read_recent_events
 from runtime_control import process_is_alive
+
+
+def compute_instance_health(instance_id: str, *, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+    manifest = manifest or read_manifest(instance_id) or {}
+    started_at = float(manifest.get("started_at", 0) or 0)
+    uptime_s = max(0.0, time.time() - started_at) if started_at else 0.0
+    recovery_count = len(read_recent_events(limit=200))
+    recoveries_per_hour = (recovery_count / (uptime_s / 3600.0)) if uptime_s > 3600 else recovery_count
+    heartbeat_at = float(manifest.get("heartbeat_at", 0) or 0)
+    heartbeat_age = time.time() - heartbeat_at if heartbeat_at else 999.0
+
+    if heartbeat_age > 30 and manifest.get("pid"):
+        status = "poor"
+        message = "Worker heartbeat is stale."
+    elif recoveries_per_hour >= 6:
+        status = "poor"
+        message = "Frequent recoveries detected."
+    elif recoveries_per_hour >= 2 or heartbeat_age > 15:
+        status = "degraded"
+        message = "Some instability detected."
+    else:
+        status = "good"
+        message = "Healthy."
+
+    return {
+        "status": status,
+        "message": message,
+        "recoveries_per_hour": round(recoveries_per_hour, 2),
+        "recent_recoveries": read_recent_events(limit=5),
+    }
 
 
 def manifest_path(instance_id: str) -> Path:
@@ -66,6 +100,7 @@ def build_manifest(
         "emulator": profile["emulator"],
         "emulator_port": profile["emulator_port"],
         "status": status,
+        "heartbeat_at": time.time(),
     }
     if snapshot:
         payload.update({
@@ -92,6 +127,7 @@ def update_manifest_heartbeat(instance_id: str, snapshot: dict[str, Any], *, sta
         status=str(existing.get("status") or "running"),
     )
     payload["started_at"] = existing.get("started_at", payload["started_at"])
+    payload["heartbeat_at"] = time.time()
     write_manifest(instance_id, payload)
 
 
@@ -127,8 +163,12 @@ def list_instances(*, include_config_only: bool = True) -> list[dict[str, Any]]:
         instance_id = profile["id"]
         seen.add(instance_id)
         live = live_by_id.get(instance_id)
+        readiness = compute_instance_readiness(instance_id)
+        local = load_instance_local_settings(instance_id)
+        health = compute_instance_health(instance_id, manifest=live)
         merged.append({
             **profile,
+            "health": health,
             "running": bool(live),
             "pid": live.get("pid") if live else None,
             "state_path": live.get("state_path", "") if live else "",
@@ -139,6 +179,14 @@ def list_instances(*, include_config_only: bool = True) -> list[dict[str, Any]]:
             "session_losses": live.get("session_losses", 0) if live else 0,
             "session_draws": live.get("session_draws", 0) if live else 0,
             "uptime_s": live.get("uptime_s", 0) if live else 0,
+            "queue_count": queue_brawler_count(instance_id),
+            "readiness": readiness,
+            "local_settings": {
+                "player_tag": str((local.get("player") or {}).get("tag", "") or profile.get("player_tag", "")),
+                "discord_webhook_url": str((local.get("discord") or {}).get("webhook_url", "")),
+                "discord_id": str((local.get("discord") or {}).get("discord_id", "")),
+                "telegram_notification_chat_id": str((local.get("telegram") or {}).get("notification_chat_id", "")),
+            },
         })
 
     if include_config_only:

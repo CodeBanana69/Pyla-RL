@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 EMULATOR_PORTS = {
-    "LDPlayer": [5555, 5557, 5559, 5554],
+    "LDPlayer": [5555, 5557, 5559, 5561, 5563, 5565, 5567, 5569, 5554],
     "MuMu": [16384, 16416, 16448, 7555, 5558, 5557, 5556, 5555, 5554],
 }
 
