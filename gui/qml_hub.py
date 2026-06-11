@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from gui.hub_state import HubStateStore
+from gui.hub_state import HubStateStore, _to_bool as _to_bool_setting
 
 
 def _normalize_dialog_path(raw_path):
@@ -16,6 +16,31 @@ def _normalize_dialog_path(raw_path):
 
         return QUrl(path).toLocalFile()
     return path
+
+
+def apply_windows_glass_effects(window, dark=True):
+    """Best-effort Win11 DWM polish for the frameless hub window.
+
+    Rounds the window corners and matches the titlebar/backdrop hint to the
+    active theme. Safe no-op on older Windows or non-Windows platforms.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        hwnd = int(window.winId())
+        if not hwnd:
+            return
+        dwm = ctypes.windll.dwmapi
+        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        dark_flag = ctypes.c_int(1 if dark else 0)
+        dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark_flag), ctypes.sizeof(dark_flag))
+        # DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_ROUND = 2
+        corner = ctypes.c_int(2)
+        dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), ctypes.sizeof(corner))
+    except Exception:
+        pass
 
 
 def ensure_pyside6_available():
@@ -194,6 +219,20 @@ class QmlHub:
             @Slot(result=bool)
             def settingsOnly(self):
                 return self._settings_only
+
+            @Slot(result=str)
+            def themeJson(self):
+                from gui.theme import normalize_theme_mode, qml_theme_payload
+
+                mode = normalize_theme_mode(self._store.general_config.get("ui_theme", "system"))
+                animations = _to_bool_setting(self._store.general_config.get("ui_animations", "yes"))
+                return json.dumps(qml_theme_payload(mode, animations))
+
+            @Slot(bool)
+            def applyWindowTheme(self, dark):
+                window = getattr(self, "_window", None)
+                if window is not None:
+                    apply_windows_glass_effects(window, dark=bool(dark))
 
             @Slot()
             def closeHub(self):
@@ -756,6 +795,16 @@ class QmlHub:
         engine.load(QUrl.fromLocalFile(str(qml_path)))
         if not engine.rootObjects():
             raise RuntimeError(f"Could not load QML hub: {qml_path}")
+
+        root_window = engine.rootObjects()[0]
+        self._bridge._window = root_window
+        try:
+            from gui.theme import resolve_theme_mode
+
+            resolved = resolve_theme_mode(self._store.general_config.get("ui_theme", "system"))
+            apply_windows_glass_effects(root_window, dark=resolved != "light")
+        except Exception:
+            pass
 
         self._app = app
         self._engine = engine

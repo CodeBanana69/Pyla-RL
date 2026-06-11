@@ -38,6 +38,12 @@ ApplicationWindow {
     property string pickerTarget: "1000"
     property string pickerType: "trophies"
     property string historySort: "games"
+    property string themeMode: "system"
+    property string resolvedTheme: "dark"
+    property bool animationsEnabled: true
+    readonly property int durFast: animationsEnabled ? 130 : 0
+    readonly property int durMed: animationsEnabled ? 210 : 0
+    readonly property int durSlow: animationsEnabled ? 320 : 0
     readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
     readonly property var queueSortOptions: [
         { id: "cups_desc", label: "Cups high \u2192 low" },
@@ -94,6 +100,67 @@ ApplicationWindow {
         }
         hubState = JSON.parse(hubBridge.stateJson())
         preflightChecks = (hubState.preflight && hubState.preflight.checks) ? hubState.preflight.checks : []
+    }
+
+    function applyTheme() {
+        if (!hubBridge || !hubBridge.themeJson) {
+            return
+        }
+        const data = JSON.parse(hubBridge.themeJson())
+        root.themeMode = data.mode
+        root.resolvedTheme = data.resolved
+        root.animationsEnabled = !!data.animations
+        const c = data.colors
+        theme.bg = c.bg
+        theme.chrome = c.chrome
+        theme.panel = c.panel
+        theme.panel2 = c.panel2
+        theme.panel3 = c.panel3
+        theme.border = c.border
+        theme.borderSoft = c.borderSoft
+        theme.hover = c.hover
+        theme.glassHighlight = c.glassHighlight
+        theme.scrim = c.scrim
+        theme.text = c.text
+        theme.muted = c.muted
+        theme.faint = c.faint
+        theme.accent = c.accent
+        theme.accentHover = c.accentHover
+        theme.accentSoft = c.accentSoft
+        theme.accentBorder = c.accentBorder
+        theme.ok = c.ok
+        theme.okSoft = c.okSoft
+        theme.danger = c.danger
+        theme.dangerSoft = c.dangerSoft
+        theme.warnSoft = c.warnSoft
+        theme.knob = c.knob
+        theme.disabled = c.disabled
+        theme.link = c.link
+        theme.glowA = c.glowA
+        theme.glowB = c.glowB
+        theme.glowC = c.glowC
+        if (hubBridge.applyWindowTheme) {
+            hubBridge.applyWindowTheme(root.resolvedTheme !== "light")
+        }
+        if (typeof backdropCanvas !== "undefined" && backdropCanvas) {
+            backdropCanvas.requestPaint()
+            backdropFade.restart()
+        }
+    }
+
+    function setThemeMode(mode) {
+        root.saveValue("settings", "ui_theme", mode)
+        root.applyTheme()
+    }
+
+    function cycleThemeMode() {
+        const next = root.themeMode === "system" ? "light" : (root.themeMode === "light" ? "dark" : "system")
+        root.setThemeMode(next)
+    }
+
+    function setAnimationsEnabled(value) {
+        root.saveValue("settings", "ui_animations", value)
+        root.applyTheme()
     }
 
     Connections {
@@ -290,6 +357,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        applyTheme()
         reloadState()
         runAction("ensure-brawler-icons")
         if (settingsOnly) {
@@ -322,23 +390,62 @@ ApplicationWindow {
         }
     }
 
-    QtObject {
+    Item {
         id: theme
-        property color bg: "#0c0c0c"
-        property color chrome: "#121212"
-        property color panel: "#181818"
-        property color panel2: "#1f1f1f"
-        property color panel3: "#2a2a2a"
-        property color border: "#333333"
-        property color borderSoft: "#262626"
-        property color text: "#f4f4f4"
-        property color muted: "#b8b8b8"
-        property color faint: "#6d6d6d"
+        visible: false
+        property color bg: "#0b0c12"
+        property color chrome: "#a811131b"
+        property color panel: "#9e161925"
+        property color panel2: "#b81c2030"
+        property color panel3: "#eb252a3d"
+        property color border: "#29ffffff"
+        property color borderSoft: "#14ffffff"
+        property color hover: "#12ffffff"
+        property color glassHighlight: "#12ffffff"
+        property color scrim: "#8c000000"
+        property color text: "#f5f6fa"
+        property color muted: "#aab0c0"
+        property color faint: "#707689"
         property color accent: "#ff9f0a"
         property color accentHover: "#ffb23a"
-        property color accentSoft: "#32220c"
-        property color accentBorder: "#8f610e"
+        property color accentSoft: "#29ff9f0a"
+        property color accentBorder: "#8cff9f0a"
         property color ok: "#30d158"
+        property color okSoft: "#2e30d158"
+        property color danger: "#ff5d52"
+        property color dangerSoft: "#29ff5d52"
+        property color warnSoft: "#29ffd60a"
+        property color knob: "#ffffff"
+        property color disabled: "#585d6e"
+        property color link: "#7ccbff"
+        property color glowA: "#ff9f0a"
+        property color glowB: "#7a5cff"
+        property color glowC: "#2bd9c8"
+
+        Behavior on bg { ColorAnimation { duration: root.durSlow } }
+        Behavior on chrome { ColorAnimation { duration: root.durSlow } }
+        Behavior on panel { ColorAnimation { duration: root.durSlow } }
+        Behavior on panel2 { ColorAnimation { duration: root.durSlow } }
+        Behavior on panel3 { ColorAnimation { duration: root.durSlow } }
+        Behavior on border { ColorAnimation { duration: root.durSlow } }
+        Behavior on borderSoft { ColorAnimation { duration: root.durSlow } }
+        Behavior on hover { ColorAnimation { duration: root.durSlow } }
+        Behavior on glassHighlight { ColorAnimation { duration: root.durSlow } }
+        Behavior on scrim { ColorAnimation { duration: root.durSlow } }
+        Behavior on text { ColorAnimation { duration: root.durSlow } }
+        Behavior on muted { ColorAnimation { duration: root.durSlow } }
+        Behavior on faint { ColorAnimation { duration: root.durSlow } }
+        Behavior on accent { ColorAnimation { duration: root.durSlow } }
+        Behavior on accentHover { ColorAnimation { duration: root.durSlow } }
+        Behavior on accentSoft { ColorAnimation { duration: root.durSlow } }
+        Behavior on accentBorder { ColorAnimation { duration: root.durSlow } }
+        Behavior on ok { ColorAnimation { duration: root.durSlow } }
+        Behavior on okSoft { ColorAnimation { duration: root.durSlow } }
+        Behavior on danger { ColorAnimation { duration: root.durSlow } }
+        Behavior on dangerSoft { ColorAnimation { duration: root.durSlow } }
+        Behavior on warnSoft { ColorAnimation { duration: root.durSlow } }
+        Behavior on disabled { ColorAnimation { duration: root.durSlow } }
+        Behavior on link { ColorAnimation { duration: root.durSlow } }
     }
 
     component Glyph: Item {
@@ -417,19 +524,21 @@ ApplicationWindow {
 
         width: Math.max(96, navText.implicitWidth + 18)
         height: 30
-        radius: 7
-        color: selected ? theme.panel3 : (hovered ? "#211f1a" : "transparent")
-        border.width: selected ? 1 : 0
-        border.color: selected ? theme.border : "transparent"
+        radius: 9
+        color: !selected && hovered ? theme.hover : "transparent"
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
 
         Text {
             id: navText
             anchors.centerIn: parent
             text: nav.label
-            color: nav.selected ? theme.text : theme.muted
+            color: nav.selected ? theme.text : (nav.hovered ? theme.text : theme.muted)
             font.pixelSize: 11
             font.weight: nav.selected ? Font.DemiBold : Font.Medium
             horizontalAlignment: Text.AlignHCenter
+
+            Behavior on color { ColorAnimation { duration: root.durFast } }
         }
 
         MouseArea {
@@ -459,14 +568,26 @@ ApplicationWindow {
         signal clicked()
 
         height: 58
-        radius: 10
-        color: selected && !locked ? theme.accentSoft : (hovered ? "#211f1a" : theme.panel)
+        radius: 12
+        color: selected && !locked ? theme.accentSoft : (hovered ? theme.hover : theme.panel)
         border.width: 1
-        border.color: selected && !locked ? theme.accentBorder : theme.borderSoft
+        border.color: selected && !locked ? theme.accentBorder : (hovered ? theme.border : theme.borderSoft)
         opacity: locked ? 0.62 : 1
+        scale: cardPressMouse.pressed && !locked ? 0.985 : 1.0
 
-        Behavior on color { ColorAnimation { duration: 120 } }
-        Behavior on border.color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
+        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.topMargin: 1
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - parent.radius * 2
+            height: 1
+            color: theme.glassHighlight
+        }
 
         RowLayout {
             anchors.fill: parent
@@ -479,7 +600,7 @@ ApplicationWindow {
                 Layout.preferredWidth: visible ? 30 : 0
                 Layout.preferredHeight: 30
                 radius: 8
-                color: "#22242d"
+                color: theme.panel3
 
                 Glyph {
                     anchors.centerIn: parent
@@ -514,16 +635,18 @@ ApplicationWindow {
                 Layout.preferredHeight: 16
                 radius: 8
                 color: card.statusChecked
-                    ? (card.statusOk ? "#17351f" : "#351818")
+                    ? (card.statusOk ? theme.okSoft : theme.dangerSoft)
                     : (card.selected && !card.locked ? theme.accent : "transparent")
                 border.width: card.statusChecked || (card.selected && !card.locked) ? 0 : 1
                 border.color: theme.border
+
+                Behavior on color { ColorAnimation { duration: root.durFast } }
 
                 Text {
                     anchors.centerIn: parent
                     visible: card.statusChecked
                     text: card.statusOk ? "\u2713" : "\u2717"
-                    color: card.statusOk ? theme.ok : "#ff6b5f"
+                    color: card.statusOk ? theme.ok : theme.danger
                     font.pixelSize: 10
                     font.weight: Font.Bold
                 }
@@ -534,12 +657,13 @@ ApplicationWindow {
                     width: 6
                     height: 6
                     radius: 3
-                    color: "#ffffff"
+                    color: theme.knob
                 }
             }
         }
 
         MouseArea {
+            id: cardPressMouse
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: card.locked ? Qt.ForbiddenCursor : Qt.PointingHandCursor
@@ -607,18 +731,24 @@ ApplicationWindow {
             ? Math.max(52, buttonText.implicitWidth + 16)
             : Math.max(118, buttonText.implicitWidth + 30)
         implicitHeight: compact ? 26 : 34
-        radius: compact ? 7 : 8
+        radius: compact ? 8 : 9
         color: buttonMouse.containsMouse
             ? (secondary ? theme.panel3 : theme.accentHover)
             : (secondary ? theme.panel2 : theme.accent)
-        border.width: secondary ? 1 : 0
-        border.color: theme.border
+        border.width: 1
+        border.color: secondary ? theme.border : theme.accentBorder
+        scale: buttonMouse.pressed && button.clickable ? 0.96 : 1.0
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
+        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
 
         Text {
             id: buttonText
             anchors.centerIn: parent
             text: button.label
-            color: theme.text
+            color: button.secondary ? theme.text : "#ffffff"
             font.pixelSize: button.compact ? 10 : 12
             font.weight: Font.DemiBold
         }
@@ -644,10 +774,13 @@ ApplicationWindow {
 
         implicitHeight: 34
         height: 34
-        radius: 8
-        color: theme.panel
+        radius: 9
+        color: field.activeFocus ? theme.panel2 : theme.panel
         border.width: 1
         border.color: field.activeFocus ? theme.accentBorder : theme.borderSoft
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
 
         TextInput {
             id: field
@@ -685,6 +818,8 @@ ApplicationWindow {
             color: revealMouse.containsMouse ? theme.panel3 : theme.panel2
             border.width: 1
             border.color: theme.borderSoft
+
+            Behavior on color { ColorAnimation { duration: root.durFast } }
 
             Text {
                 anchors.centerIn: parent
@@ -765,9 +900,13 @@ ApplicationWindow {
                     width: 16
                     height: 16
                     radius: 8
-                    color: theme.text
+                    color: theme.knob
                     border.width: 2
-                    border.color: theme.accent
+                    border.color: control.pressed ? theme.accentHover : theme.accent
+                    scale: control.pressed ? 1.18 : 1.0
+
+                    Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: root.durFast } }
                 }
             }
 
@@ -794,6 +933,8 @@ ApplicationWindow {
             color: toggle.checked ? theme.accent : theme.panel3
             border.width: toggle.checked ? 0 : 1
             border.color: theme.border
+
+            Behavior on color { ColorAnimation { duration: root.durFast } }
         }
 
         Rectangle {
@@ -802,8 +943,8 @@ ApplicationWindow {
             radius: 9
             y: 2
             x: toggle.checked ? 20 : 2
-            color: "#ffffff"
-            Behavior on x { NumberAnimation { duration: 110 } }
+            color: theme.knob
+            Behavior on x { NumberAnimation { duration: root.durFast; easing.type: Easing.OutBack; easing.overshoot: 1.2 } }
         }
 
         MouseArea {
@@ -821,10 +962,15 @@ ApplicationWindow {
 
         implicitWidth: Math.max(66, pillText.implicitWidth + 22)
         height: 32
-        radius: 8
-        color: selected ? theme.accentSoft : (pillMouse.containsMouse ? "#211f1a" : theme.panel)
+        radius: 16
+        color: selected ? theme.accentSoft : (pillMouse.containsMouse ? theme.hover : theme.panel)
         border.width: 1
-        border.color: selected ? theme.accentBorder : theme.borderSoft
+        border.color: selected ? theme.accentBorder : (pillMouse.containsMouse ? theme.border : theme.borderSoft)
+        scale: pillMouse.pressed ? 0.95 : 1.0
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
+        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
 
         Text {
             id: pillText
@@ -834,6 +980,8 @@ ApplicationWindow {
             font.pixelSize: 12
             font.weight: pill.selected ? Font.DemiBold : Font.Medium
             elide: Text.ElideRight
+
+            Behavior on color { ColorAnimation { duration: root.durFast } }
         }
 
         MouseArea {
@@ -854,10 +1002,15 @@ ApplicationWindow {
 
         width: 92
         height: 96
-        radius: 10
-        color: selected ? theme.accentSoft : (pickMouse.containsMouse ? "#211f1a" : theme.panel)
+        radius: 12
+        color: selected ? theme.accentSoft : (pickMouse.containsMouse ? theme.hover : theme.panel)
         border.width: 1
         border.color: selected ? theme.accentBorder : theme.borderSoft
+        scale: pickMouse.pressed ? 0.96 : (pickMouse.containsMouse ? 1.03 : 1.0)
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
+        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
 
         Column {
             anchors.centerIn: parent
@@ -943,7 +1096,7 @@ ApplicationWindow {
         Layout.fillWidth: true
         implicitHeight: Math.max(hasHint ? 68 : 52, slot.implicitHeight + (hasHint ? 34 : 18))
 
-        radius: 8
+        radius: 10
         color: theme.panel2
         border.width: 1
         border.color: theme.borderSoft
@@ -1034,10 +1187,20 @@ ApplicationWindow {
 
         Layout.fillWidth: true
         implicitHeight: body.implicitHeight + 32
-        radius: 10
+        radius: 14
         color: theme.panel
         border.width: 1
         border.color: theme.borderSoft
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.topMargin: 1
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - parent.radius * 2
+            height: 1
+            color: theme.glassHighlight
+        }
+
         readonly property bool settingsPanelVisible: {
             if (root.activeTab !== "Settings" || !root.settingsFilter.trim()) {
                 return true
@@ -1082,12 +1245,25 @@ ApplicationWindow {
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
+        onVisibleChanged: {
+            if (visible) {
+                pageEnterAnim.restart()
+            }
+        }
+
         ColumnLayout {
             id: pageBody
             width: Math.max(320, page.availableWidth - 24)
             x: Math.max(12, (page.availableWidth - width) / 2)
             y: 20
             spacing: 12
+            transform: Translate { id: pageShift; y: 0 }
+
+            ParallelAnimation {
+                id: pageEnterAnim
+                NumberAnimation { target: pageBody; property: "opacity"; from: 0; to: 1; duration: root.durMed; easing.type: Easing.OutCubic }
+                NumberAnimation { target: pageShift; property: "y"; from: 14; to: 0; duration: root.durMed; easing.type: Easing.OutCubic }
+            }
         }
     }
 
@@ -1096,10 +1272,13 @@ ApplicationWindow {
 
         width: 28
         height: 28
-        radius: 6
+        radius: 14
         color: helpMouse.containsMouse ? theme.panel3 : theme.panel2
         border.width: 1
-        border.color: theme.borderSoft
+        border.color: helpMouse.containsMouse ? theme.border : theme.borderSoft
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
 
         Text {
             anchors.centerIn: parent
@@ -1120,9 +1299,12 @@ ApplicationWindow {
 
     component TutorialOverlay: Rectangle {
         anchors.fill: parent
-        visible: root.activeTutorialId !== ""
-        color: "#cc000000"
+        opacity: root.activeTutorialId !== "" ? 1 : 0
+        visible: opacity > 0.01
+        color: theme.scrim
         z: 99
+
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
 
         readonly property var topic: root.tutorialTopic(root.activeTutorialId)
 
@@ -1134,11 +1316,14 @@ ApplicationWindow {
         Rectangle {
             anchors.centerIn: parent
             width: Math.min(520, root.width - 48)
-            radius: 12
-            color: theme.panel
+            radius: 14
+            color: theme.panel3
             border.width: 1
-            border.color: theme.borderSoft
+            border.color: theme.border
             implicitHeight: tutorialOverlayColumn.implicitHeight + 32
+            scale: root.activeTutorialId !== "" ? 1 : 0.94
+
+            Behavior on scale { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
 
             MouseArea {
                 anchors.fill: parent
@@ -1193,8 +1378,12 @@ ApplicationWindow {
 
         width: 28
         height: 28
-        radius: 6
-        color: iconMouse.containsMouse ? theme.panel3 : "transparent"
+        radius: 8
+        color: iconMouse.containsMouse ? theme.hover : "transparent"
+        scale: iconMouse.pressed ? 0.92 : 1.0
+
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
 
         Text {
             anchors.centerIn: parent
@@ -1292,13 +1481,15 @@ ApplicationWindow {
         property bool hovered: false
 
         height: 52
-        radius: 8
+        radius: 10
         color: hovered ? theme.panel2 : theme.panel
         opacity: isDragSource ? 0.72 : 1.0
         border.width: isDropTarget || rowIndex === 0 ? 2 : 1
         border.color: isDropTarget ? theme.accent : (rowIndex === 0 ? theme.accentBorder : theme.borderSoft)
 
-        Behavior on color { ColorAnimation { duration: 100 } }
+        Behavior on color { ColorAnimation { duration: root.durFast } }
+        Behavior on border.color { ColorAnimation { duration: root.durFast } }
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
 
         Rectangle {
             visible: rowIndex === 0
@@ -1523,8 +1714,8 @@ ApplicationWindow {
                     onOpened: repositionWithinOverlay()
 
                     background: Rectangle {
-                        radius: 8
-                        color: theme.panel2
+                        radius: 10
+                        color: theme.panel3
                         border.width: 1
                         border.color: theme.borderSoft
                     }
@@ -1592,10 +1783,24 @@ ApplicationWindow {
         id: farmPage
         anchors.fill: parent
 
+        onVisibleChanged: {
+            if (visible) {
+                farmEnterAnim.restart()
+            }
+        }
+
         ColumnLayout {
+            id: farmPageBody
             anchors.fill: parent
             anchors.margins: 12
             spacing: 10
+            transform: Translate { id: farmPageShift; y: 0 }
+
+            ParallelAnimation {
+                id: farmEnterAnim
+                NumberAnimation { target: farmPageBody; property: "opacity"; from: 0; to: 1; duration: root.durMed; easing.type: Easing.OutCubic }
+                NumberAnimation { target: farmPageShift; property: "y"; from: 14; to: 0; duration: root.durMed; easing.type: Easing.OutCubic }
+            }
 
             Rectangle {
                 Layout.fillWidth: true
@@ -1735,8 +1940,8 @@ ApplicationWindow {
                             onOpened: repositionWithinOverlay()
 
                             background: Rectangle {
-                                radius: 8
-                                color: theme.panel2
+                                radius: 10
+                                color: theme.panel3
                                 border.width: 1
                                 border.color: theme.borderSoft
                             }
@@ -1839,7 +2044,15 @@ ApplicationWindow {
                                 rowIndex: modelData.index
                             }
                             displaced: Transition {
-                                NumberAnimation { properties: "x,y"; duration: 120; easing.type: Easing.OutCubic }
+                                NumberAnimation { properties: "x,y"; duration: root.durFast; easing.type: Easing.OutCubic }
+                            }
+                            add: Transition {
+                                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.durMed; easing.type: Easing.OutCubic }
+                                NumberAnimation { property: "scale"; from: 0.96; to: 1; duration: root.durMed; easing.type: Easing.OutCubic }
+                            }
+                            remove: Transition {
+                                NumberAnimation { property: "opacity"; to: 0; duration: root.durFast }
+                                NumberAnimation { property: "scale"; to: 0.96; duration: root.durFast }
                             }
                         }
 
@@ -1881,6 +2094,45 @@ ApplicationWindow {
     Rectangle {
         anchors.fill: parent
         color: theme.bg
+
+        Canvas {
+            id: backdropCanvas
+            anchors.fill: parent
+            antialiasing: true
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+
+            function paintGlow(ctx, x, y, radius, glowColor) {
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
+                gradient.addColorStop(0, String(glowColor))
+                gradient.addColorStop(1, String(Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0)))
+                ctx.fillStyle = gradient
+                ctx.beginPath()
+                ctx.arc(x, y, radius, 0, Math.PI * 2)
+                ctx.fill()
+            }
+
+            onPaint: {
+                const ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                const span = Math.max(width, height)
+                ctx.globalAlpha = root.resolvedTheme === "light" ? 0.22 : 0.15
+                paintGlow(ctx, width * 0.14, height * 0.08, span * 0.55, theme.glowA)
+                paintGlow(ctx, width * 0.94, height * 0.92, span * 0.6, theme.glowB)
+                paintGlow(ctx, width * 0.78, height * 0.16, span * 0.38, theme.glowC)
+                ctx.globalAlpha = 1
+            }
+
+            NumberAnimation {
+                id: backdropFade
+                target: backdropCanvas
+                property: "opacity"
+                from: 0
+                to: 1
+                duration: root.durSlow
+                easing.type: Easing.OutCubic
+            }
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -1930,6 +2182,38 @@ ApplicationWindow {
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 4
+                    Rectangle {
+                        id: themeToggleButton
+                        width: 28
+                        height: 28
+                        radius: 8
+                        color: themeToggleMouse.containsMouse ? theme.hover : "transparent"
+                        scale: themeToggleMouse.pressed ? 0.92 : 1.0
+
+                        Behavior on color { ColorAnimation { duration: root.durFast } }
+                        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
+
+                        ToolTip.visible: themeToggleMouse.containsMouse
+                        ToolTip.delay: 500
+                        ToolTip.text: "Theme: " + root.themeMode + " (click to switch)"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.themeMode === "system" ? "\u25d1" : (root.resolvedTheme === "light" ? "\u2600" : "\u263e")
+                            color: theme.muted
+                            font.pixelSize: 13
+
+                            Behavior on color { ColorAnimation { duration: root.durFast } }
+                        }
+
+                        MouseArea {
+                            id: themeToggleMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.cycleThemeMode()
+                        }
+                    }
                     IconButton {
                         glyph: "−"
                         onClicked: root.showMinimized()
@@ -1944,7 +2228,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.preferredHeight: warningBanner.visible ? 34 : 0
                 visible: warningBanner.visible
-                color: "#2a220c"
+                color: theme.warnSoft
                 border.width: 1
                 border.color: theme.accentBorder
 
@@ -1980,29 +2264,88 @@ ApplicationWindow {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 10
+                    radius: 12
                     color: theme.panel
                     border.width: 1
                     border.color: theme.border
                     clip: true
 
+                    Rectangle {
+                        anchors.top: parent.top
+                        anchors.topMargin: 1
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: parent.width - parent.radius * 2
+                        height: 1
+                        color: theme.glassHighlight
+                    }
+
                     ScrollView {
                         anchors.fill: parent
                         anchors.margins: 4
-                        contentWidth: navRow.implicitWidth
-                        contentHeight: navRow.implicitHeight
+                        contentWidth: navHolder.width
+                        contentHeight: navHolder.height
                         ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                         ScrollBar.horizontal.policy: ScrollBar.AsNeeded
 
-                        Row {
-                            id: navRow
-                            spacing: 2
-                            Repeater {
-                                model: root.navItems
-                                delegate: NavButton {
-                                    tabId: modelData
-                                    label: root.navLabel(modelData)
-                                    onClicked: root.activeTab = modelData
+                        Item {
+                            id: navHolder
+                            width: navRow.implicitWidth
+                            height: navRow.implicitHeight
+
+                            function syncIndicator() {
+                                for (var i = 0; i < navRow.children.length; i++) {
+                                    var child = navRow.children[i]
+                                    if (child && child.tabId !== undefined && child.tabId === root.activeTab) {
+                                        navIndicator.x = child.x
+                                        navIndicator.width = child.width
+                                        return
+                                    }
+                                }
+                            }
+
+                            onWidthChanged: Qt.callLater(syncIndicator)
+                            Component.onCompleted: Qt.callLater(syncIndicator)
+
+                            Connections {
+                                target: root
+                                function onActiveTabChanged() { Qt.callLater(navHolder.syncIndicator) }
+                            }
+
+                            Rectangle {
+                                id: navIndicator
+                                y: 0
+                                width: 0
+                                height: navRow.implicitHeight
+                                radius: 9
+                                visible: width > 0
+                                color: theme.panel3
+                                border.width: 1
+                                border.color: theme.border
+
+                                Behavior on x { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
+                                Behavior on width { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
+
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 3
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    width: 16
+                                    height: 2
+                                    radius: 1
+                                    color: theme.accent
+                                }
+                            }
+
+                            Row {
+                                id: navRow
+                                spacing: 2
+                                Repeater {
+                                    model: root.navItems
+                                    delegate: NavButton {
+                                        tabId: modelData
+                                        label: root.navLabel(modelData)
+                                        onClicked: root.activeTab = modelData
+                                    }
                                 }
                             }
                         }
@@ -2241,7 +2584,7 @@ ApplicationWindow {
                                         width: 8
                                         height: 8
                                         radius: 4
-                                        color: modelData.ok ? theme.ok : (modelData.severity === "required" ? "#ff6b5f" : theme.accent)
+                                        color: modelData.ok ? theme.ok : (modelData.severity === "required" ? theme.danger : theme.accent)
                                     }
                                     Text {
                                         Layout.fillWidth: true
@@ -2265,7 +2608,7 @@ ApplicationWindow {
                                 id: statusOverviewText
                                 width: parent.width
                                 text: root.statusText
-                                color: root.statusOk ? theme.muted : "#ff6b5f"
+                                color: root.statusOk ? theme.muted : theme.danger
                                 font.pixelSize: 11
                                 wrapMode: Text.WordWrap
                             }
@@ -2403,6 +2746,30 @@ ApplicationWindow {
                                 secondary: true
                                 onClicked: root.runAction("reset-setup-wizard")
                             }
+                        }
+                    }
+
+                    FormPanel {
+                        title: "APPEARANCE"
+                        FieldRow {
+                            label: "Theme"
+                            hint: "Liquid glass in light or dark. System follows your Windows app theme."
+                            Row {
+                                spacing: 8
+                                Repeater {
+                                    model: ["light", "dark", "system"]
+                                    delegate: ChoicePill {
+                                        label: modelData
+                                        selected: root.themeMode === modelData
+                                        onClicked: root.setThemeMode(modelData)
+                                    }
+                                }
+                            }
+                        }
+                        FieldRow {
+                            label: "UI Animations"
+                            hint: "Smooth transitions and hover effects. Turn off for minimum UI overhead."
+                            CenterRow { ToggleSwitch { checked: root.animationsEnabled; onToggled: function(value) { root.setAnimationsEnabled(value) } } }
                         }
                     }
 
@@ -2719,7 +3086,7 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
                 TabPage {
@@ -2752,7 +3119,7 @@ ApplicationWindow {
                         HubButton { label: "Webhook Guide"; secondary: true; onClicked: root.runAction("discord-webhook-guide") }
                         HubButton { label: "Developer Portal"; secondary: true; onClicked: root.runAction("discord-developer-portal") }
                     }
-                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
                 TabPage {
@@ -2776,7 +3143,7 @@ ApplicationWindow {
                         HubButton { label: "Send Telegram Test"; onClicked: root.runAction("telegram-test") }
                         HubButton { label: "Open @BotFather"; secondary: true; onClicked: root.runAction("telegram-botfather") }
                     }
-                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
                 TabPage {
@@ -2799,7 +3166,7 @@ ApplicationWindow {
                         HubButton { label: "Test API Config"; onClicked: root.runAction("api-test") }
                         HubButton { label: "Developer Portal"; secondary: true; onClicked: root.runAction("brawl-stars-developer") }
                     }
-                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
 
                 TabPage {
@@ -2876,7 +3243,7 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Text { text: root.statusText; color: root.statusOk ? theme.muted : "#ff6b5f"; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                    Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     Text { text: "Recent Matches"; color: theme.faint; font.pixelSize: 11 }
                     ColumnLayout {
                         Layout.fillWidth: true
@@ -3090,7 +3457,7 @@ ApplicationWindow {
                             visible: root.statusText !== ""
                             Layout.fillWidth: true
                             text: root.statusText
-                            color: root.statusOk ? theme.faint : "#ff6b5f"
+                            color: root.statusOk ? theme.faint : theme.danger
                             font.pixelSize: 10
                             elide: Text.ElideRight
                             maximumLineCount: 1
@@ -3102,11 +3469,17 @@ ApplicationWindow {
                         visible: !settingsOnly
                         Layout.preferredWidth: 168
                         Layout.preferredHeight: 44
-                        radius: 10
+                        radius: 12
                         color: (hubState.preflight && hubState.preflight.ready)
                             ? (startMouse.containsMouse ? theme.accentHover : theme.accent)
-                            : "#5a5a5a"
+                            : theme.disabled
                         opacity: (hubState.preflight && hubState.preflight.ready) ? 1.0 : 0.85
+                        border.width: 1
+                        border.color: (hubState.preflight && hubState.preflight.ready) ? theme.accentBorder : theme.borderSoft
+                        scale: startMouse.pressed ? 0.97 : 1.0
+
+                        Behavior on color { ColorAnimation { duration: root.durFast } }
+                        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
 
                         Text {
                             anchors.centerIn: parent
@@ -3130,10 +3503,14 @@ ApplicationWindow {
                         visible: settingsOnly
                         Layout.preferredWidth: 168
                         Layout.preferredHeight: 44
-                        radius: 10
+                        radius: 12
                         color: closeSettingsMouse.containsMouse ? theme.panel3 : theme.panel2
                         border.width: 1
                         border.color: theme.border
+                        scale: closeSettingsMouse.pressed ? 0.97 : 1.0
+
+                        Behavior on color { ColorAnimation { duration: root.durFast } }
+                        Behavior on scale { NumberAnimation { duration: root.durFast; easing.type: Easing.OutCubic } }
 
                         Text {
                             anchors.centerIn: parent
@@ -3196,18 +3573,24 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        visible: root.showWizard
-        color: "#cc000000"
+        opacity: root.showWizard ? 1 : 0
+        visible: opacity > 0.01
+        color: theme.scrim
         z: 99
+
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
 
         Rectangle {
             anchors.centerIn: parent
             width: 420
-            radius: 12
-            color: theme.panel
+            radius: 14
+            color: theme.panel3
             border.width: 1
-            border.color: theme.borderSoft
+            border.color: theme.border
             implicitHeight: wizardColumn.implicitHeight + 32
+            scale: root.showWizard ? 1 : 0.94
+
+            Behavior on scale { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
 
             ColumnLayout {
                 id: wizardColumn
@@ -3244,7 +3627,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         implicitHeight: 36
                         radius: 8
-                        color: licenseRowMouse.containsMouse ? "#211f1a" : theme.panel2
+                        color: licenseRowMouse.containsMouse ? theme.hover : theme.panel2
                         border.width: 1
                         border.color: root.licenseTermsAccepted ? theme.accentBorder : theme.borderSoft
 
@@ -3347,9 +3730,12 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        visible: root.showBrawlerPicker
-        color: "#cc000000"
+        opacity: root.showBrawlerPicker ? 1 : 0
+        visible: opacity > 0.01
+        color: theme.scrim
         z: 100
+
+        Behavior on opacity { NumberAnimation { duration: root.durFast } }
 
         MouseArea {
             anchors.fill: parent
@@ -3360,11 +3746,14 @@ ApplicationWindow {
             anchors.centerIn: parent
             width: Math.min(620, root.width - 40)
             height: Math.min(520, root.height - 48)
-            radius: 12
-            color: theme.panel
+            radius: 14
+            color: theme.panel3
             border.width: 1
-            border.color: theme.borderSoft
+            border.color: theme.border
             clip: true
+            scale: root.showBrawlerPicker ? 1 : 0.94
+
+            Behavior on scale { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
 
             MouseArea {
                 anchors.fill: parent

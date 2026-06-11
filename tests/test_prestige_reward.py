@@ -265,6 +265,31 @@ class PrestigeRewardTests(unittest.TestCase):
                 self.assertEqual(manager.window_controller.clicks, [])
                 self.assertEqual(manager.window_controller.presses, [])
 
+    def test_prestige_reward_keeps_farming_when_push_target_above_1000(self):
+        manager = object.__new__(StageManager)
+        manager.brawlers_pick_data = [
+            {"brawler": "gray", "trophies": 990, "push_until": 2000, "wins": 0, "win_streak": 0},
+        ]
+        manager.Trophy_observer = DummyTrophyObserver()
+        manager.Trophy_observer.current_trophies = 1000
+        manager.last_match_crossed_1000 = True
+        manager.Lobby_automation = DummyLobbyAutomation()
+        manager.window_controller = DummyWindowController()
+        screenshot_bgr = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        self.draw_prestige_screen(screenshot_bgr, button_box=(1140, 840, 280, 105))
+        manager.window_controller.screenshot = lambda: cv2.cvtColor(screenshot_bgr, cv2.COLOR_BGR2RGB)
+
+        with patch("stage_manager.get_state", return_value="lobby"), \
+                patch.object(manager, "read_lobby_trophies_from_screenshot", return_value=5), \
+                patch("stage_manager.save_brawler_data"):
+            manager.handle_prestige_reward()
+
+        self.assertEqual(manager.brawlers_pick_data[0]["brawler"], "gray")
+        self.assertEqual(manager.Trophy_observer.current_trophies, 5)
+        self.assertFalse(manager.Lobby_automation.lowest_selected)
+        self.assertFalse(getattr(manager, "stop_after_post_match_rewards", False))
+        self.assertIn((1280, 892), manager.window_controller.clicks)
+
     def test_recent_trophy_change_requires_real_delta_and_expires(self):
         manager = object.__new__(StageManager)
         manager.last_recorded_result_time = time.time()

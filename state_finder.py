@@ -103,6 +103,9 @@ def get_in_game_state(image):
     if star_drop_type:
         return f"star_drop_{star_drop_type}"
 
+    if is_in_prestige_reward(image):
+        return "prestige_reward"
+
     if is_in_trophy_reward(image):
         return "trophy_reward"
 
@@ -127,6 +130,137 @@ def is_in_lobby(image) -> bool:
 
 def is_in_end_of_a_match(image):
     return find_game_result(image)
+
+
+def count_hsv_in_region(image, region, lower, upper):
+    current_height, current_width = image.shape[:2]
+    orig_x, orig_y, orig_width, orig_height = region
+    width_ratio, height_ratio = current_width / orig_screen_width, current_height / orig_screen_height
+    x = int(orig_x * width_ratio)
+    y = int(orig_y * height_ratio)
+    width = int(orig_width * width_ratio)
+    height = int(orig_height * height_ratio)
+    crop = image[y:y + height, x:x + width]
+    if crop.size == 0:
+        return 0
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
+    return int(cv2.countNonZero(mask))
+
+
+def get_prestige_next_button_center(image):
+    current_height, current_width = image.shape[:2]
+    width_ratio = current_width / orig_screen_width
+    height_ratio = current_height / orig_screen_height
+
+    button_region = [1040, 760, 620, 250]
+    x = int(button_region[0] * width_ratio)
+    y = int(button_region[1] * height_ratio)
+    w = int(button_region[2] * width_ratio)
+    h = int(button_region[3] * height_ratio)
+    button_crop = image[y:y + h, x:x + w]
+    if button_crop.size == 0:
+        return None
+
+    hsv = cv2.cvtColor(button_crop, cv2.COLOR_BGR2HSV)
+    green_mask = cv2.inRange(
+        hsv,
+        np.array((45, 120, 110), dtype=np.uint8),
+        np.array((72, 255, 255), dtype=np.uint8),
+    )
+    contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+
+    min_area = max(400, button_crop.shape[0] * button_crop.shape[1] * 0.04)
+    candidates = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        bx, by, bw, bh = cv2.boundingRect(contour)
+        if area < min_area or bw < w * 0.20 or bh < h * 0.15:
+            continue
+        button_part = button_crop[by:by + bh, bx:bx + bw]
+        if button_part.size == 0:
+            continue
+        text_hsv = cv2.cvtColor(button_part, cv2.COLOR_BGR2HSV)
+        white_mask = cv2.inRange(
+            text_hsv,
+            np.array((0, 0, 160), dtype=np.uint8),
+            np.array((179, 100, 255), dtype=np.uint8),
+        )
+        white_pixels = cv2.countNonZero(white_mask)
+        if white_pixels < max(80, int(button_part.shape[0] * button_part.shape[1] * 0.02)):
+            continue
+        candidates.append((area, bx, by, bw, bh))
+
+    if not candidates:
+        return None
+
+    _, bx, by, bw, bh = max(candidates, key=lambda item: item[0])
+    return int(x + bx + bw / 2), int(y + by + bh / 2)
+
+
+def has_prestige_badge_shape(image):
+    current_height, current_width = image.shape[:2]
+    width_ratio = current_width / orig_screen_width
+    height_ratio = current_height / orig_screen_height
+    badge_region = [1060, 120, 680, 560]
+    x = int(badge_region[0] * width_ratio)
+    y = int(badge_region[1] * height_ratio)
+    w = int(badge_region[2] * width_ratio)
+    h = int(badge_region[3] * height_ratio)
+    crop = image[y:y + h, x:x + w]
+    if crop.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    blue_mask = cv2.inRange(
+        hsv,
+        np.array((96, 90, 90), dtype=np.uint8),
+        np.array((126, 255, 255), dtype=np.uint8),
+    )
+    blue_mask = cv2.morphologyEx(
+        blue_mask,
+        cv2.MORPH_CLOSE,
+        np.ones((9, 9), dtype=np.uint8),
+    )
+    contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+
+    scale = max(0.05, width_ratio * height_ratio)
+    min_area = int(22000 * scale)
+    min_width = int(180 * width_ratio)
+    min_height = int(160 * height_ratio)
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        bx, by, bw, bh = cv2.boundingRect(contour)
+        if area >= min_area and bw >= min_width and bh >= min_height:
+            return True
+    return False
+
+
+def is_in_prestige_reward(image):
+    button_center = get_prestige_next_button_center(image)
+    if button_center is None:
+        return False
+    if not has_prestige_badge_shape(image):
+        return False
+
+    prestige_purple = count_hsv_in_region(
+        image,
+        [980, 80, 760, 660],
+        (124, 80, 90),
+        (162, 255, 255),
+    )
+    prestige_blue = count_hsv_in_region(
+        image,
+        [1060, 120, 650, 540],
+        (95, 80, 80),
+        (125, 255, 255),
+    )
+    scale = max(0.05, (image.shape[1] / orig_screen_width) * (image.shape[0] / orig_screen_height))
+    return prestige_purple > int(18000 * scale) and prestige_blue > int(12000 * scale)
 
 
 def is_in_trophy_reward(image):

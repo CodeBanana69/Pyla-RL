@@ -254,7 +254,6 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("emulatorPreflightStatus", qml)
         self.assertIn("function startBot()", qml)
         self.assertNotIn("gradient: Gradient", qml)
-        self.assertNotIn("scale: startMouse.pressed", qml)
 
     def test_normalize_dialog_path_handles_file_urls(self):
         from gui.qml_hub import _normalize_dialog_path
@@ -371,6 +370,61 @@ class QmlHubStateTests(unittest.TestCase):
 
         self.assertIn("ensure_pyside6_available", bridge)
         self.assertIn('"PySide6>=6.7.0"', bridge)
+
+    def test_ui_theme_setting_persists(self):
+        store, paths = self.make_store()
+
+        self.assertEqual(store.general_config.get("ui_theme"), "system")
+        self.assertEqual(store.general_config.get("ui_animations"), "yes")
+
+        store.update_config("settings", "ui_theme", "light")
+        store.update_config("settings", "ui_animations", "false")
+
+        general = toml.load(paths["general"])
+        self.assertEqual(general["ui_theme"], "light")
+        self.assertEqual(general["ui_animations"], "no")
+
+        state = store.ui_state()
+        self.assertEqual(state["settings"]["ui_theme"], "light")
+        self.assertFalse(state["settings"]["ui_animations"])
+
+    def test_ui_theme_setting_rejects_invalid_modes(self):
+        store, _ = self.make_store()
+
+        with self.assertRaises(ValueError):
+            store.update_config("settings", "ui_theme", "neon")
+
+    def test_qml_liquid_glass_theme_contract(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+
+        # Live theme bridge
+        self.assertIn("def themeJson(self):", bridge)
+        self.assertIn("apply_windows_glass_effects", bridge)
+        self.assertIn("function applyTheme()", qml)
+        self.assertIn("hubBridge.themeJson()", qml)
+        self.assertIn("function setThemeMode(mode)", qml)
+        self.assertIn("function cycleThemeMode()", qml)
+        self.assertIn('root.saveValue("settings", "ui_theme", mode)', qml)
+        self.assertIn('root.saveValue("settings", "ui_animations", value)', qml)
+
+        # Theme toggle + appearance settings
+        self.assertIn("id: themeToggleButton", qml)
+        self.assertIn('title: "APPEARANCE"', qml)
+        self.assertIn('model: ["light", "dark", "system"]', qml)
+
+        # Glass backdrop + animated tokens
+        self.assertIn("id: backdropCanvas", qml)
+        self.assertIn("createRadialGradient", qml)
+        self.assertIn("property color glassHighlight", qml)
+        self.assertIn("property color scrim", qml)
+        self.assertIn("Behavior on bg { ColorAnimation { duration: root.durSlow } }", qml)
+
+        # Motion language with reduced-motion support
+        self.assertIn("readonly property int durFast: animationsEnabled ? 130 : 0", qml)
+        self.assertIn("id: pageEnterAnim", qml)
+        self.assertIn("id: navIndicator", qml)
+        self.assertIn("add: Transition {", qml)
 
 
 if __name__ == "__main__":

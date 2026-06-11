@@ -68,6 +68,8 @@ class HubStateStore:
         "showdown_playstyle_mode": ("bot", "str"),
         "cpu_or_gpu": ("general", "str"),
         "directml_device_id": ("general", "str"),
+        "ui_theme": ("general", "str"),
+        "ui_animations": ("general", "yesno"),
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
         "terminal_verbosity": ("general", "str"),
@@ -243,6 +245,8 @@ class HubStateStore:
 
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
+        self.general_config.setdefault("ui_theme", "system")
+        self.general_config.setdefault("ui_animations", "yes")
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
         self.general_config.setdefault("terminal_verbosity", "normal")
@@ -436,6 +440,7 @@ class HubStateStore:
             value = source.get(key, "")
             if key in {
                 "long_press_star_drop",
+                "ui_animations",
                 "terminal_logging",
                 "movement_debug",
                 "visual_debug",

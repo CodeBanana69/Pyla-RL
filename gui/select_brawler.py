@@ -26,7 +26,7 @@ from utils import (
 from tkinter import filedialog
 
 from gui.main import install_tk_background_error_filter
-from gui.theme import THEME
+from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -54,22 +54,25 @@ class SelectBrawler:
         self.app.geometry(f"{str(int(820 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")
         self._drag_offset = (0, 0)
         self.data_setter = data_setter
+        pal = get_palette(load_ui_theme_mode())
+        ctk.set_appearance_mode(resolve_theme_mode(load_ui_theme_mode()))
+        self.palette = pal
         self.colors = {
-            "accent": "#ff9f0a",
-            'gray': "#2f2f2f",
-            'red': "#ffb23a",
-            'darker_white': "#b8b8b8",
-            'dark gray': "#0c0c0c",
-            'cherry red': "#ff9f0a",
-            'ui box gray': "#121212",
-            'chess white': "#f4f4f4",
-            'chess brown': "#202020",
-            'indian red': "#ffb23a",
-            'panel': "#181818",
-            'panel2': "#1f1f1f",
-            'border_soft': "#262626",
-            'accent_soft': "#32220c",
-            'accent_border': "#8f610e",
+            "accent": pal["accent"],
+            'gray': pal["surface_3"],
+            'red': pal["accent_hover"],
+            'darker_white': pal["muted"],
+            'dark gray': pal["bg"],
+            'cherry red': pal["accent"],
+            'ui box gray': pal["chrome"],
+            'chess white': pal["text"],
+            'chess brown': pal["surface_2"],
+            'indian red': pal["accent_hover"],
+            'panel': pal["surface"],
+            'panel2': pal["surface_2"],
+            'border_soft': pal["hairline"],
+            'accent_soft': pal["accent_soft"],
+            'accent_border': pal["accent_border"],
         }
 
         self.app.configure(fg_color=self.colors['ui box gray'])
@@ -211,7 +214,7 @@ class SelectBrawler:
             hover_color=self.colors['red'],
             text_color="white",
             font=("Segoe UI", int(13 * scale_factor), "bold"),
-            border_color="#ffd18a",
+            border_color=self.palette["accent_ring"],
             border_width=1,
             corner_radius=int(12 * scale_factor),
             width=int(148 * scale_factor),
@@ -362,7 +365,7 @@ class SelectBrawler:
             hover_color=self.colors['red'] if primary else self.colors['panel2'],
             text_color="white" if primary else self.colors['chess white'],
             font=("Segoe UI", int(13 * scale_factor), "bold"),
-            border_color="#ffd18a" if primary else self.colors['gray'],
+            border_color=self.palette["accent_ring"] if primary else self.colors['gray'],
             border_width=1,
             corner_radius=int(10 * scale_factor),
             width=width or int(120 * scale_factor),

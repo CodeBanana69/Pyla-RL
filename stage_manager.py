@@ -1,9 +1,10 @@
-﻿import sys
+﻿import os
+import sys
 import time
 import cv2
 import numpy as np
 
-from state_finder import get_state
+from state_finder import get_prestige_next_button_center, get_state, is_in_prestige_reward
 from trophy_observer import TrophyObserver
 from core.integration import get_webhook_settings, on_queue_file_changed
 from runtime_log import log_debug, log_info, log_warn
@@ -69,6 +70,7 @@ class StageManager:
             'star_drop_angelic': lambda: self.click_star_drop("angelic"),
             'star_drop_demonic': lambda: self.click_star_drop("demonic"),
             'star_drop_starr_nova': lambda: self.click_star_drop("starr_nova"),
+            'prestige_reward': self.handle_prestige_reward,
             'trophy_reward': lambda: self.window_controller.press("proceed"),
             'starr_nova_event': lambda: self.window_controller.press("middle_got_it"),
             'end_draw': self.end_game,
@@ -83,7 +85,11 @@ class StageManager:
         webhook_settings = get_webhook_settings()
         if early_access:
             self.player_tag = load_toml_as_dict("./cfg/general_config.toml")['player_tag']
-        self.ping_when_stuck = webhook_settings.get("ping_when_stuck", False)
+        self.ping_when_stuck = _config_bool(webhook_settings.get("ping_when_stuck"), False)
+        self.ping_when_target_is_reached = _config_bool(
+            webhook_settings.get("ping_when_target_is_reached"),
+            False,
+        )
         self._queue_file_mtime = None
         self.playstyle_info = playstyle_info
         self.get_latest_state = state_getting
@@ -92,6 +98,8 @@ class StageManager:
         self.last_match_trophy_delta = 0
         self.last_match_crossed_1000 = False
         self.last_match_api_sync_ok = None
+        self.last_recorded_result_time = 0.0
+        self.stop_after_post_match_rewards = False
 
     def _should_stop(self):
         return bool(self.runtime_control and self.runtime_control.should_stop())
@@ -369,10 +377,157 @@ class StageManager:
         )
         return result
 
+    def can_handle_prestige_reward_screen(self):
+        current = self.brawlers_pick_data[0] if getattr(self, "brawlers_pick_data", None) else {}
+        if str(current.get("type", "trophies")).strip().lower() != "trophies":
+            return False
+
+        return self.had_recent_trophy_change(seconds=45.0) or bool(
+            getattr(self, "last_match_crossed_1000", False)
+        )
+
+    def had_recent_trophy_change(self, seconds=30.0):
+        changed_at = max(
+            float(getattr(self, "last_recorded_result_time", 0.0) or 0.0),
+            float(getattr(self, "time_since_last_stat_change", 0.0) or 0.0),
+        )
+        if changed_at <= 0:
+            return False
+        if time.time() - changed_at > seconds:
+            return False
+        return int(getattr(self, "last_match_trophy_delta", 0) or 0) != 0
+
+    def reset_prestige_reward_gate(self):
+        self.last_match_trophy_before = None
+        self.last_match_trophy_after = None
+        self.last_match_trophy_delta = 0
+        self.last_match_crossed_1000 = False
+
+    def advance_to_next_brawler_after_prestige(self):
+        if not self.brawlers_pick_data:
+            return False
+        current_brawler = self.brawlers_pick_data[0].get("brawler", "current")
+        print(f"Prestige reward detected for {current_brawler}; treating current brawler as completed.")
+        self.brawlers_pick_data[0]["trophies"] = max(1000, int(self.brawlers_pick_data[0].get("trophies") or 0))
+        self.brawlers_pick_data[0]["push_until"] = max(1000, int(self.brawlers_pick_data[0].get("push_until") or 1000))
+
+        if len(self.brawlers_pick_data) <= 1:
+            print("Prestige reward reached, but no next brawler is queued.")
+            self.stop_after_post_match_rewards = True
+            save_brawler_data(self.brawlers_pick_data)
+            return False
+
+        self.brawlers_pick_data.pop(0)
+        next_data = self.brawlers_pick_data[0]
+        self.Trophy_observer.change_trophies(next_data.get("trophies", 0))
+        self.Trophy_observer.current_wins = next_data.get("wins", 0) if next_data.get("wins", "") != "" else 0
+        self.Trophy_observer.win_streak = next_data.get("win_streak", 0)
+        save_brawler_data(self.brawlers_pick_data)
+        return True
+
+    def read_lobby_trophies_from_screenshot(self, screenshot):
+        height, width = screenshot.shape[:2]
+        width_ratio = width / 1920
+        height_ratio = height / 1080
+        x1 = int(700 * width_ratio)
+        y1 = int(58 * height_ratio)
+        x2 = int(990 * width_ratio)
+        y2 = int(165 * height_ratio)
+        crop = screenshot[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+
+        try:
+            crop = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            texts = extract_text_strings(crop)
+        except Exception as e:
+            print(f"Could not OCR lobby trophies after reward: {e}")
+            return None
+
+        for text in texts:
+            value = self.validate_trophies(text)
+            if value is not False and 0 <= value <= 5000:
+                return value
+        print(f"Could not read lobby trophies after reward from OCR: {texts}")
+        return None
+
+    def wait_for_lobby_after_reward(self, max_attempts=30):
+        screenshot = self.window_controller.screenshot()
+        current_state = get_state(screenshot)
+        attempts = 0
+        while current_state != "lobby" and attempts < max_attempts:
+            self.window_controller.press_key("Q")
+            time.sleep(1.0)
+            screenshot = self.window_controller.screenshot()
+            current_state = get_state(screenshot)
+            attempts += 1
+        return screenshot if current_state == "lobby" else None
+
+    def handle_prestige_reward(self):
+        if not self.can_handle_prestige_reward_screen():
+            print("Prestige reward ignored; no recent recorded trophy result allows this reward screen.")
+            return
+        screenshot = self.window_controller.screenshot()
+        screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+        next_button_center = get_prestige_next_button_center(screenshot_bgr)
+        if next_button_center is None or not is_in_prestige_reward(screenshot_bgr):
+            print("Prestige reward state ignored; NEXT button was not confirmed.")
+            return
+
+        print("Prestige reward screen detected; clicking NEXT.")
+        self.window_controller.keys_up(list("wasd"))
+        self.window_controller.click(*next_button_center)
+        time.sleep(1.0)
+
+        lobby_screenshot = self.wait_for_lobby_after_reward()
+        if lobby_screenshot is None:
+            print("Could not reach lobby after reward; will retry from normal state loop.")
+            return
+
+        lobby_trophies = self.read_lobby_trophies_from_screenshot(lobby_screenshot)
+        if lobby_trophies is not None and self.brawlers_pick_data:
+            print(f"Lobby trophies after reward: {lobby_trophies}")
+            self.Trophy_observer.change_trophies(lobby_trophies)
+            self.brawlers_pick_data[0]["trophies"] = lobby_trophies
+            save_brawler_data(self.brawlers_pick_data)
+
+        push_target = self._active_push_target()
+        if lobby_trophies is None:
+            if push_target > 1000:
+                print(
+                    f"Prestige at 1k milestone while pushing to {push_target}; "
+                    "keeping current brawler in queue."
+                )
+                return
+            print("Could not read lobby trophies after prestige; trusting confirmed prestige reward screen.")
+        elif lobby_trophies > 20:
+            print("Reward screen did not confirm a 1k trophy reset; not forcing brawler switch.")
+            return
+        elif push_target > 1000:
+            print(
+                f"Prestige at 1k milestone while pushing to {push_target}; "
+                "keeping current brawler in queue."
+            )
+            return
+
+        if not self.advance_to_next_brawler_after_prestige():
+            self.window_controller.press_key("Q")
+            return
+
+        self.Lobby_automation.select_lowest_trophy_brawler()
+
     def start_game(self):
         on_queue_file_changed(self)
         if self._should_stop() or self._should_pause():
             return
+
+        if getattr(self, "stop_after_post_match_rewards", False):
+            print("Post-match rewards cleared; stopping after completed target.")
+            if os.path.exists("latest_brawler_data.json"):
+                os.remove("latest_brawler_data.json")
+            self.window_controller.release_movement()
+            self.window_controller.close()
+            sys.exit(0)
 
         if early_access and self.player_tag:
             print("Waiting 3 seconds for API to update with latest data...")
@@ -408,8 +563,7 @@ class StageManager:
                 self.window_controller.release_movement()
                 self.window_controller.close()
                 sys.exit(0)
-            ping_when_target_is_reached = load_toml_as_dict("cfg/webhook_config.toml")["ping_when_target_is_reached"]
-            if ping_when_target_is_reached:
+            if self.ping_when_target_is_reached:
                 screenshot = self.window_controller.screenshot()
                 notify_user("brawler_goal", screenshot, self)
             print(f'Bot has reached the target trophies/wins for {self.brawlers_pick_data[0]["brawler"]}, moving on to the next one in the list.', value, push_current_brawler_till)
@@ -704,6 +858,7 @@ class StageManager:
                     trophies_before < 1000 <= trophies_after and trophies_after > trophies_before
                 )
                 self.time_since_last_stat_change = time.time()
+                self.last_recorded_result_time = time.time()
                 values = {
                     "trophies": self.Trophy_observer.current_trophies,
                     "wins": self.Trophy_observer.current_wins

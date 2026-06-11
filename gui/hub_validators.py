@@ -60,3 +60,7 @@ def validate_config_value(section, key, value):
     if section == "api" and key == "player_tag" and text:
         if not text.startswith("#"):
             raise ValueError("Player tag should start with #.")
+
+    if section == "settings" and key == "ui_theme" and text:
+        if text.lower() not in {"light", "dark", "system"}:
+            raise ValueError("Theme must be light, dark, or system.")

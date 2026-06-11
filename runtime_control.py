@@ -237,6 +237,15 @@ def drain_remote_commands(state_path, handler):
     clear_remote_commands(state_path)
 
 
+def blend_samples(current, target, factor=0.45):
+    """Ease displayed sparkline samples toward the latest values for smooth motion."""
+    if not target:
+        return list(target)
+    if not current or len(current) != len(target):
+        return list(target)
+    return [old + (new - old) * factor for old, new in zip(current, target)]
+
+
 def draw_ips_sparkline(canvas, samples, color, width=SPARKLINE_WIDTH, height=SPARKLINE_HEIGHT):
     canvas.delete("all")
     mid_y = height / 2
@@ -355,7 +364,10 @@ def run_window(state_path, metrics_path=None):
     import tkinter as tk
     import customtkinter as ctk
 
-    ctk.set_appearance_mode("dark")
+    from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
+
+    pal = get_palette(load_ui_theme_mode())
+    ctk.set_appearance_mode(resolve_theme_mode(load_ui_theme_mode()))
 
     graph_enabled = pause_menu_graph_enabled() and metrics_path is not None
     strip_enabled = pause_menu_session_strip_enabled() and metrics_path is not None
@@ -372,7 +384,7 @@ def run_window(state_path, metrics_path=None):
     root.resizable(False, False)
     root.attributes("-topmost", True)
     root.overrideredirect(True)
-    root.configure(fg_color="#121212")
+    root.configure(fg_color=pal["chrome"])
 
     compact_root = ctk.CTkToplevel(root)
     compact_root.title("Pyla-RL Control")
@@ -380,7 +392,7 @@ def run_window(state_path, metrics_path=None):
     compact_root.resizable(False, False)
     compact_root.attributes("-topmost", True)
     compact_root.overrideredirect(True)
-    compact_root.configure(fg_color="#121212")
+    compact_root.configure(fg_color=pal["chrome"])
     compact_root.withdraw()
 
     owner_pid = None
@@ -437,8 +449,8 @@ def run_window(state_path, metrics_path=None):
 
     chrome = ctk.CTkFrame(
         root,
-        fg_color="#121212",
-        border_color="#262626",
+        fg_color=pal["chrome"],
+        border_color=pal["hairline"],
         border_width=1,
         corner_radius=0,
         height=42,
@@ -451,7 +463,7 @@ def run_window(state_path, metrics_path=None):
     ctk.CTkLabel(
         chrome,
         text="Pyla  ·  Control",
-        text_color="#f4f4f4",
+        text_color=pal["text"],
         font=("Segoe UI", 13, "bold"),
     ).place(relx=0.5, rely=0.5, anchor="center")
 
@@ -460,8 +472,8 @@ def run_window(state_path, metrics_path=None):
         text="−",
         command=minimize_full,
         fg_color="transparent",
-        hover_color="#1f1f1f",
-        text_color="#b8b8b8",
+        hover_color=pal["surface_2"],
+        text_color=pal["muted"],
         font=("Segoe UI", 13, "bold"),
         width=34,
         height=28,
@@ -473,8 +485,8 @@ def run_window(state_path, metrics_path=None):
         text="×",
         command=show_compact,
         fg_color="transparent",
-        hover_color="#1f1f1f",
-        text_color="#b8b8b8",
+        hover_color=pal["surface_2"],
+        text_color=pal["muted"],
         font=("Segoe UI", 13, "bold"),
         width=34,
         height=28,
@@ -483,8 +495,8 @@ def run_window(state_path, metrics_path=None):
 
     compact_chrome = ctk.CTkFrame(
         compact_root,
-        fg_color="#181818",
-        border_color="#262626",
+        fg_color=pal["surface"],
+        border_color=pal["hairline"],
         border_width=1,
         corner_radius=10,
         height=54,
@@ -497,20 +509,20 @@ def run_window(state_path, metrics_path=None):
     compact_status = ctk.CTkLabel(
         compact_chrome,
         textvariable=compact_status_var,
-        text_color="#30d158",
+        text_color=pal["success"],
         font=("Segoe UI", 12, "bold"),
         width=78,
         anchor="w",
     )
     compact_status.place(x=10, rely=0.5, anchor="w")
 
-    card = ctk.CTkFrame(root, fg_color="#0c0c0c", corner_radius=0)
+    card = ctk.CTkFrame(root, fg_color=pal["bg"], corner_radius=0)
     card.pack(fill="both", expand=True)
 
     panel = ctk.CTkFrame(
         card,
-        fg_color="#181818",
-        border_color="#262626",
+        fg_color=pal["surface"],
+        border_color=pal["hairline"],
         border_width=1,
         corner_radius=10,
     )
@@ -519,7 +531,7 @@ def run_window(state_path, metrics_path=None):
     title = ctk.CTkLabel(
         panel,
         text="STATUS",
-        text_color="#b8b8b8",
+        text_color=pal["muted"],
         font=("Segoe UI", 11, "bold"),
     )
     title.pack(pady=(12, 0))
@@ -527,7 +539,7 @@ def run_window(state_path, metrics_path=None):
     status_label = ctk.CTkLabel(
         panel,
         textvariable=status_var,
-        text_color="#30d158",
+        text_color=pal["success"],
         font=("Segoe UI", 18, "bold"),
     )
     status_label.pack(pady=(0, 4 if strip_enabled else (6 if graph_enabled else 10)))
@@ -538,14 +550,14 @@ def run_window(state_path, metrics_path=None):
     session_strip = None
     session_labels = []
     if strip_enabled:
-        session_strip = ctk.CTkFrame(panel, fg_color="#141414", corner_radius=8)
+        session_strip = ctk.CTkFrame(panel, fg_color=pal["surface_2"], corner_radius=8)
         session_strip.pack(fill="x", padx=10, pady=(0, 8))
 
         for index, (var, color, size) in enumerate(
             (
-                (session_line1_var, "#f4f4f4", 12),
-                (session_line2_var, "#b8b8b8", 11),
-                (session_notice_var, "#6d6d6d", 10),
+                (session_line1_var, pal["text"], 12),
+                (session_line2_var, pal["muted"], 11),
+                (session_notice_var, pal["muted_2"], 10),
             )
         ):
             label = ctk.CTkLabel(
@@ -566,7 +578,7 @@ def run_window(state_path, metrics_path=None):
         ips_label = ctk.CTkLabel(
             graph_row,
             textvariable=ips_var,
-            text_color="#b8b8b8",
+            text_color=pal["muted"],
             font=("Segoe UI", 11, "bold"),
             anchor="w",
         )
@@ -576,20 +588,22 @@ def run_window(state_path, metrics_path=None):
             graph_row,
             width=SPARKLINE_WIDTH,
             height=SPARKLINE_HEIGHT,
-            bg="#181818",
+            bg=pal["surface"],
             highlightthickness=0,
             bd=0,
         )
         sparkline_canvas.pack(side="right")
-        draw_ips_sparkline(sparkline_canvas, [], "#30d158")
+        draw_ips_sparkline(sparkline_canvas, [], pal["success"])
 
     def graph_color(paused):
-        return "#ff9f0a" if paused else "#30d158"
+        return pal["accent"] if paused else pal["success"]
 
     def read_current_metrics():
         if not metrics_path:
             return None
         return read_metrics(Path(metrics_path).resolve())
+
+    sparkline_state = {"displayed": []}
 
     def update_graph(paused, metrics):
         if not graph_enabled or sparkline_canvas is None:
@@ -597,16 +611,18 @@ def run_window(state_path, metrics_path=None):
         color = graph_color(paused)
         if metrics is None:
             ips_var.set("IPS -- · Feed --")
+            sparkline_state["displayed"] = []
             draw_ips_sparkline(sparkline_canvas, [], color)
             return
         feed_text = f"{metrics['feed_fps']:.1f}"
         ips_var.set(f"IPS {metrics['ips']:.1f} · Feed {feed_text}")
         if feed_fps_warning(metrics):
-            ips_label.configure(text_color="#ffb23a")
+            ips_label.configure(text_color=pal["accent_hover"])
         else:
-            ips_label.configure(text_color="#b8b8b8")
+            ips_label.configure(text_color=pal["muted"])
         history = metrics.get("history") or []
-        draw_ips_sparkline(sparkline_canvas, history, color)
+        sparkline_state["displayed"] = blend_samples(sparkline_state["displayed"], history)
+        draw_ips_sparkline(sparkline_canvas, sparkline_state["displayed"], color)
 
     def update_session_strip(metrics):
         if not strip_enabled:
@@ -670,11 +686,11 @@ def run_window(state_path, metrics_path=None):
         width=170,
         height=38,
         corner_radius=8,
-        fg_color="#1f1f1f",
-        hover_color="#2a2a2a",
-        border_color="#333333",
+        fg_color=pal["surface_2"],
+        hover_color=pal["surface_3"],
+        border_color=pal["hairline_strong"],
         border_width=1,
-        text_color="#FFFFFF",
+        text_color=pal["text"],
         font=("Segoe UI", 15, "bold"),
     )
     pause_button.pack(pady=(0, 6))
@@ -693,11 +709,11 @@ def run_window(state_path, metrics_path=None):
         width=170,
         height=34,
         corner_radius=8,
-        fg_color="#3a1212",
-        hover_color="#551818",
-        border_color="#7a2020",
+        fg_color=pal["danger_soft"],
+        hover_color=pal["danger_border"],
+        border_color=pal["danger"],
         border_width=1,
-        text_color="#ffb4b4",
+        text_color=pal["danger"],
         font=("Segoe UI", 13, "bold"),
     )
     stop_button.pack(side="left", padx=(0, 8))
@@ -709,11 +725,11 @@ def run_window(state_path, metrics_path=None):
         width=170,
         height=34,
         corner_radius=8,
-        fg_color="#1f1f1f",
-        hover_color="#2a2a2a",
-        border_color="#333333",
+        fg_color=pal["surface_2"],
+        hover_color=pal["surface_3"],
+        border_color=pal["hairline_strong"],
         border_width=1,
-        text_color="#FFFFFF",
+        text_color=pal["text"],
         font=("Segoe UI", 13, "bold"),
     )
     hub_button.pack(side="left")
@@ -729,16 +745,16 @@ def run_window(state_path, metrics_path=None):
         status_text = "Paused" if paused else "Running"
         button_text = "Resume Bot" if paused else "Pause Bot"
         compact_button_text = "Resume" if paused else "Pause"
-        status_color = "#ff9f0a" if paused else "#30d158"
+        status_color = pal["accent"] if paused else pal["success"]
         status_var.set(status_text)
         button_var.set(button_text)
         compact_status_var.set(status_text)
         compact_button_var.set(compact_button_text)
         status_label.configure(text_color=status_color)
         compact_status.configure(text_color=status_color)
-        pause_fg = "#ff9f0a" if paused else "#1f1f1f"
-        pause_hover = "#ffb23a" if paused else "#2a2a2a"
-        pause_border = "#8f610e" if paused else "#333333"
+        pause_fg = pal["accent"] if paused else pal["surface_2"]
+        pause_hover = pal["accent_hover"] if paused else pal["surface_3"]
+        pause_border = pal["accent_border"] if paused else pal["hairline_strong"]
         pause_button.configure(
             fg_color=pause_fg,
             hover_color=pause_hover,
@@ -784,11 +800,11 @@ def run_window(state_path, metrics_path=None):
         width=92,
         height=30,
         corner_radius=8,
-        fg_color="#1f1f1f",
-        hover_color="#2a2a2a",
-        border_color="#333333",
+        fg_color=pal["surface_2"],
+        hover_color=pal["surface_3"],
+        border_color=pal["hairline_strong"],
         border_width=1,
-        text_color="#FFFFFF",
+        text_color=pal["text"],
         font=("Segoe UI", 12, "bold"),
     )
     compact_pause_button.place(x=96, rely=0.5, anchor="w")
@@ -800,11 +816,11 @@ def run_window(state_path, metrics_path=None):
         width=44,
         height=30,
         corner_radius=8,
-        fg_color="#1f1f1f",
-        hover_color="#2a2a2a",
-        border_color="#333333",
+        fg_color=pal["surface_2"],
+        hover_color=pal["surface_3"],
+        border_color=pal["hairline_strong"],
         border_width=1,
-        text_color="#FFFFFF",
+        text_color=pal["text"],
         font=("Segoe UI", 11, "bold"),
     ).place(x=194, rely=0.5, anchor="w")
 
@@ -813,8 +829,8 @@ def run_window(state_path, metrics_path=None):
         text="□",
         command=show_full,
         fg_color="transparent",
-        hover_color="#2a2a2a",
-        text_color="#b8b8b8",
+        hover_color=pal["surface_3"],
+        text_color=pal["muted"],
         font=("Segoe UI", 12, "bold"),
         width=28,
         height=28,
@@ -826,8 +842,8 @@ def run_window(state_path, metrics_path=None):
         text="−",
         command=minimize_compact,
         fg_color="transparent",
-        hover_color="#2a2a2a",
-        text_color="#b8b8b8",
+        hover_color=pal["surface_3"],
+        text_color=pal["muted"],
         font=("Segoe UI", 12, "bold"),
         width=28,
         height=28,
@@ -839,8 +855,8 @@ def run_window(state_path, metrics_path=None):
         text="×",
         command=minimize_compact if auto_reopen else hide_menu,
         fg_color="transparent",
-        hover_color="#2a2a2a",
-        text_color="#b8b8b8",
+        hover_color=pal["surface_3"],
+        text_color=pal["muted"],
         font=("Segoe UI", 12, "bold"),
         width=28,
         height=28,
