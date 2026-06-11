@@ -251,6 +251,12 @@ class Play:
         foot_x, foot_y, _ = Play.get_player_foot_circle(player_data)
         return foot_x, foot_y
 
+    def _get_active_frame(self):
+        frame = getattr(self, "current_frame", None)
+        if frame is not None:
+            return frame
+        return getattr(self, "frame", None)
+
     @staticmethod
     def angle_from_direction(dx: float, dy: float) -> float:
         return math.degrees(math.atan2(dy, dx)) % 360
@@ -746,11 +752,12 @@ class Play:
         return count >= min_pixels
 
     def _poison_gas_in_direction(self, direction, player_data):
-        if self.current_frame is None or player_data is None:
+        frame = self._get_active_frame()
+        if frame is None or player_data is None:
             return False
         player_pos = self.get_player_pos(player_data)
         r = int(max(80, min(self.fog_flee_distance, 150)))
-        built = self._build_trusted_fog_mask(self.current_frame, roi_center=player_pos, roi_radius=r)
+        built = self._build_trusted_fog_mask(frame, roi_center=player_pos, roi_radius=r)
         if built is None:
             return False
         mask, (ox, oy) = built
@@ -994,7 +1001,7 @@ class Play:
             return self._poison_gas_in_direction(arg1, arg2)
         player_data = arg1
         threshold = arg2 if isinstance(arg2, (int, float)) else 10000
-        frame = getattr(self, "current_frame", None) or getattr(self, "frame", None)
+        frame = self._get_active_frame()
         if frame is None:
             return {"up": 0, "down": 0, "left": 0, "right": 0}
         actual_player_box = self.get_actual_player_box(player_data) or player_data
