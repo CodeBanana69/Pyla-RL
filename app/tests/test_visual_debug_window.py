@@ -10,6 +10,29 @@ import play as play_module
 import visual_debug_window as vdw
 
 
+class FitImageToRectTests(unittest.TestCase):
+    def test_fit_image_letterboxes_landscape_frame(self):
+        img = np.full((100, 200, 3), 128, dtype=np.uint8)
+        fitted = vdw._fit_image_to_rect(img, 400, 400)
+        self.assertEqual(fitted.shape, (400, 400, 3))
+        self.assertTrue(np.all(fitted[0, :, :] == 0))
+        self.assertTrue(np.all(fitted[-1, :, :] == 0))
+        self.assertTrue(np.any(fitted[150:250, 50:350, :] == 128))
+
+    def test_fit_image_fills_square_target_when_aspect_matches(self):
+        img = np.full((200, 200, 3), 64, dtype=np.uint8)
+        fitted = vdw._fit_image_to_rect(img, 400, 400)
+        self.assertEqual(fitted.shape, (400, 400, 3))
+        np.testing.assert_array_equal(fitted, np.full((400, 400, 3), 64, dtype=np.uint8))
+
+    def test_fit_image_downscales_when_larger_than_target(self):
+        img = np.full((800, 800, 3), 32, dtype=np.uint8)
+        fitted = vdw._fit_image_to_rect(img, 400, 300)
+        self.assertEqual(fitted.shape, (300, 400, 3))
+        self.assertTrue(np.all(fitted[:, 0, :] == 0))
+        self.assertTrue(np.all(fitted[:, -1, :] == 0))
+
+
 class OpenCvHighGuiProbeTests(unittest.TestCase):
     def setUp(self):
         vdw.reset_opencv_highgui_cache()
@@ -94,14 +117,60 @@ class ShowVisualDebugFrameTests(unittest.TestCase):
         vdw.reset_opencv_highgui_cache()
         vdw._opencv_highgui_warned = False
 
+    @patch.object(vdw, "_primary_monitor_rect", return_value=(0, 0, 1920, 1080))
     @patch.object(vdw, "opencv_highgui_available", return_value=True)
+    @patch.object(vdw.cv2, "resizeWindow")
+    @patch.object(vdw.cv2, "moveWindow")
+    @patch.object(vdw.cv2, "namedWindow")
     @patch.object(vdw.cv2, "imshow")
     @patch.object(vdw.cv2, "waitKey", return_value=1)
     @patch.object(vdw.cv2, "cvtColor", side_effect=lambda img, _code: img)
-    def test_show_visual_debug_frame_uses_opencv(self, _mock_cvt, _mock_wait, mock_imshow, _mock_probe):
+    def test_show_visual_debug_frame_uses_opencv(
+        self,
+        _mock_cvt,
+        _mock_wait,
+        mock_imshow,
+        mock_named_window,
+        mock_move_window,
+        mock_resize_window,
+        _mock_probe,
+        _mock_monitor,
+    ):
         img = np.zeros((6, 6, 3), dtype=np.uint8)
         vdw.show_visual_debug_frame(img)
+        mock_named_window.assert_called_once_with(vdw.VISUAL_DEBUG_WINDOW_NAME, vdw.cv2.WINDOW_NORMAL)
+        mock_move_window.assert_called_once_with(vdw.VISUAL_DEBUG_WINDOW_NAME, 0, 0)
+        mock_resize_window.assert_called_once_with(vdw.VISUAL_DEBUG_WINDOW_NAME, 1920, 1080)
         mock_imshow.assert_called_once()
+        displayed = mock_imshow.call_args.args[1]
+        self.assertEqual(displayed.shape, (1080, 1920, 3))
+
+    @patch.object(vdw, "_primary_monitor_rect", return_value=(0, 0, 1920, 1080))
+    @patch.object(vdw, "opencv_highgui_available", return_value=True)
+    @patch.object(vdw.cv2, "resizeWindow")
+    @patch.object(vdw.cv2, "moveWindow")
+    @patch.object(vdw.cv2, "namedWindow")
+    @patch.object(vdw.cv2, "imshow")
+    @patch.object(vdw.cv2, "waitKey", return_value=1)
+    @patch.object(vdw.cv2, "cvtColor", side_effect=lambda img, _code: img)
+    def test_show_visual_debug_frame_initializes_opencv_window_once(
+        self,
+        _mock_cvt,
+        _mock_wait,
+        mock_imshow,
+        mock_named_window,
+        mock_move_window,
+        mock_resize_window,
+        _mock_probe,
+        _mock_monitor,
+    ):
+        img = np.zeros((6, 6, 3), dtype=np.uint8)
+        vdw.show_visual_debug_frame(img)
+        vdw.show_visual_debug_frame(img)
+        mock_named_window.assert_called_once()
+        mock_move_window.assert_called_once()
+        mock_resize_window.assert_called_once()
+        self.assertEqual(mock_imshow.call_count, 2)
 
     @patch.object(vdw, "opencv_highgui_available", return_value=False)
     @patch.object(vdw.sys, "platform", "win32")

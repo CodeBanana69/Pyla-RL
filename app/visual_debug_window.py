@@ -9,6 +9,9 @@ import numpy as np
 
 _opencv_highgui_available = None
 _opencv_highgui_warned = False
+_opencv_window_ready = False
+
+VISUAL_DEBUG_WINDOW_NAME = "PylaAi-XXZ Visual Debug"
 
 OPENCV_REPAIR_CMD = (
     "pip uninstall -y opencv-python-headless && pip install --no-deps opencv-python==4.8.0.76"
@@ -16,8 +19,93 @@ OPENCV_REPAIR_CMD = (
 
 
 def reset_opencv_highgui_cache():
-    global _opencv_highgui_available
+    global _opencv_highgui_available, _opencv_window_ready
     _opencv_highgui_available = None
+    _opencv_window_ready = False
+
+
+def _primary_monitor_rect():
+    """Return (left, top, width, height) for the primary monitor work area."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    rect = RECT()
+    if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+        return (
+            int(rect.left),
+            int(rect.top),
+            int(rect.right - rect.left),
+            int(rect.bottom - rect.top),
+        )
+    return (
+        0,
+        0,
+        int(user32.GetSystemMetrics(0)),
+        int(user32.GetSystemMetrics(1)),
+    )
+
+
+def _display_target_size(image_width, image_height):
+    rect = _primary_monitor_rect()
+    if rect:
+        return rect[2], rect[3]
+    return max(1, int(image_width)), max(1, int(image_height))
+
+
+def _fit_image_to_rect(rgb_image, target_w, target_h):
+    """Upscale/downscale with aspect ratio preserved; letterbox on black canvas."""
+    target_w = max(1, int(target_w))
+    target_h = max(1, int(target_h))
+    if rgb_image is None or rgb_image.size == 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+
+    source_h, source_w = rgb_image.shape[:2]
+    if source_w <= 0 or source_h <= 0:
+        return np.zeros((target_h, target_w, 3), dtype=np.uint8)
+
+    scale = min(target_w / source_w, target_h / source_h)
+    fitted_w = max(1, int(round(source_w * scale)))
+    fitted_h = max(1, int(round(source_h * scale)))
+    if fitted_w == source_w and fitted_h == source_h:
+        resized = rgb_image
+    else:
+        resized = cv2.resize(rgb_image, (fitted_w, fitted_h), interpolation=cv2.INTER_LINEAR)
+
+    if fitted_w == target_w and fitted_h == target_h:
+        return resized
+
+    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    x0 = (target_w - fitted_w) // 2
+    y0 = (target_h - fitted_h) // 2
+    canvas[y0 : y0 + fitted_h, x0 : x0 + fitted_w] = resized
+    return canvas
+
+
+def _ensure_opencv_debug_window(target_w, target_h):
+    global _opencv_window_ready
+    if _opencv_window_ready:
+        return
+    cv2.namedWindow(VISUAL_DEBUG_WINDOW_NAME, cv2.WINDOW_NORMAL)
+    rect = _primary_monitor_rect()
+    if rect:
+        left, top, width, height = rect
+        cv2.moveWindow(VISUAL_DEBUG_WINDOW_NAME, left, top)
+        cv2.resizeWindow(VISUAL_DEBUG_WINDOW_NAME, width, height)
+    else:
+        cv2.resizeWindow(VISUAL_DEBUG_WINDOW_NAME, target_w, target_h)
+    _opencv_window_ready = True
 
 
 def opencv_highgui_available():
@@ -61,8 +149,13 @@ def log_visual_debug_startup():
 
 
 def show_visual_debug_frame(img):
+    source_h, source_w = img.shape[:2]
+    target_w, target_h = _display_target_size(source_w, source_h)
+    display = _fit_image_to_rect(img, target_w, target_h)
+
     if opencv_highgui_available():
-        cv2.imshow("PylaAi-XXZ Visual Debug", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        _ensure_opencv_debug_window(target_w, target_h)
+        cv2.imshow(VISUAL_DEBUG_WINDOW_NAME, cv2.cvtColor(display, cv2.COLOR_RGB2BGR))
         cv2.waitKey(1)
         return
     warn_missing_opencv_highgui_once()
@@ -81,7 +174,6 @@ if sys.platform == "win32":
     kernel32 = ctypes.windll.kernel32
 
     WS_OVERLAPPEDWINDOW = 0x00CF0000
-    CW_USEDEFAULT = 0x80000000
     SW_SHOW = 5
     WM_DESTROY = 0x0002
     WM_ERASEBKGND = 0x0014
@@ -90,9 +182,15 @@ if sys.platform == "win32":
     DIB_RGB_COLORS = 0
     SRCCOPY = 0x00CC0020
     IDC_ARROW = 32512
-    SWP_NOMOVE = 0x0002
-    SWP_NOZORDER = 0x0004
     ERROR_CLASS_ALREADY_EXISTS = 1410
+
+    class RECT(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
 
     class BITMAPINFOHEADER(ctypes.Structure):
         _fields_ = [
@@ -206,15 +304,26 @@ if sys.platform == "win32":
                 if kernel32.GetLastError() != ERROR_CLASS_ALREADY_EXISTS:
                     raise OSError(f"RegisterClassW failed with error {kernel32.GetLastError()}")
 
+            monitor = _primary_monitor_rect()
+            if monitor:
+                win_x, win_y, client_w, client_h = monitor
+            else:
+                win_x, win_y, client_w, client_h = 0, 0, 960, 640
+
+            window_rect = RECT(win_x, win_y, win_x + client_w, win_y + client_h)
+            user32.AdjustWindowRect(ctypes.byref(window_rect), WS_OVERLAPPEDWINDOW, False)
+            outer_w = window_rect.right - window_rect.left
+            outer_h = window_rect.bottom - window_rect.top
+
             hwnd = user32.CreateWindowExW(
                 0,
                 self._class_name,
-                "PylaAi-XXZ Visual Debug",
+                VISUAL_DEBUG_WINDOW_NAME,
                 WS_OVERLAPPEDWINDOW,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                960,
-                640,
+                window_rect.left,
+                window_rect.top,
+                outer_w,
+                outer_h,
                 None,
                 None,
                 hinstance,
@@ -243,18 +352,25 @@ if sys.platform == "win32":
                 self._blit_frame(hwnd, img)
 
         def _blit_frame(self, hwnd, rgb_image):
-            h, w = rgb_image.shape[:2]
-            user32.SetWindowPos(hwnd, None, 0, 0, w + 16, h + 39, SWP_NOMOVE | SWP_NOZORDER)
+            client = RECT()
+            user32.GetClientRect(hwnd, ctypes.byref(client))
+            dest_w = client.right - client.left
+            dest_h = client.bottom - client.top
+            if dest_w <= 0 or dest_h <= 0:
+                return
+
+            display = _fit_image_to_rect(rgb_image, dest_w, dest_h)
+            fitted_h, fitted_w = display.shape[:2]
 
             hdc = user32.GetDC(hwnd)
             if not hdc:
                 return
             try:
-                bgr = np.ascontiguousarray(rgb_image[:, :, ::-1])
+                bgr = np.ascontiguousarray(display[:, :, ::-1])
                 bmi = BITMAPINFO()
                 bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-                bmi.bmiHeader.biWidth = w
-                bmi.bmiHeader.biHeight = -h
+                bmi.bmiHeader.biWidth = fitted_w
+                bmi.bmiHeader.biHeight = -fitted_h
                 bmi.bmiHeader.biPlanes = 1
                 bmi.bmiHeader.biBitCount = 24
                 bmi.bmiHeader.biCompression = BI_RGB
@@ -262,12 +378,12 @@ if sys.platform == "win32":
                     hdc,
                     0,
                     0,
-                    w,
-                    h,
+                    dest_w,
+                    dest_h,
                     0,
                     0,
-                    w,
-                    h,
+                    fitted_w,
+                    fitted_h,
                     bgr.ctypes.data,
                     ctypes.byref(bmi),
                     DIB_RGB_COLORS,
