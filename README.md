@@ -8,7 +8,7 @@
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
 [![GitHub stars](https://img.shields.io/github/stars/CodeBanana69/Pyla-RL?style=social)](https://github.com/CodeBanana69/Pyla-RL)
 
-**Showdown-focused Brawl Stars bot for Windows** — LDPlayer and MuMu, analog joystick movement, farm-plan queue, and remote control from Discord or Telegram.
+**Showdown-focused Brawl Stars bot for Windows** — LDPlayer and MuMu, **aimbot** (smart lead aim), **dodgebot** (combat strafe dodge), analog joystick movement, farm-plan queue, and remote control from Discord or Telegram.
 
 Pyla-RL is **free and open source**. Do not pay for copies, repacks, or "premium builds."
 
@@ -46,6 +46,8 @@ flowchart LR
 
 | | |
 |---|---|
+| Aimbot | Smart lead aim tracks moving enemies and aims the attack joystick ahead of them |
+| Dodgebot | Combat dodge strafes sideways while shooting hittable enemies; respects walls and line of sight |
 | Analog joystick | Continuous angle movement — smoother than WASD tap modes |
 | Teammate follow | Follows trio mates when no enemy is visible; hysteresis avoids ping-pong |
 | Team spacing | Orbits when grouped; biases back toward the team |
