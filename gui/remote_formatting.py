@@ -26,6 +26,7 @@ EMBED_COLORS = {
 }
 
 STATUS_FIELD_LABELS = {
+    "runtime": "Runtime",
     "state": "State",
     "ips": "IPS",
     "feed_fps": "Feed FPS",

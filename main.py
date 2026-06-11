@@ -58,6 +58,7 @@ from runtime_control import (
     RUNNING,
     RuntimeControlWindow,
     is_stop_requested,
+    read_state,
     request_stop,
     write_state,
 )
@@ -514,6 +515,25 @@ def pyla_main(data):
         def should_pause(self):
             return self.runtime_control.should_pause()
 
+        def runtime_control_label(self):
+            from gui.remote_formatting import runtime_label_from_state
+
+            return runtime_label_from_state(read_state(self.control_window.state_path))
+
+        def update_runtime_control_notice(self):
+            label = self.runtime_control_label()
+            prev = getattr(self, "_last_runtime_control_label", None)
+            if label == prev:
+                return
+            if label == "paused":
+                runtime_log.log_info(
+                    "state",
+                    "Pyla-RL is paused. Press F8 or use Discord/Telegram /start to resume.",
+                )
+            elif prev == "paused" and label == "running":
+                runtime_log.log_info("state", "Pyla-RL resumed.")
+            self._last_runtime_control_label = label
+
         def sleep_interruptible(self, duration, allow_pause=True, poll_interval=0.1):
             end_time = time.time() + duration
             while time.time() < end_time:
@@ -678,17 +698,12 @@ def pyla_main(data):
         def wait_while_paused(self):
             self.window_controller.release_movement()
             self.runtime_control.mark_paused()
-            runtime_log.log_info(
-                "startup",
-                "Pyla-RL is paused. Press F8 or use Discord/Telegram /resume to continue.",
-            )
             while self.should_pause() and not self.should_stop():
                 if self.sleep_interruptible(0.75, allow_pause=False) == "stop":
                     return
             if not self.should_stop():
                 self.runtime_control.mark_running()
                 self.time_since_last_webhook_ping = time.time()
-                runtime_log.log_info("startup", "Pause released, resuming run.")
 
         def handle_pause_request(self):
             if self.should_pause() and not self.should_stop():
@@ -902,6 +917,7 @@ def pyla_main(data):
         def build_runtime_snapshot(self):
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
             total = self.Stage_manager.Trophy_observer.match_history.get("total", {})
+            runtime_label = self.runtime_control_label()
             return {
                 "uptime_s": time.time() - self.started_at,
                 "state": format_state_label(self.state),
@@ -911,13 +927,14 @@ def pyla_main(data):
                 "session_wins": int(total.get("victory", 0) or 0),
                 "session_losses": int(total.get("defeat", 0) or 0),
                 "session_draws": int(total.get("draw", 0) or 0),
-                "notice": "Running",
+                "notice": runtime_label.title(),
                 "feed_fps": self.perf_feed_fps,
             }
 
         def remote_status(self):
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
             return {
+                "runtime": self.runtime_control_label(),
                 "state": format_state_label(self.state),
                 "ips": f"{self.ips_ema:.2f}" if self.ips_ema is not None else "",
                 "feed_fps": f"{self.perf_feed_fps:.2f}",
@@ -983,6 +1000,8 @@ def pyla_main(data):
                     )
                     persist_worker_session(self)
 
+                self.update_runtime_control_notice()
+
                 if self.get_latest_state() == "lobby":
                     if self.should_pause():
                         self.handle_pause_request()
@@ -1047,9 +1066,13 @@ def pyla_main(data):
                                 self.ips_ema,
                                 self.perf_feed_fps,
                                 self.ips_history,
+                                session=self.build_runtime_snapshot(),
                             )
                         intent = getattr(self.Play, "match_intent_summary", "") or ""
+                        runtime_label = self.runtime_control_label()
                         perf_text = f"{current_ips:.2f} IPS | feed {self.perf_feed_fps:.1f} FPS"
+                        if runtime_label != "running":
+                            perf_text = f"{runtime_label.upper()} | {perf_text}"
                         if intent:
                             perf_text += f" | {intent}"
                         runtime_log.log_status_line(perf_text)

@@ -168,7 +168,14 @@ class RuntimeControlBridge:
         if self.should_stop():
             return False
         state = read_state(self.state_path)
-        return state == PAUSED or self._paused
+        with self._lock:
+            paused_flag = self._paused
+        if state == RUNNING:
+            if paused_flag:
+                with self._lock:
+                    self._paused = False
+            return False
+        return state == PAUSED or paused_flag
 
     def mark_paused(self) -> None:
         with self._lock:
