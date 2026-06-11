@@ -33,7 +33,9 @@ def looks_like_disconnect_dialog(frame):
 
 
 def load_brawler():
-    data_path = ROOT / "latest_brawler_data.json"
+    data_path = ROOT / "data" / "latest_brawler_data.json"
+    if not data_path.exists():
+        data_path = ROOT / "latest_brawler_data.json"
     if not data_path.exists():
         return "shelly"
     data = json.loads(data_path.read_text(encoding="utf-8"))

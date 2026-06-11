@@ -4,10 +4,7 @@ import sys
 import customtkinter as ctk  # Import the customtkinter library
 from gui.license_client import check_if_exists
 from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
-from utils import api_base_url, save_dict_as_toml
-
-sys.path.append(os.path.abspath('../'))
-from utils import  load_toml_as_dict
+from utils import api_base_url, load_toml_as_dict, save_dict_as_toml
 
 
 def login(logged_in_setter):

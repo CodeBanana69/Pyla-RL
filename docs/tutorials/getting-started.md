@@ -16,7 +16,7 @@
 1. Start your Android emulator (LDPlayer or MuMu).
 2. Open Brawl Stars in the emulator.
 3. Set emulator resolution to **1920x1080** (recommended).
-4. Double-click **`pyla-rl.bat`** or run `python main.py`.
+4. Double-click **`pyla-rl.bat`** or run `python app/main.py` from the install folder.
 
 ## First run
 

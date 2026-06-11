@@ -46,7 +46,11 @@ class InstanceSupervisor:
 
         queue_path = self.project_root / str(profile.get("queue_path", ""))
         if not queue_path.exists() or not queue_has_data(queue_path):
-            default_queue = self.project_root / "latest_brawler_data.json"
+            from utils import DEFAULT_QUEUE_PATH, LEGACY_QUEUE_PATH
+
+            default_queue = self.project_root / DEFAULT_QUEUE_PATH
+            if not default_queue.exists():
+                default_queue = self.project_root / LEGACY_QUEUE_PATH
             if default_queue.exists() and queue_has_data(default_queue):
                 queue_path.parent.mkdir(parents=True, exist_ok=True)
                 queue_path.write_text(default_queue.read_text(encoding="utf-8"), encoding="utf-8")

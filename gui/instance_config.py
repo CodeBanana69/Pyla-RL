@@ -15,7 +15,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from utils import load_toml_as_dict, resolve_project_path, save_dict_as_toml
+from utils import (
+    DEFAULT_QUEUE_PATH,
+    LEGACY_QUEUE_PATH,
+    default_queue_path,
+    load_toml_as_dict,
+    resolve_project_path,
+    save_dict_as_toml,
+)
 
 
 INSTANCES_CONFIG_PATH = "cfg/instances.toml"
@@ -531,7 +538,7 @@ def get_queue_path(instance_id: str | None = None) -> Path:
         if profile:
             return Path(resolve_project_path(profile["queue_path"]))
         return Path(resolve_project_path(INSTANCES_ROOT)) / _slugify(instance_id) / "latest_brawler_data.json"
-    return Path(resolve_project_path("latest_brawler_data.json"))
+    return Path(default_queue_path())
 
 
 def queue_has_data(path: Path | str | None = None, instance_id: str | None = None) -> bool:
@@ -659,7 +666,7 @@ def compute_instance_readiness(instance_id: str) -> dict[str, Any]:
         return {"status": "no_emulator", "message": "No emulator port assigned."}
 
     if not queue_has_data(instance_id=instance_id):
-        default_queue = Path("latest_brawler_data.json")
+        default_queue = Path(default_queue_path())
         if default_queue.exists() and queue_has_data(default_queue):
             return {
                 "status": "needs_farm_plan",
@@ -745,7 +752,9 @@ def migrate_single_instance_to_default() -> dict[str, Any]:
         "player_tag": api_config.get("player_tag", ""),
     })
 
-    source_queue = Path("latest_brawler_data.json")
+    source_queue = Path(default_queue_path())
+    if not source_queue.exists():
+        source_queue = Path(resolve_project_path(LEGACY_QUEUE_PATH))
     target_queue = Path(profile["queue_path"])
     if source_queue.exists() and not target_queue.exists():
         target_queue.parent.mkdir(parents=True, exist_ok=True)

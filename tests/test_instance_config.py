@@ -33,7 +33,8 @@ class InstanceConfigTests(unittest.TestCase):
             }),
             encoding="utf-8",
         )
-        (self.root / "latest_brawler_data.json").write_text("[]", encoding="utf-8")
+        (self.root / "data").mkdir(parents=True, exist_ok=True)
+        (self.root / "data" / "latest_brawler_data.json").write_text("[]", encoding="utf-8")
         clear_toml_cache()
 
     @patch("utils.resolve_project_path")

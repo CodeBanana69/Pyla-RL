@@ -22,7 +22,7 @@ If the farm plan is empty, START opens the legacy brawler picker window instead.
 
 ## Queue file format
 
-Single-instance mode uses `latest_brawler_data.json` in the project root.
+Single-instance mode uses `data/latest_brawler_data.json` in the project folder.
 
 Example entry:
 

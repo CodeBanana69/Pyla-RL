@@ -7,8 +7,6 @@ import customtkinter as ctk
 import utils
 from utils import api_base_url
 
-sys.path.append(os.path.abspath('../'))
-
 
 def patch_tk_cleanup_errors():
     if getattr(tk.Variable, "_pyla_safe_del", False):

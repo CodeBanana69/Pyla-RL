@@ -16,7 +16,9 @@ EMULATOR_PORTS = {
 SUPPORTED_EMULATORS = tuple(EMULATOR_PORTS.keys())
 ADB_SERVER_PORT = 5037
 
-LOCAL_ADB_EXE = Path(__file__).resolve().parent.parent / "adb.exe"
+from utils import resolve_project_path
+
+LOCAL_ADB_EXE = Path(resolve_project_path("bin/adb.exe"))
 
 LDPLAYER_PROCESS_NAMES = (
     "dnplayer.exe",

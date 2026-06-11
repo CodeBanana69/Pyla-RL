@@ -442,7 +442,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("onClicked: hubBridge.openPatreon()", qml)
 
     def test_qml_hub_is_primary_without_legacy_fallback(self):
-        main_source = Path("main.py").read_text(encoding="utf-8")
+        main_source = Path("app/main.py").read_text(encoding="utf-8")
 
         self.assertIn("from gui.qml_hub import QmlHub", main_source)
         self.assertIn("return QmlHub(*args, **kwargs)", main_source)

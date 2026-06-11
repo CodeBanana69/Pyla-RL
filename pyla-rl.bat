@@ -3,6 +3,9 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
+set "BUNDLE=%~dp0app"
+set "PYTHONPATH=%BUNDLE%"
+
 set "OMP_NUM_THREADS=2"
 set "OPENBLAS_NUM_THREADS=2"
 set "MKL_NUM_THREADS=2"
@@ -80,7 +83,7 @@ if errorlevel 1 (
     if exist "setup.exe" (
         echo Run setup.exe in this folder again, then launch pyla-rl.bat.
     ) else (
-        echo Run: %PY% setup.py --pyla-install
+        echo Run: %PY% app\setup.py --pyla-install
     )
     echo.
     echo Diagnostic: %PY% tools\check_runtime.py
@@ -92,7 +95,7 @@ if errorlevel 1 (
 echo Make sure your emulator is running and Brawl Stars is open.
 echo.
 
-%PY% main.py
+%PY% "%BUNDLE%\main.py"
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (

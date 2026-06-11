@@ -339,7 +339,7 @@ class HubStateStore:
         self.time_tresholds.setdefault("super", 0.1)
         self.time_tresholds.setdefault("hypercharge", 2.0)
         self.time_tresholds.setdefault("gadget", 0.5)
-        self.time_tresholds.setdefault("wall_detection", 1.0)
+        self.time_tresholds.setdefault("wall_detection", 0.2)
         self.time_tresholds.setdefault("no_detection_proceed", 8.5)
         self.time_tresholds.setdefault("low_ips_recovery_seconds", 45)
         self.time_tresholds.setdefault("low_ips_recovery_cooldown", 35)
@@ -531,7 +531,9 @@ class HubStateStore:
         if is_multi_instance_enabled():
             instance_id = self.editing_instance_id or get_default_instance_id()
             return get_queue_path(instance_id)
-        return Path("latest_brawler_data.json")
+        from utils import default_queue_path
+
+        return Path(default_queue_path())
 
     def state_json(self, preflight=None, correct_zoom=True):
         return json.dumps(self.ui_state(preflight=preflight, correct_zoom=correct_zoom))

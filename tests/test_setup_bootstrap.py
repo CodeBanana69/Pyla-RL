@@ -11,7 +11,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertNotIn('"install"]', source)
 
     def test_setup_py_supports_direct_pyla_install_mode(self):
-        source = Path("setup.py").read_text(encoding="utf-8")
+        source = Path("app/setup.py").read_text(encoding="utf-8")
 
         pyla_install_index = source.index('if "--pyla-install" in sys.argv:')
         setup_function_index = source.index("def setup_pyla():")
@@ -45,7 +45,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn('"PySide6>=6.7.0"', source)
 
     def test_setup_repairs_numpy_before_importing_utils(self):
-        source = Path("setup.py").read_text(encoding="utf-8")
+        source = Path("app/setup.py").read_text(encoding="utf-8")
 
         numpy_repair_index = source.index('force_install(["numpy<2.0.0"], no_deps=True)')
         utils_import_index = source.find("from utils import")
@@ -54,7 +54,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn('"numpy<2.0.0"', source)
 
     def test_direct_setup_does_not_create_run_bat(self):
-        source = Path("setup.py").read_text(encoding="utf-8")
+        source = Path("app/setup.py").read_text(encoding="utf-8")
 
         self.assertNotIn("def create_run_file", source)
         self.assertNotIn("create_run_file()", source)
@@ -82,7 +82,8 @@ class SetupBootstrapTests(unittest.TestCase):
 
         self.assertIn("ensure_project_venv", source)
         self.assertIn("verify_runtime_imports", source)
-        self.assertIn("venv_command + [\"setup.py\", \"--pyla-install\"]", source)
+        self.assertIn("bundle_dir / \"setup.py\"", source)
+        self.assertIn("cwd=bundle_dir", source)
 
     def test_general_config_template_requires_first_run_wizard(self):
         source = Path("cfg/general_config.toml").read_text(encoding="utf-8")
@@ -96,7 +97,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("ensure_hub_first_run_wizard", source)
 
     def test_main_repairs_numpy_before_importing_cv2(self):
-        source = Path("main.py").read_text(encoding="utf-8")
+        source = Path("app/main.py").read_text(encoding="utf-8")
 
         repair_index = source.index("repair_numpy_before_cv2_import()")
         cv2_index = source.index("import cv2")
@@ -108,7 +109,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("setup.exe", launcher)
 
     def test_setup_splits_easyocr_from_core_batch(self):
-        source = Path("setup.py").read_text(encoding="utf-8")
+        source = Path("app/setup.py").read_text(encoding="utf-8")
 
         core_start = source.index("base_reqs = [")
         core_end = source.index("]", core_start)

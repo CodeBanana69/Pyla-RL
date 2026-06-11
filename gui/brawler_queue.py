@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from utils import (
+    DEFAULT_QUEUE_PATH,
     fetch_brawl_stars_player,
     get_brawler_list,
     load_brawl_stars_api_config,
@@ -9,7 +10,7 @@ from utils import (
     save_brawler_data,
 )
 
-QUEUE_PATH = Path("latest_brawler_data.json")
+QUEUE_PATH = Path(DEFAULT_QUEUE_PATH)
 PUSH_ORDER_PATH = Path("cfg/push_order.json")
 
 QUEUE_SORT_MODES = {

@@ -6,8 +6,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+APP = ROOT / "app"
+for path in (APP, ROOT):
+    if path.is_dir() and str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from tools.launcher_bat import candidate_python_commands
 from tools.python_runtime import probe_cv2, probe_runtime_imports, read_python_pin, setup_status_path

@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+
+_APP_ROOT = Path(__file__).resolve().parents[1] / "app"
+if _APP_ROOT.is_dir() and str(_APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APP_ROOT))
 
 
 @contextmanager

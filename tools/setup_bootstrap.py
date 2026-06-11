@@ -270,10 +270,11 @@ def main():
         return 1
 
     project_dir = app_dir()
-    setup_py = project_dir / "setup.py"
-    main_py = project_dir / "main.py"
+    bundle_dir = project_dir / "app"
+    setup_py = bundle_dir / "setup.py"
+    main_py = bundle_dir / "main.py"
     if not setup_py.exists() or not main_py.exists():
-        print("setup.exe must be placed in the Pyla-RL project folder next to setup.py and main.py.")
+        print("setup.exe must be placed in the Pyla-RL project folder next to app/setup.py and app/main.py.")
         input("Press Enter to close...")
         return 1
 
@@ -312,7 +313,7 @@ def main():
     env["PYLAAI_SETUP_AUTO"] = "1"
     if progress_window:
         progress_window.update("Installing Pyla-RL dependencies...")
-    run(venv_command + ["setup.py", "--pyla-install"], cwd=project_dir, env=env)
+    run(venv_command + ["setup.py", "--pyla-install"], cwd=bundle_dir, env=env)
 
     if progress_window:
         progress_window.update("Verifying EasyOCR runtime...")
@@ -352,7 +353,7 @@ def main():
 
     print("")
     print("Pyla-RL setup completed.")
-    print("Start your emulator, open Brawl Stars, then run pyla-rl.bat or python main.py.")
+    print("Start your emulator, open Brawl Stars, then run pyla-rl.bat or python app/main.py.")
     if progress_window:
         progress_window.update("Setup completed.")
         progress_window.close()

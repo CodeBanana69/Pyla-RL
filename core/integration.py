@@ -68,7 +68,9 @@ def get_queue_path() -> Path:
 
         return Path(_instance_queue_path())
     except Exception:
-        return Path(resolve_project_path("latest_brawler_data.json"))
+        from utils import default_queue_path
+
+        return Path(default_queue_path())
 
 
 def normalize_queue_row(row: dict) -> dict:

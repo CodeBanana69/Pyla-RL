@@ -36,9 +36,18 @@ SKIPPED_FILES = {
     "adbwinusbapi.dll",
     "brawl_stars_api.local.toml",
     "downgrader.exe",
+    "setup.exe",
     "telegram_chats.toml",
     "telegram_config.local.toml",
     "updater.exe",
+}
+
+ROOT_LAUNCHER_FILES = {
+    "setup.exe",
+    "updater.exe",
+    "pyla-rl.bat",
+    "readme.md",
+    "README.md",
 }
 
 OBSOLETE_FILES = {
@@ -337,17 +346,73 @@ def merge_json_data(new_data, old_data):
     return old_data
 
 
+def is_distribution_root(path: Path) -> bool:
+    if not (path / "cfg").exists():
+        return False
+    return (path / "app" / "main.py").exists() or (path / "main.py").exists()
+
+
 def find_project_root(extracted_dir: Path) -> Path:
-    if (extracted_dir / "main.py").exists() and (extracted_dir / "cfg").exists():
+    if is_distribution_root(extracted_dir):
         return extracted_dir
-    candidates = [
-        path for path in extracted_dir.rglob("main.py")
-        if (path.parent / "cfg").exists()
-    ]
+    candidates = []
+    for main_py in extracted_dir.rglob("main.py"):
+        parent = main_py.parent
+        if parent.name == "app" and is_distribution_root(parent.parent):
+            candidates.append(parent.parent)
+        elif (parent / "cfg").exists():
+            candidates.append(parent)
     if not candidates:
         raise FileNotFoundError("Downloaded update does not look like a Pyla-RL project.")
     candidates.sort(key=lambda path: len(path.parts))
-    return candidates[0].parent
+    return candidates[0]
+
+
+def migrate_legacy_layout(project_dir: Path) -> None:
+    """Move flat installs to app/ + bin/ + data/ layout."""
+    project_dir = Path(project_dir)
+    app_dir = project_dir / "app"
+    if not (project_dir / "main.py").exists() or (app_dir / "main.py").exists():
+        return
+
+    print("Migrating project layout (moving runtime modules into app/)...")
+    app_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir = project_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = project_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    for py_file in project_dir.glob("*.py"):
+        if py_file.name.lower() in ROOT_LAUNCHER_FILES:
+            continue
+        destination = app_dir / py_file.name
+        if destination.exists():
+            continue
+        shutil.move(str(py_file), str(destination))
+        print(f"Moved {py_file.name} -> app/{py_file.name}")
+
+    for name in ("qt.conf",):
+        source = project_dir / name
+        if source.is_file():
+            destination = app_dir / name
+            if not destination.exists():
+                shutil.move(str(source), str(destination))
+                print(f"Moved {name} -> app/{name}")
+
+    for name in ("adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll"):
+        source = project_dir / name
+        if source.is_file():
+            destination = bin_dir / name
+            if not destination.exists():
+                shutil.move(str(source), str(destination))
+                print(f"Moved {name} -> bin/{name}")
+
+    legacy_queue = project_dir / "latest_brawler_data.json"
+    if legacy_queue.is_file():
+        destination = data_dir / "latest_brawler_data.json"
+        if not destination.exists():
+            shutil.move(str(legacy_queue), str(destination))
+            print("Moved latest_brawler_data.json -> data/latest_brawler_data.json")
 
 
 def backup_preserved_files(project_dir: Path, backup_dir: Path) -> None:
@@ -447,6 +512,7 @@ def install_from_zip(project_dir: Path, url: str, label: str, marker_sha: str | 
     zip_path = temp_dir / "pylaai_update.zip"
 
     try:
+        migrate_legacy_layout(project_dir)
         backup_preserved_files(project_dir, backup_dir)
         download_file(url, zip_path, label)
         extract_dir = temp_dir / "extracted"
@@ -497,8 +563,8 @@ def main() -> int:
     print("=" * 50)
     print(f"Project folder: {project_dir}")
 
-    if not (project_dir / "main.py").exists():
-        print("updater.exe must be inside the Pyla-RL project folder next to main.py.")
+    if not is_distribution_root(project_dir):
+        print("updater.exe must be inside the Pyla-RL project folder next to app/main.py or main.py.")
         wait_for_enter()
         return 1
 
