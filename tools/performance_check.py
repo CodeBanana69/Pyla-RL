@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from gpu_support import describe_directml_adapter, resolve_directml_device_id, resolve_inference_device
 from utils import load_toml_as_dict
 
 
@@ -20,7 +21,9 @@ def main():
     print(f"ONNX Runtime: {ort.__version__}")
     print(f"Available providers: {', '.join(ort.get_available_providers())}")
     print(f"Configured cpu_or_gpu: {cfg.get('cpu_or_gpu', 'auto')}")
+    print(f"Resolved inference device: {resolve_inference_device(cfg.get('cpu_or_gpu', 'auto'))}")
     print(f"Configured directml_device_id: {cfg.get('directml_device_id', 'auto')}")
+    print(f"Resolved DirectML adapter: {describe_directml_adapter(cfg.get('directml_device_id', 'auto'))}")
     print(f"Configured onnx_cpu_threads: {cfg.get('onnx_cpu_threads', 'auto')}")
     configured_max_ips = cfg.get("max_ips", 0)
     max_ips_text = (

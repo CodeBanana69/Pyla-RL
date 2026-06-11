@@ -9,7 +9,14 @@ from cuda_runtime_paths import add_cuda_dll_directories
 add_cuda_dll_directories()
 import onnxruntime as ort
 
-from gpu_support import gpu_help_message, normalize_preferred_device
+from gpu_support import (
+    describe_directml_adapter,
+    gpu_help_message,
+    normalize_preferred_device,
+    primary_vendor,
+    resolve_directml_device_id,
+    resolve_inference_device,
+)
 from utils import load_toml_as_dict
 
 warnings.filterwarnings(
@@ -44,59 +51,50 @@ _runtime_provider_fallback_warning_printed = False
 
 
 def _directml_provider():
-    device_id = load_toml_as_dict("cfg/general_config.toml").get("directml_device_id", "auto")
+    config = load_toml_as_dict("cfg/general_config.toml")
+    device_id = resolve_directml_device_id(config.get("directml_device_id", "auto"))
     if str(device_id).strip().lower() in ("", "auto", "none"):
         return "DmlExecutionProvider"
     try:
-        return ("DmlExecutionProvider", {"device_id": int(device_id)})
+        adapter_index = int(device_id)
+        print(describe_directml_adapter(adapter_index))
+        return ("DmlExecutionProvider", {"device_id": adapter_index})
     except (TypeError, ValueError):
         print(f"Ignoring invalid directml_device_id={device_id!r}; using default DirectML adapter.")
         return "DmlExecutionProvider"
 
 
+def _cuda_provider_options():
+    return (
+        "CUDAExecutionProvider",
+        {
+            "cudnn_conv_algo_search": "EXHAUSTIVE",
+            "cudnn_conv_use_max_workspace": "1",
+            "do_copy_in_default_stream": "1",
+            "use_tf32": "1",
+        },
+    )
+
+
 def _build_providers(preferred_device):
     global _provider_message_printed
-    preferred_device = normalize_preferred_device(preferred_device)
+    requested_device = normalize_preferred_device(preferred_device)
+    preferred_device = resolve_inference_device(requested_device)
+    if preferred_device == "cuda" and primary_vendor() == "amd":
+        print(
+            "WARNING: CUDA was requested on an AMD GPU system. "
+            "Using DirectML instead. Run: py -3.11-64 tools\\fix_gpu_runtime.py directml"
+        )
+        preferred_device = "directml"
     available_providers = set(ort.get_available_providers())
     providers = []
 
-    if preferred_device == "cuda":
-        if "CUDAExecutionProvider" in available_providers and not providers:
-            cuda_provider = (
-                "CUDAExecutionProvider",
-                {
-                    "cudnn_conv_algo_search": "EXHAUSTIVE",
-                    "cudnn_conv_use_max_workspace": "1",
-                    "do_copy_in_default_stream": "1",
-                    "use_tf32": "1",
-                },
-            )
-            providers.append(cuda_provider)
-
-    if preferred_device in ("gpu", "auto", "directml", "dml"):
-        if "DmlExecutionProvider" in available_providers and not providers:
-            providers.append(_directml_provider())
-
-    if preferred_device in ("gpu", "auto"):
-        if "CUDAExecutionProvider" in available_providers and not providers:
-            cuda_provider = (
-                "CUDAExecutionProvider",
-                {
-                    "cudnn_conv_algo_search": "EXHAUSTIVE",
-                    "cudnn_conv_use_max_workspace": "1",
-                    "do_copy_in_default_stream": "1",
-                    "use_tf32": "1",
-                },
-            )
-            providers.append(cuda_provider)
-
-    if preferred_device in ("gpu", "auto", "openvino"):
-        if "OpenVINOExecutionProvider" in available_providers and not providers:
-            providers.append("OpenVINOExecutionProvider")
-
-    if preferred_device in ("gpu", "auto"):
-        if "AzureExecutionProvider" in available_providers and not providers:
-            providers.append("AzureExecutionProvider")
+    if preferred_device == "cuda" and "CUDAExecutionProvider" in available_providers:
+        providers.append(_cuda_provider_options())
+    elif preferred_device in ("directml", "dml") and "DmlExecutionProvider" in available_providers:
+        providers.append(_directml_provider())
+    elif preferred_device == "openvino" and "OpenVINOExecutionProvider" in available_providers:
+        providers.append("OpenVINOExecutionProvider")
 
     providers.append("CPUExecutionProvider")
     if not _provider_message_printed:
@@ -106,7 +104,7 @@ def _build_providers(preferred_device):
                 f"Using CPU inference. Available ONNX providers: {', '.join(ort.get_available_providers())}. "
                 f"Python={platform.python_version()} {platform.architecture()[0]}."
             )
-            if preferred_device in ("auto", "gpu", "directml", "dml", "cuda"):
+            if preferred_device in ("directml", "dml", "cuda", "openvino") or requested_device in ("auto", "gpu"):
                 print(gpu_help_message("missing_gpu_provider", provider=selected))
         else:
             print(

@@ -13,6 +13,7 @@ from gpu_support import (
     auto_candidate_variants as gpu_auto_candidate_variants,
     detect_graphics_cards as gpu_detect_graphics_cards,
     detect_runtime_variant as gpu_detect_runtime_variant,
+    select_best_runtime_result,
 )
 
 
@@ -254,7 +255,10 @@ def main():
         print("No ONNX runtime worked. Leaving the last attempted runtime installed.")
         return 1
 
-    best = max(working, key=lambda result: float(result.get("ips") or 0))
+    best = select_best_runtime_result(results, cards)
+    if best is None:
+        print("No ONNX runtime worked. Leaving the last attempted runtime installed.")
+        return 1
     best_variant = best["variant"]
     if results[-1].get("variant") != best_variant:
         print()

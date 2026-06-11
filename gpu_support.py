@@ -128,7 +128,49 @@ def normalize_preferred_device(preferred_device):
     preferred_device = str(preferred_device or "auto").strip().lower()
     if preferred_device in ("amd", "dml"):
         return "directml"
+    if preferred_device == "gpu":
+        return "auto"
     return preferred_device
+
+
+def resolve_inference_device(preferred_device="auto", cards=None):
+    """Resolve auto/gpu to the runtime that matches the detected primary GPU."""
+    preferred_device = normalize_preferred_device(preferred_device)
+    if preferred_device not in ("auto",):
+        return preferred_device
+
+    cards = cards if cards is not None else detect_graphics_cards()
+    vendor = primary_vendor(cards)
+    if vendor == "nvidia":
+        return "cuda"
+    if vendor in ("amd", "intel"):
+        return "directml"
+    if platform.system() == "Windows":
+        # WMI can miss adapters in some environments; still try DirectML before CPU.
+        return "directml"
+    return "cpu"
+
+
+def resolve_directml_device_id(device_id=None, cards=None):
+    device_id = str(device_id or "auto").strip().lower()
+    if device_id not in ("", "auto", "none"):
+        return device_id
+    return recommended_directml_device_id(cards)
+
+
+def describe_directml_adapter(device_id=None, cards=None):
+    device_id = resolve_directml_device_id(device_id, cards)
+    if str(device_id).strip().lower() in ("", "auto", "none"):
+        return "DirectML default adapter"
+    try:
+        adapter_index = int(device_id)
+    except (TypeError, ValueError):
+        return f"DirectML adapter {device_id!r}"
+    adapters = list_directml_adapters(cards)
+    if 0 <= adapter_index < len(adapters):
+        adapter = adapters[adapter_index]
+        return f"DirectML adapter {adapter_index}: {adapter.get('name')} ({adapter.get('vendor') or 'unknown'})"
+    return f"DirectML adapter {adapter_index}"
 
 
 def recommended_setup_onnx_variant(target=None, cards=None):
@@ -320,12 +362,43 @@ def resolve_ultralytics_device(requested_device="0"):
 def apply_gpu_config(config, variant, cards=None):
     cards = cards if cards is not None else detect_graphics_cards()
     variant = normalize_runtime_variant(variant)
+    if variant == "auto":
+        variant = resolve_inference_device("auto", cards)
     config["cpu_or_gpu"] = variant
     if variant == "directml":
-        device_id = recommended_directml_device_id(cards)
+        device_id = resolve_directml_device_id(config.get("directml_device_id", "auto"), cards)
         if device_id != "auto":
             config["directml_device_id"] = device_id
     return config
+
+
+def select_best_runtime_result(results, cards=None):
+    """Prefer vendor-appropriate GPU runtimes over CPU when both benchmark successfully."""
+    cards = cards if cards is not None else detect_graphics_cards()
+    working = [
+        result
+        for result in results
+        if result.get("ok") and float(result.get("ips") or 0) > 0
+    ]
+    if not working:
+        return None
+
+    vendor = primary_vendor(cards)
+    if vendor == "amd":
+        directml_results = [result for result in working if result.get("variant") == "directml"]
+        if directml_results:
+            return max(directml_results, key=lambda result: float(result.get("ips") or 0))
+    if vendor == "intel":
+        for preferred_variant in ("directml", "openvino"):
+            matches = [result for result in working if result.get("variant") == preferred_variant]
+            if matches:
+                return max(matches, key=lambda result: float(result.get("ips") or 0))
+    if vendor == "nvidia":
+        cuda_results = [result for result in working if result.get("variant") == "cuda"]
+        if cuda_results:
+            return max(cuda_results, key=lambda result: float(result.get("ips") or 0))
+
+    return max(working, key=lambda result: float(result.get("ips") or 0))
 
 
 def describe_detected_gpus(cards=None):

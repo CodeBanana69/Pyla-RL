@@ -1,11 +1,19 @@
 ﻿import sys
 import time
 import cv2
+import numpy as np
 
 from state_finder import get_state
 from trophy_observer import TrophyObserver
 from core.integration import get_webhook_settings, on_queue_file_changed
-from utils import find_template_center, load_toml_as_dict, notify_user, save_brawler_data
+from utils import (
+    extract_text_strings,
+    find_template_center,
+    load_toml_as_dict,
+    normalize_brawler_name,
+    notify_user,
+    save_brawler_data,
+)
 
 try:
     from early_access.early_access import get_brawler_stats, get_player_info
@@ -39,7 +47,11 @@ class StageManager:
         self.brawlers_pick_data = brawlers_data
         self.Trophy_observer = TrophyObserver()
         self.time_since_last_stat_change = time.time()
-        self.play_again_on_win = load_toml_as_dict("./cfg/bot_config.toml")["play_again_on_win"] == "yes"
+        bot_config = load_toml_as_dict("./cfg/bot_config.toml")
+        self.play_again_on_win = bot_config.get("play_again_on_win", "no") == "yes"
+        self.post_match_action = str(bot_config.get("post_match_action", "lobby")).strip().lower()
+        if self.post_match_action not in ("lobby", "play_again"):
+            self.post_match_action = "lobby"
         self.window_controller = window_controller
         self.states = {
             'shop': self.quit_shop,
@@ -218,18 +230,201 @@ class StageManager:
             return
         notify_user("match", screenshot, self, match_record=match_record)
 
+    @staticmethod
+    def _is_win_result(result):
+        if not result:
+            return False
+        normalized = str(result).strip().lower()
+        if normalized == "victory":
+            return True
+        if normalized.startswith("trio_showdown_"):
+            try:
+                place = int(normalized.rsplit("_", 1)[-1])
+            except (TypeError, ValueError):
+                return False
+            return place <= 1
+        return False
+
+    def requires_brawler_reselection(self, active_brawler=None):
+        brawlers_pick_data = getattr(self, "brawlers_pick_data", None)
+        if not brawlers_pick_data:
+            return False
+        active_name = normalize_brawler_name(active_brawler or getattr(self, "active_match_brawler", ""))
+        front_name = normalize_brawler_name(brawlers_pick_data[0].get("brawler", ""))
+        return bool(active_name and front_name and active_name != front_name)
+
+    def should_return_to_lobby_after_match(self, active_brawler=None):
+        if getattr(self, "pending_brawler_reselection", False):
+            return True
+        if getattr(self, "brawlers_pick_data", None) and getattr(self, "Trophy_observer", None):
+            type_to_push = self.brawlers_pick_data[0].get("type", "trophies")
+            value = getattr(self.Trophy_observer, f"current_{type_to_push}", None)
+            if value is None and type_to_push == "trophies":
+                value = getattr(self.Trophy_observer, "current_trophies", 0)
+            target = self.brawlers_pick_data[0].get("push_until", 1000)
+            try:
+                if int(value) >= int(target):
+                    return True
+            except (TypeError, ValueError):
+                pass
+        return self.requires_brawler_reselection(active_brawler)
+
+    def should_use_play_again(self, value=0, target=0, active_brawler=None):
+        if self.post_match_action != "play_again":
+            return False
+        try:
+            if int(value) >= int(target):
+                return False
+        except (TypeError, ValueError):
+            pass
+        if self.should_return_to_lobby_after_match(active_brawler):
+            return False
+        try:
+            return int(value) < int(target)
+        except (TypeError, ValueError):
+            return True
+
+    def _should_press_play_again(self, result, value, target):
+        if not self.should_use_play_again(value, target):
+            return False
+        if self.play_again_on_win and not self._is_win_result(result):
+            return False
+        return not self._should_pause() and not self._should_stop()
+
+    def dismiss_end_screen(self, use_play_again=False):
+        self.window_controller.keys_up(list("wasd"))
+        if use_play_again:
+            screenshot = self.window_controller.screenshot()
+            if self.is_play_again_button_visually_available(screenshot):
+                print("Post-match action: clicking PLAY AGAIN.")
+                self.click_play_again_button()
+                return
+
+            exit_center = self.get_play_again_missing_exit_center(screenshot, allow_ocr=False)
+            if exit_center is not None:
+                print("Play Again unavailable; clicking EXIT to requeue from lobby.")
+                self.window_controller.click(*exit_center, delay=0.08)
+                return
+
+            text_state = self.get_play_again_text_state(screenshot)
+            if text_state == "play_again":
+                print("Post-match action: clicking PLAY AGAIN.")
+                self.click_play_again_button()
+                return
+            if text_state == "exit":
+                print("Play Again unavailable; clicking EXIT to requeue from lobby.")
+                self.window_controller.click(
+                    int(1660 * self.window_controller.width_ratio),
+                    int(980 * self.window_controller.height_ratio),
+                    delay=0.08,
+                )
+                return
+
+            print("Play Again button is not enabled; pressing continue instead.")
+            self.window_controller.press_key("Q")
+            return
+        self.window_controller.press_key("Q")
+
+    def click_play_again_button(self):
+        self.window_controller.click(
+            int(1215 * self.window_controller.width_ratio),
+            int(935 * self.window_controller.height_ratio),
+            delay=0.08,
+        )
+
+    def _scaled_crop(self, image, region):
+        if image is None or image.size == 0:
+            return None
+        height, width = image.shape[:2]
+        x, y, w, h = region
+        x1 = max(0, int(x * width / 1920))
+        y1 = max(0, int(y * height / 1080))
+        x2 = min(width, int((x + w) * width / 1920))
+        y2 = min(height, int((y + h) * height / 1080))
+        crop = image[y1:y2, x1:x2]
+        return crop if crop.size else None
+
+    @staticmethod
+    def _button_color_ratios(crop):
+        hsv = cv2.cvtColor(crop, cv2.COLOR_RGB2HSV)
+        blue = cv2.inRange(hsv, np.array((95, 80, 100), dtype=np.uint8), np.array((125, 255, 255), dtype=np.uint8))
+        green = cv2.inRange(hsv, np.array((42, 70, 100), dtype=np.uint8), np.array((82, 255, 255), dtype=np.uint8))
+        yellow = cv2.inRange(hsv, np.array((18, 70, 110), dtype=np.uint8), np.array((38, 255, 255), dtype=np.uint8))
+        dark = cv2.inRange(hsv, np.array((0, 0, 0), dtype=np.uint8), np.array((179, 255, 90), dtype=np.uint8))
+        total = max(1, crop.shape[0] * crop.shape[1])
+        return {
+            "button": (cv2.countNonZero(blue) + cv2.countNonZero(green) + cv2.countNonZero(yellow)) / total,
+            "dark": cv2.countNonZero(dark) / total,
+        }
+
+    def is_play_again_button_visually_available(self, screenshot):
+        play_crop = self._scaled_crop(screenshot, [1030, 850, 360, 150])
+        if play_crop is None:
+            return False
+        ratios = self._button_color_ratios(play_crop)
+        return ratios["button"] > 0.18 and ratios["dark"] > 0.035
+
+    def get_play_again_missing_exit_center(self, screenshot, allow_ocr=True):
+        if screenshot is None or screenshot.size == 0:
+            return None
+
+        play_crop = self._scaled_crop(screenshot, [1030, 850, 360, 150])
+        exit_crop = self._scaled_crop(screenshot, [1480, 850, 380, 170])
+        if exit_crop is None:
+            return None
+        exit_ratios = self._button_color_ratios(exit_crop)
+        play_ratios = self._button_color_ratios(play_crop) if play_crop is not None else {"button": 0.0, "dark": 0.0}
+        if exit_ratios["button"] > 0.20 and exit_ratios["dark"] > 0.035 and play_ratios["button"] < 0.12:
+            return (
+                int(1660 * self.window_controller.width_ratio),
+                int(980 * self.window_controller.height_ratio),
+            )
+
+        if not allow_ocr:
+            return None
+
+        text_state = self.get_play_again_text_state(screenshot)
+        if text_state != "exit":
+            return None
+
+        return (
+            int(1660 * self.window_controller.width_ratio),
+            int(980 * self.window_controller.height_ratio),
+        )
+
+    def get_play_again_text_state(self, screenshot):
+        try:
+            height, width = screenshot.shape[:2]
+            button_crop = screenshot[int(height * 0.78):height, int(width * 0.72):width]
+            texts = extract_text_strings(button_crop)
+        except Exception:
+            return ""
+
+        normalized_words = [normalize_brawler_name(text) for text in texts]
+        normalized_text = " ".join(normalized_words)
+        compact_text = "".join(normalized_words)
+        play_again_visible = (
+            "play" in normalized_text and "again" in normalized_text
+        ) or "playagain" in compact_text
+        if play_again_visible:
+            return "play_again"
+        if "exit" in normalized_text:
+            return "exit"
+        return ""
+
     def end_game(self):
         screenshot = self.window_controller.screenshot()
 
         found_game_result = False
         match_notified = False
         current_state = get_state(screenshot)
-        button_pressed = False
+        use_play_again = False
         end_screen_time = time.time()
 
         while current_state.startswith("end") and time.time() - end_screen_time < 35:
+            stat_gate_open = time.time() - self.time_since_last_stat_change > 25
 
-            if time.time() - self.time_since_last_stat_change > 25:
+            if stat_gate_open:
                 found_game_result = '_'.join(current_state.split("_")[1:])
                 current_brawler = self.brawlers_pick_data[0]['brawler']
                 power_level = None
@@ -245,25 +440,26 @@ class StageManager:
                 }
                 type_to_push = self.brawlers_pick_data[0]['type']
                 value = values[type_to_push]
+                target = self.brawlers_pick_data[0].get("push_until", 1000)
                 self.brawlers_pick_data[0][type_to_push] = value
                 self.brawlers_pick_data[0]['win_streak'] = self.Trophy_observer.win_streak
                 save_brawler_data(self.brawlers_pick_data)
                 if not match_notified:
                     self._notify_match_summary(screenshot)
                     match_notified = True
+                use_play_again = self._should_press_play_again(found_game_result, value, target)
 
-            if not button_pressed and self.play_again_on_win and found_game_result == "victory" and not self._should_pause() and not self._should_stop():
-                self.window_controller.press("play_again")
-                button_pressed = True
+            if use_play_again:
+                print("Post-match action: Play Again.")
             else:
                 print("Game has ended, proceeding")
-                self.window_controller.press("proceed")
+            self.dismiss_end_screen(use_play_again=use_play_again)
 
             time.sleep(3)
             screenshot = self.window_controller.screenshot()
             current_state = get_state(screenshot)
 
-        if self.play_again_on_win and found_game_result == "victory" and not self._should_pause():
+        if use_play_again and not self._should_pause():
             print("Waiting for match to start...")
             start_wait_time = time.time()
             while time.time() - start_wait_time < 25:
