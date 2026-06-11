@@ -1,6 +1,6 @@
 ﻿# Pyla-RL
 
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](docs/LICENSE)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](app/docs/LICENSE)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/CodeBanana69/Pyla-RL)
 [![Focus](https://img.shields.io/badge/mode-Showdown%20(trio)-FF9F0A)](README.md#features)
@@ -16,16 +16,16 @@ Pyla-RL is **free and open source**. Do not pay for copies, repacks, or "premium
 |---|---|
 | **Source** | https://github.com/CodeBanana69/Pyla-RL |
 | **Community** | [Pyla Discord](https://discord.gg/xUusk3fw4A) |
-| **Tutorials** | [docs/TUTORIAL.md](docs/TUTORIAL.md) |
+| **Tutorials** | [docs/TUTORIAL.md](app/docs/TUTORIAL.md) |
 | **Quick start** | [Get started](#quick-start) below |
 
-> **Note:** This is a source-code fork with a one-click Windows setup helper. Official builds and support are also available through the Pyla Discord. See [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md).
+> **Note:** This is a source-code fork with a one-click Windows setup helper. Official builds and support are also available through the Pyla Discord. See [docs/ANTI_RESELLING.md](app/docs/ANTI_RESELLING.md).
 
 ## Screenshots
 
 | Hub — Overview | Hub — Farm Plan | Pyla-RL Control |
 |:---:|:---:|:---:|
-| ![Hub Overview](docs/assets/hub-overview.png) | ![Farm Plan](docs/assets/hub-farm-plan.png) | ![Control window](docs/assets/control-window.png) |
+| ![Hub Overview](app/docs/assets/hub-overview.png) | ![Farm Plan](app/docs/assets/hub-farm-plan.png) | ![Control window](app/docs/assets/control-window.png) |
 | Pre-flight checks, performance profiles, game mode | Queue builder, Push All presets, import/export | Pause/resume (F8), IPS graph, session strip |
 
 Enable **Debug Screen** in Hub settings for a live vision overlay (player, walls, fog, ranges) while the bot runs.
@@ -61,16 +61,16 @@ flowchart LR
 |---|---|
 | Farm plan queue | Build, sort, import/export brawler push targets |
 | Push All 1k | Auto-queue every brawler under 1000 trophies |
-| Brawl Stars API | Trophy autofill when picking brawlers ([setup guide](docs/tutorials/brawl-stars-api.md)) |
-| Multi-instance | Parallel LDPlayer / MuMu bots ([guide](docs/tutorials/multi-instance.md)) |
+| Brawl Stars API | Trophy autofill when picking brawlers ([setup guide](app/docs/tutorials/brawl-stars-api.md)) |
+| Multi-instance | Parallel LDPlayer / MuMu bots ([guide](app/docs/tutorials/multi-instance.md)) |
 | Performance profiles | Balanced, low-end, quality, high-ips presets |
 
 ### Remote control
 
 | | |
 |---|---|
-| Discord | `/pause`, `/start`, `/status`, `/screenshot`, `/queue`, `/push`, and more ([guide](docs/tutorials/discord-remote-control.md)) |
-| Telegram | `/pause`, `/resume`, `/status`, `/screenshot`, farm-plan commands ([guide](docs/tutorials/telegram.md)) |
+| Discord | `/pause`, `/start`, `/status`, `/screenshot`, `/queue`, `/push`, and more ([guide](app/docs/tutorials/discord-remote-control.md)) |
+| Telegram | `/pause`, `/resume`, `/status`, `/screenshot`, farm-plan commands ([guide](app/docs/tutorials/telegram.md)) |
 | Pause visibility | F8 pause; state shown in terminal, control window, and `/status` |
 
 ### Reliability
@@ -88,7 +88,7 @@ flowchart LR
 2. Start **LDPlayer** or **MuMu**, open Brawl Stars, set **1920×1080**.
 3. Launch **`pyla-rl.bat`** → Hub **Overview** → pick emulator → **Run Checks**.
 4. Build a farm plan on **Farm Plan** (or use the legacy picker) → **START**.
-5. Full walkthrough: [docs/tutorials/getting-started.md](docs/tutorials/getting-started.md)
+5. Full walkthrough: [docs/tutorials/getting-started.md](app/docs/tutorials/getting-started.md)
 
 <details>
 <summary><strong>Emulator troubleshooting</strong></summary>
@@ -98,7 +98,7 @@ flowchart LR
 - **MuMu:** confirm ADB is enabled. Default port `16384` (instance 1: `16416`).
 - START requires the **ADB device** check. Emulator process, Brawl Stars foreground, and resolution are warnings only.
 
-More: [docs/tutorials/troubleshooting.md](docs/tutorials/troubleshooting.md)
+More: [docs/tutorials/troubleshooting.md](app/docs/tutorials/troubleshooting.md)
 
 </details>
 
@@ -115,33 +115,33 @@ More: [docs/tutorials/troubleshooting.md](docs/tutorials/troubleshooting.md)
 
 | Topic | Guide |
 |-------|--------|
-| All tutorials | [docs/TUTORIAL.md](docs/TUTORIAL.md) |
-| Repo layout | [docs/REPO_LAYOUT.md](docs/REPO_LAYOUT.md) |
-| Discord webhooks | [docs/tutorials/discord.md](docs/tutorials/discord.md) |
-| Discord remote control | [docs/tutorials/discord-remote-control.md](docs/tutorials/discord-remote-control.md) |
-| Telegram | [docs/tutorials/telegram.md](docs/tutorials/telegram.md) |
-| Brawl Stars API | [docs/tutorials/brawl-stars-api.md](docs/tutorials/brawl-stars-api.md) |
-| Multi-instance | [docs/tutorials/multi-instance.md](docs/tutorials/multi-instance.md) |
-| Settings and performance | [docs/tutorials/settings-and-performance.md](docs/tutorials/settings-and-performance.md) |
-| Anti-reselling | [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md) |
+| All tutorials | [docs/TUTORIAL.md](app/docs/TUTORIAL.md) |
+| Repo layout | [docs/REPO_LAYOUT.md](app/docs/REPO_LAYOUT.md) |
+| Discord webhooks | [docs/tutorials/discord.md](app/docs/tutorials/discord.md) |
+| Discord remote control | [docs/tutorials/discord-remote-control.md](app/docs/tutorials/discord-remote-control.md) |
+| Telegram | [docs/tutorials/telegram.md](app/docs/tutorials/telegram.md) |
+| Brawl Stars API | [docs/tutorials/brawl-stars-api.md](app/docs/tutorials/brawl-stars-api.md) |
+| Multi-instance | [docs/tutorials/multi-instance.md](app/docs/tutorials/multi-instance.md) |
+| Settings and performance | [docs/tutorials/settings-and-performance.md](app/docs/tutorials/settings-and-performance.md) |
+| Anti-reselling | [docs/ANTI_RESELLING.md](app/docs/ANTI_RESELLING.md) |
 
 ## Integrations (summary)
 
-**Discord** — Set `webhook_url` for match notifications. For slash commands, add a bot token and enable `discord_control_enabled` in `cfg/discord_config.toml`. Full setup: [discord-remote-control.md](docs/tutorials/discord-remote-control.md).
+**Discord** — Set `webhook_url` for match notifications. For slash commands, add a bot token and enable `discord_control_enabled` in `cfg/discord_config.toml`. Full setup: [discord-remote-control.md](app/docs/tutorials/discord-remote-control.md).
 
-**Telegram** — Create a bot with `@BotFather`, set `bot_token` and `enabled = true` in `cfg/telegram_config.toml`. Full setup: [telegram.md](docs/tutorials/telegram.md).
+**Telegram** — Create a bot with `@BotFather`, set `bot_token` and `enabled = true` in `cfg/telegram_config.toml`. Full setup: [telegram.md](app/docs/tutorials/telegram.md).
 
-**Brawl Stars API** — Fill `cfg/brawl_stars_api.toml` for trophy autofill and Push All 1k. Full setup: [brawl-stars-api.md](docs/tutorials/brawl-stars-api.md). Do not commit filled tokens or passwords.
+**Brawl Stars API** — Fill `cfg/brawl_stars_api.toml` for trophy autofill and Push All 1k. Full setup: [brawl-stars-api.md](app/docs/tutorials/brawl-stars-api.md). Do not commit filled tokens or passwords.
 
-**Multi-instance** — Enable on the Hub **Instances** tab; each profile gets its own port and farm plan. Full setup: [multi-instance.md](docs/tutorials/multi-instance.md).
+**Multi-instance** — Enable on the Hub **Instances** tab; each profile gets its own port and farm plan. Full setup: [multi-instance.md](app/docs/tutorials/multi-instance.md).
 
 ## Performance and vision
 
-- Run `python tools/performance_check.py` if IPS is low.
-- Apply a safe profile: `python tools/apply_performance_profile.py --profile balanced` (use `--profile low-end` on older laptops).
-- Wall model training pipeline: capture → dataset → train → install via `tools/capture_wall_samples.py`, `tools/train_wall_model.py`, `tools/install_vision_model.py`. Details: [settings-and-performance.md](docs/tutorials/settings-and-performance.md).
+- Run `python app/tools/performance_check.py` if IPS is low.
+- Apply a safe profile: `python app/tools/apply_performance_profile.py --profile balanced` (use `--profile low-end` on older laptops).
+- Wall model training pipeline: capture → dataset → train → install via `app/tools/capture_wall_samples.py`, `app/tools/train_wall_model.py`, `app/tools/install_vision_model.py`. Details: [settings-and-performance.md](app/docs/tutorials/settings-and-performance.md).
 
-Re-capture README screenshots after major UI changes: `python tools/capture_readme_assets.py`
+Re-capture README screenshots after major UI changes: `python app/tools/capture_readme_assets.py`
 
 ## Tests
 
@@ -156,7 +156,7 @@ CI runs a core subset on every push to `main`.
 - Localhost fork: online login, auto icon/wall updates, and hosted stats are not enabled by default.
 - Vision `.pt` models: https://github.com/AngelFireLA/BrawlStarsBotMaking
 - Early-access features are not included before public release.
-- **License:** CC BY-NC — do not sell or resell. See [docs/ANTI_RESELLING.md](docs/ANTI_RESELLING.md).
+- **License:** CC BY-NC — do not sell or resell. See [docs/ANTI_RESELLING.md](app/docs/ANTI_RESELLING.md).
 
 ## Contributors
 

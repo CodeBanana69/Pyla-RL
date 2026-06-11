@@ -30,11 +30,16 @@ DEFAULT_QUEUE_PATH = "data/latest_brawler_data.json"
 LEGACY_QUEUE_PATH = "latest_brawler_data.json"
 
 
-def project_root():
+def install_root():
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
-    # utils.py lives in app/; distribution root is one level up.
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def project_root():
+    if getattr(sys, "frozen", False):
+        return os.path.join(install_root(), "app")
+    return os.path.dirname(os.path.abspath(__file__))
 
 
 def default_queue_path():

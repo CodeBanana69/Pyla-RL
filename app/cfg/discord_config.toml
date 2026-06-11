@@ -1,0 +1,16 @@
+webhook_url = ""
+discord_id = ""
+username = "PylaAi-XXZ"
+send_match_summary = false
+include_screenshot = true
+ping_when_stuck = false
+ping_when_target_is_reached = false
+ping_every_x_match = 0
+ping_every_x_minutes = 0
+discord_control_enabled = false
+discord_bot_token = ""
+discord_control_user_id = ""
+discord_control_channel_id = ""
+discord_control_guild_id = ""
+notify_on_recovery = false
+recovery_alert_threshold = 3

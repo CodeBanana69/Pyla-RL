@@ -1,0 +1,13 @@
+# Telegram bot support.
+# Create a bot with @BotFather, paste the token below, then set enabled = true.
+# Anyone who messages the bot can control this PylaAi-XXZ instance.
+
+enabled = false
+bot_token = ""
+
+send_match_summary = true
+include_screenshot = true
+allow_multiple_notification_chat_ids = false
+
+remote_control_enabled = true
+poll_timeout_seconds = 25

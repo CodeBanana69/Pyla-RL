@@ -3,19 +3,19 @@
 import cv2
 import numpy as np
 
-from utils import load_toml_as_dict, config_bool
+from utils import load_toml_as_dict, config_bool, resolve_project_path
 
 orig_screen_width, orig_screen_height = 1920, 1080
 
-states_path = r"./images/states/"
+states_path = resolve_project_path("images/states/")
 
-star_drops_path = r"./images/star_drop_types/"
+star_drops_path = resolve_project_path("images/star_drop_types/")
 images_with_star_drop = []
 for file in os.listdir(star_drops_path):
     if "star_drop" in file:
         images_with_star_drop.append(file)
 
-end_results_path = r"./images/end_results/"
+end_results_path = resolve_project_path("images/end_results/")
 
 match_result_crop_region = load_toml_as_dict("./cfg/lobby_config.toml")['lobby']['match_result']
 region_data = load_toml_as_dict("./cfg/lobby_config.toml")['template_matching']

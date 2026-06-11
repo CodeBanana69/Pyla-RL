@@ -24,4 +24,4 @@ jobs:
       - name: Run core tests
         env:
           PYTHONPATH: app
-        run: python -m unittest tests.test_project_layout tests.test_updater_migration tests.test_runtime_control_bridge tests.test_discord_control tests.test_remote_command_router tests.test_hub_validators tests.test_telegram_support tests.test_grid_name_match -v
+        run: python -m unittest app.tests.test_project_layout app.tests.test_updater_migration app.tests.test_runtime_control_bridge app.tests.test_discord_control app.tests.test_remote_command_router app.tests.test_hub_validators app.tests.test_telegram_support app.tests.test_grid_name_match -v

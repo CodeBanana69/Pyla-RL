@@ -1153,9 +1153,9 @@ def run_app():
     from tools.launcher_bat import remove_legacy_launchers
 
     log_path = configure_terminal_output()
-    from utils import project_root
+    from utils import install_root
 
-    remove_legacy_launchers(Path(project_root()))
+    remove_legacy_launchers(Path(install_root()))
     runtime_log.log_info("startup", FREE_NOTICE)
     runtime_log.log_info("startup", f"Official source: {OFFICIAL_GITHUB}")
     runtime_log.log_info("startup", f"Pyla-RL v{pyla_version}")

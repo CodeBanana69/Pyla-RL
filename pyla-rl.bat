@@ -18,8 +18,8 @@ echo Pyla-RL launcher
 echo Official free download: https://github.com/CodeBanana69/Pyla-RL
 echo.
 
-if exist "cfg\pyla_python.txt" (
-    set /p PYLA_PY=<cfg\pyla_python.txt
+if exist "app\cfg\pyla_python.txt" (
+    set /p PYLA_PY=<app\cfg\pyla_python.txt
     "%PYLA_PY%" -c "import cv2, pandas" >nul 2>&1
     if not errorlevel 1 (
         set "PY=%PYLA_PY%"
@@ -29,10 +29,10 @@ if exist "cfg\pyla_python.txt" (
     echo.
 )
 
-if exist ".venv\Scripts\python.exe" (
-    ".venv\Scripts\python.exe" -c "import cv2, pandas" >nul 2>&1
+if exist "app\.venv\Scripts\python.exe" (
+    "app\.venv\Scripts\python.exe" -c "import cv2, pandas" >nul 2>&1
     if not errorlevel 1 (
-        set "PY=.venv\Scripts\python.exe"
+        set "PY=app\.venv\Scripts\python.exe"
         goto :run
     )
     echo Found .venv but required packages are missing there; trying other interpreters...
@@ -86,7 +86,7 @@ if errorlevel 1 (
         echo Run: %PY% app\setup.py --pyla-install
     )
     echo.
-    echo Diagnostic: %PY% tools\check_runtime.py
+    echo Diagnostic: %PY% app\tools\check_runtime.py
     echo.
     pause
     exit /b 1

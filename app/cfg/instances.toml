@@ -1,0 +1,5 @@
+[multi_instance]
+enabled = false
+default_instance = ""
+
+[instances]
