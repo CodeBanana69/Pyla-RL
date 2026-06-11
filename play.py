@@ -142,6 +142,22 @@ class Play:
         self.hypercharge_pixels_minimum = bot_config["hypercharge_pixels_minimum"]
         self.super_pixels_minimum = bot_config["super_pixels_minimum"]
         self.wall_detection_confidence = bot_config["wall_detection_confidence"]
+        self.wall_detection_retry_confidence = float(
+            bot_config.get("wall_detection_retry_confidence", max(0.2, self.wall_detection_confidence - 0.55))
+        )
+        self.wall_detection_retry_min_objects = int(bot_config.get("wall_detection_retry_min_objects", 3))
+        self.last_wall_primary_count = 0
+        self.wall_box_min_size = float(bot_config.get("wall_box_min_size", 20))
+        self.wall_box_merge_iou = float(bot_config.get("wall_box_merge_iou", 0.25))
+        self.wall_box_merge_center_distance = float(bot_config.get("wall_box_merge_center_distance", 35))
+        self.wall_history_min_hits = int(bot_config.get("wall_history_min_hits", 1))
+        self.wall_history = []
+        self.wall_history_length = int(bot_config.get("wall_history_length", 3))
+        self.map_object_vision_enabled = config_bool(bot_config.get("map_object_vision_enabled"), True)
+        self.map_object_wall_color_detection = config_bool(bot_config.get("map_object_wall_color_detection"), True)
+        self.map_object_water_detection = config_bool(bot_config.get("map_object_water_detection"), False)
+        self.map_object_min_area = float(bot_config.get("map_object_min_area", 900))
+        self.last_map_object_data = {}
         self.entity_detection_confidence = bot_config["entity_detection_confidence"]
         self.seconds_to_hold_attack_after_reaching_max = load_toml_as_dict("cfg/bot_config.toml")["seconds_to_hold_attack_after_reaching_max"]
         self.persistent_data = {"time_since_holding_attack": None}
@@ -160,8 +176,45 @@ class Play:
         self._combat_target = None
         self._last_attack_tap_at = 0.0
         self.match_intent_summary = ""
+        gamemode = str(bot_config.get("gamemode", "showdown")).strip().lower()
+        self.is_showdown = gamemode == "showdown"
+        self.wall_stuck_enabled = config_bool(bot_config.get("wall_stuck_enabled"), True)
+        self.wall_stuck_ignore_radius = float(bot_config.get("wall_stuck_ignore_radius", 150))
+        self.wall_stuck_sample_interval = float(bot_config.get("wall_stuck_sample_interval", 0.2))
+        self.wall_stuck_shift_threshold = float(bot_config.get("wall_stuck_shift_threshold", 3.0))
+        self.wall_stuck_timeout = float(bot_config.get("wall_stuck_timeout", 3.0))
+        self.wall_stuck_min_walls = int(bot_config.get("wall_stuck_min_walls", 3))
+        self.escape_retreat_duration = float(bot_config.get("escape_retreat_duration", 0.4))
+        self.escape_arc_duration = float(bot_config.get("escape_arc_duration", 1.2))
+        self.escape_arc_degrees = float(bot_config.get("escape_arc_degrees", 135.0))
+        self.wall_stuck_state = {
+            "last_sample_time": 0.0,
+            "last_wall_centers": None,
+            "stationary_since": None,
+        }
+        self.escape_state = {
+            "phase": None,
+            "started_at": 0.0,
+            "retreat_angle": 0.0,
+            "arc_side": 1,
+        }
+        self._next_arc_side = 1
+        fog_low = bot_config.get("fog_hsv_low", (50, 95, 215))
+        fog_high = bot_config.get("fog_hsv_high", (60, 125, 245))
+        self.fog_hsv_low = tuple(fog_low) if isinstance(fog_low, (list, tuple)) else (50, 95, 215)
+        self.fog_hsv_high = tuple(fog_high) if isinstance(fog_high, (list, tuple)) else (60, 125, 245)
+        self.fog_flee_distance = float(bot_config.get("fog_flee_distance", 130))
+        self.fog_min_blob_pixels = int(bot_config.get("fog_min_blob_pixels", 20))
+        self.fog_min_pixels_in_radius = int(bot_config.get("fog_min_pixels_in_radius", 20))
+        self.fog_check_every_n_frames = max(1, int(bot_config.get("fog_check_every_n_frames", 3)))
+        self._fog_check_counter = 0
+        self._fog_threat_cached = None
+        self._fog_direction_escape_cached = None
+        self._fog_mask_cache_frame_id = None
+        self._fog_mask_cache_value = None
         self.refresh_enemy_spacing_config()
         general_config = load_toml_as_dict("cfg/general_config.toml")
+        self.wall_stuck_debug = config_bool(general_config.get("wall_stuck_debug"), False)
         global visual_debug
         visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
         self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
@@ -182,6 +235,39 @@ class Play:
     @staticmethod
     def get_entity_pos(entity):
         return (entity[0] + entity[2]) / 2, (entity[1] + entity[3]) / 2
+
+    @staticmethod
+    def get_player_foot_circle(player_data):
+        x1, y1, x2, y2 = player_data[:4]
+        width = abs(float(x2) - float(x1))
+        height = abs(float(y2) - float(y1))
+        radius = max(width / 2.0, 4.0)
+        foot_x = (float(x1) + float(x2)) / 2.0
+        foot_y = float(y2) - radius
+        return foot_x, foot_y, radius
+
+    @staticmethod
+    def get_player_pos(player_data):
+        foot_x, foot_y, _ = Play.get_player_foot_circle(player_data)
+        return foot_x, foot_y
+
+    @staticmethod
+    def angle_from_direction(dx: float, dy: float) -> float:
+        return math.degrees(math.atan2(dy, dx)) % 360
+
+    @staticmethod
+    def angle_opposite(angle_degrees: float) -> float:
+        return (angle_degrees + 180) % 360
+
+    @staticmethod
+    def angle_to_vector(angle_degrees):
+        angle_rad = math.radians(angle_degrees)
+        return math.cos(angle_rad), math.sin(angle_rad)
+
+    @staticmethod
+    def vector_from_angle(angle_degrees, radius=JOYSTICK_RADIUS):
+        ux, uy = Play.angle_to_vector(angle_degrees)
+        return ux * radius, uy * radius
 
     @staticmethod
     def get_distance(enemy_coords, player_coords):
@@ -258,7 +344,7 @@ class Play:
         if not self.is_there_enemy(enemies):
             return
 
-        player_pos = self.get_entity_pos(data["player"][0])
+        player_pos = self.get_player_pos(data["player"][0])
         walls = data.get("wall") or []
         enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
         if not enemy_result:
@@ -400,6 +486,298 @@ class Play:
 
         angle = math.atan2(y, x)
         return round(angle / (math.pi / 8)) % 16
+
+    def _wslog(self, *args):
+        if not self.wall_stuck_debug:
+            return
+        try:
+            import runtime_log
+            runtime_log.log_debug("movement", " ".join(str(arg) for arg in args))
+        except Exception:
+            print("[WS]", *args)
+
+    def _wall_centers_filtered(self, walls, player_pos):
+        if not walls:
+            return np.empty((0, 2), dtype=np.float32)
+        centers = []
+        px, py = player_pos
+        r2 = self.wall_stuck_ignore_radius * self.wall_stuck_ignore_radius
+        for box in walls:
+            x1, y1, x2, y2 = box[0], box[1], box[2], box[3]
+            cx = (x1 + x2) * 0.5
+            cy = (y1 + y2) * 0.5
+            dx, dy = cx - px, cy - py
+            if dx * dx + dy * dy >= r2:
+                centers.append((cx, cy))
+        return np.asarray(centers, dtype=np.float32) if centers else np.empty((0, 2), dtype=np.float32)
+
+    def _avg_wall_shift(self, prev_centers, curr_centers):
+        if prev_centers is None or len(prev_centers) < self.wall_stuck_min_walls:
+            return None
+        if len(curr_centers) < self.wall_stuck_min_walls:
+            return None
+        diffs = prev_centers[:, None, :] - curr_centers[None, :, :]
+        d2 = (diffs * diffs).sum(axis=2)
+        nearest = np.sqrt(d2.min(axis=1))
+        return float(nearest.mean())
+
+    def detect_wall_stuck(self, walls, player_pos, is_trying_to_move, current_time):
+        if not self.wall_stuck_enabled or player_pos is None:
+            return False
+        state = self.wall_stuck_state
+        if current_time - state["last_sample_time"] < self.wall_stuck_sample_interval:
+            if state["stationary_since"] is None or not is_trying_to_move:
+                return False
+            return (current_time - state["stationary_since"]) >= self.wall_stuck_timeout
+
+        curr_centers = self._wall_centers_filtered(walls, player_pos)
+        shift = self._avg_wall_shift(state["last_wall_centers"], curr_centers)
+        state["last_wall_centers"] = curr_centers
+        state["last_sample_time"] = current_time
+
+        if shift is None:
+            state["stationary_since"] = None
+            return False
+
+        if shift < self.wall_stuck_shift_threshold:
+            if state["stationary_since"] is None:
+                state["stationary_since"] = current_time
+            self._wslog(
+                f"walls shift={shift:.2f}px, stationary for "
+                f"{current_time - state['stationary_since']:.2f}s "
+                f"(trying_to_move={is_trying_to_move})"
+            )
+        elif state["stationary_since"] is not None:
+            self._wslog(f"walls moved again: shift={shift:.2f}px, resetting timer")
+            state["stationary_since"] = None
+
+        if state["stationary_since"] is None or not is_trying_to_move:
+            return False
+        return (current_time - state["stationary_since"]) >= self.wall_stuck_timeout
+
+    def _reset_wall_stuck_state(self, current_time):
+        self.wall_stuck_state["stationary_since"] = None
+        self.wall_stuck_state["last_wall_centers"] = None
+        self.wall_stuck_state["last_sample_time"] = current_time
+
+    def start_semicircle_escape(self, angle, current_time):
+        side = self._next_arc_side
+        self._next_arc_side = -side
+        self.escape_state["phase"] = "retreat"
+        self.escape_state["started_at"] = current_time
+        self.escape_state["retreat_angle"] = self.angle_opposite(angle)
+        self.escape_state["arc_side"] = side
+        self._wslog(
+            f"semicircle escape START: angle={angle:.1f}° "
+            f"retreat={self.escape_state['retreat_angle']:.1f}° "
+            f"side={'CCW' if side > 0 else 'CW'}"
+        )
+
+    def semicircle_escape_step(self, current_time):
+        state = self.escape_state
+        phase = state["phase"]
+        if phase is None:
+            return None
+        elapsed = current_time - state["started_at"]
+
+        if phase == "retreat":
+            if elapsed < self.escape_retreat_duration:
+                return state["retreat_angle"]
+            state["phase"] = "arc"
+            state["started_at"] = current_time
+            self._wslog("semicircle escape: retreat done, starting arc")
+            elapsed = 0.0
+            phase = "arc"
+
+        if phase == "arc":
+            if elapsed >= self.escape_arc_duration:
+                state["phase"] = None
+                self._wslog("semicircle escape: finished")
+                return None
+            t = elapsed / self.escape_arc_duration
+            sweep = self.escape_arc_degrees * t * state["arc_side"]
+            return (state["retreat_angle"] + sweep) % 360
+
+        return None
+
+    def _build_trusted_fog_mask(self, frame, roi_center, roi_radius):
+        if frame is None or not hasattr(frame, "shape"):
+            return None
+
+        roi_radius = int(max(1, roi_radius))
+        cache_key = (id(frame), int(roi_center[0]), int(roi_center[1]), int(roi_radius))
+        if getattr(self, "_fog_mask_cache_frame_id", None) == cache_key:
+            return getattr(self, "_fog_mask_cache_value", None)
+
+        h, w = frame.shape[:2]
+        cx, cy = int(roi_center[0]), int(roi_center[1])
+        x0, y0 = max(0, cx - roi_radius), max(0, cy - roi_radius)
+        x1, y1 = min(w, cx + roi_radius + 1), min(h, cy + roi_radius + 1)
+        if x0 >= x1 or y0 >= y1:
+            self._fog_mask_cache_frame_id = cache_key
+            self._fog_mask_cache_value = None
+            return None
+        region = frame[y0:y1, x0:x1]
+        origin = (x0, y0)
+
+        hsv = cv2.cvtColor(region, cv2.COLOR_RGB2HSV)
+        low = np.array(self.fog_hsv_low, dtype=np.uint8)
+        high = np.array(self.fog_hsv_high, dtype=np.uint8)
+        mask = cv2.inRange(hsv, low, high)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        result = None
+        if num_labels > 1:
+            trusted = np.zeros_like(mask)
+            any_kept = False
+            for label in range(1, num_labels):
+                if stats[label, cv2.CC_STAT_AREA] >= self.fog_min_blob_pixels:
+                    trusted[labels == label] = 255
+                    any_kept = True
+            if any_kept and cv2.countNonZero(trusted) > 0:
+                result = (trusted, origin)
+
+        self._fog_mask_cache_frame_id = cache_key
+        self._fog_mask_cache_value = result
+        return result
+
+    def detect_fog_threat(self, frame, player_position):
+        r = self.fog_flee_distance
+        built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
+        if built is None:
+            return None
+        mask, (ox, oy) = built
+
+        px, py = int(player_position[0]), int(player_position[1])
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return None
+
+        dx_all = (xs + ox) - px
+        dy_all = (ys + oy) - py
+        dist_sq = dx_all * dx_all + dy_all * dy_all
+        inside = dist_sq <= r * r
+        count = int(inside.sum())
+        if count < self.fog_min_pixels_in_radius:
+            return None
+
+        cx = float(dx_all[inside].mean())
+        cy = float(dy_all[inside].mean())
+        if math.hypot(cx, cy) < 1:
+            return None
+        toward_fog = self.angle_from_direction(cx, cy)
+        return self.angle_opposite(toward_fog)
+
+    def detect_fog_direction_escape(self, frame, player_position):
+        r = int(max(self.fog_flee_distance, 120))
+        built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
+        if built is None:
+            return None
+        mask, (ox, oy) = built
+
+        px, py = int(player_position[0]), int(player_position[1])
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return None
+
+        dx = (xs + ox) - px
+        dy = (ys + oy) - py
+        band = max(35, int(r * 0.45))
+        min_pixels = max(20, int(self.fog_min_pixels_in_radius * 0.55))
+
+        direction_counts = {
+            "up": int(((dy < 0) & (dy >= -r) & (np.abs(dx) <= band)).sum()),
+            "down": int(((dy > 0) & (dy <= r) & (np.abs(dx) <= band)).sum()),
+            "left": int(((dx < 0) & (dx >= -r) & (np.abs(dy) <= band)).sum()),
+            "right": int(((dx > 0) & (dx <= r) & (np.abs(dy) <= band)).sum()),
+        }
+
+        escape_x = 0.0
+        escape_y = 0.0
+        if direction_counts["up"] >= min_pixels and direction_counts["up"] > direction_counts["down"] + min_pixels:
+            escape_y += 1.0
+        if direction_counts["down"] >= min_pixels and direction_counts["down"] > direction_counts["up"] + min_pixels:
+            escape_y -= 1.0
+        if direction_counts["left"] >= min_pixels and direction_counts["left"] > direction_counts["right"] + min_pixels:
+            escape_x += 1.0
+        if direction_counts["right"] >= min_pixels and direction_counts["right"] > direction_counts["left"] + min_pixels:
+            escape_x -= 1.0
+
+        if math.hypot(escape_x, escape_y) < 0.01:
+            return None
+
+        return self.angle_from_direction(escape_x, escape_y)
+
+    def _refresh_fog_cache(self, frame, player_position):
+        if frame is None or player_position is None:
+            self._fog_threat_cached = None
+            self._fog_direction_escape_cached = None
+            return
+        self._fog_threat_cached = self.detect_fog_threat(frame, player_position)
+        self._fog_direction_escape_cached = self.detect_fog_direction_escape(frame, player_position)
+
+    def angle_points_into_fog(self, frame, player_position, angle_degrees, lookahead=None):
+        if frame is None or player_position is None or angle_degrees is None:
+            return False
+        fog_flee_distance = float(getattr(self, "fog_flee_distance", 130))
+        r = int(max(140, lookahead or fog_flee_distance * 1.7))
+        built = self._build_trusted_fog_mask(frame, roi_center=player_position, roi_radius=r)
+        if built is None:
+            return False
+        mask, (ox, oy) = built
+
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return False
+
+        px, py = player_position
+        dx = (xs + ox) - px
+        dy = (ys + oy) - py
+        ux, uy = self.angle_to_vector(float(angle_degrees))
+        forward = dx * ux + dy * uy
+        lateral = np.abs(dx * uy - dy * ux)
+        corridor_width = max(42, int(r * 0.28))
+        min_pixels = max(18, int(self.fog_min_pixels_in_radius * 0.5))
+        in_path = (forward > 0) & (forward <= r) & (lateral <= corridor_width)
+        count = int(in_path.sum())
+        return count >= min_pixels
+
+    def _poison_gas_in_direction(self, direction, player_data):
+        if self.current_frame is None or player_data is None:
+            return False
+        player_pos = self.get_player_pos(player_data)
+        r = int(max(80, min(self.fog_flee_distance, 150)))
+        built = self._build_trusted_fog_mask(self.current_frame, roi_center=player_pos, roi_radius=r)
+        if built is None:
+            return False
+        mask, (ox, oy) = built
+        ys, xs = np.nonzero(mask)
+        if xs.size == 0:
+            return False
+
+        px, py = player_pos
+        dx = (xs + ox) - px
+        dy = (ys + oy) - py
+        band = max(30, int(r * 0.45))
+        min_pixels = max(12, int(self.fog_min_pixels_in_radius * 0.45))
+        direction = str(direction).lower()
+        _, _, foot_radius = self.get_player_foot_circle(player_data)
+        dist_sq = dx * dx + dy * dy
+        player_area = dist_sq <= (foot_radius * foot_radius)
+        if int(player_area.sum()) >= min_pixels:
+            return True
+        checks = {
+            "up": (dy < 0) & (dy >= -r) & (np.abs(dx) <= band),
+            "down": (dy > 0) & (dy <= r) & (np.abs(dx) <= band),
+            "left": (dx < 0) & (dx >= -r) & (np.abs(dy) <= band),
+            "right": (dx > 0) & (dx <= r) & (np.abs(dy) <= band),
+        }
+        if direction not in checks:
+            return False
+        return int(checks[direction].sum()) >= min_pixels
 
     def unstuck_movement_if_needed(self, movement, current_time=None):
         if current_time is None:
@@ -611,7 +989,14 @@ class Play:
                 closest_teammate = teammate_pos
         return closest_teammate, closest_distance
 
-    def is_there_poison_gas(self, player_data, threshold=10000):
+    def is_there_poison_gas(self, arg1, arg2=10000):
+        if isinstance(arg1, str):
+            return self._poison_gas_in_direction(arg1, arg2)
+        player_data = arg1
+        threshold = arg2 if isinstance(arg2, (int, float)) else 10000
+        frame = getattr(self, "current_frame", None) or getattr(self, "frame", None)
+        if frame is None:
+            return {"up": 0, "down": 0, "left": 0, "right": 0}
         actual_player_box = self.get_actual_player_box(player_data) or player_data
         px1, py1, px2, py2 = actual_player_box
         player_width = max(px2 - px1, 1)
@@ -629,11 +1014,11 @@ class Play:
                 "right": 0,
             }
 
-        roi = self.frame[min_y:max_y, min_x:max_x]
+        roi = frame[min_y:max_y, min_x:max_x]
         hsv_roi = cv2.cvtColor(roi, cv2.COLOR_RGB2HSV)
 
         mask = cv2.inRange(hsv_roi, POISON_LOW_HSV, POISON_HIGH_HSV)
-        x, y = self.get_entity_pos(actual_player_box)
+        x, y = self.get_player_pos(player_data)
         roi_w = int(max_x - min_x)
         roi_h = int(max_y - min_y)
         local_px = int(clamp(x - min_x, 0, roi_w))
@@ -689,22 +1074,19 @@ class Play:
 
         dx = movement[0] / magnitude * distance
         dy = movement[1] / magnitude * distance
-        hit_circle_center, hit_circle_radius = self.get_player_hit_circle(player_box)
-        if hit_circle_center is None:
-            return False
-
-        new_pos = (hit_circle_center[0] + dx, hit_circle_center[1] + dy)
+        foot_x, foot_y, foot_radius = self.get_player_foot_circle(player_box)
+        foot_center = (foot_x, foot_y)
         padding = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_padding", 0) or 0)
-        radius = hit_circle_radius + padding
+        radius = foot_radius + padding
         probe_tiles = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_probe_tiles", 1.0) or 1.0)
         probes = (distance * 0.5, distance, distance * max(1.0, probe_tiles))
         for probe_distance in probes:
             scale = probe_distance / max(distance, 1e-6)
             probe_pos = (
-                hit_circle_center[0] + dx * scale,
-                hit_circle_center[1] + dy * scale,
+                foot_center[0] + dx * scale,
+                foot_center[1] + dy * scale,
             )
-            if self.walls_block_swept_circle(hit_circle_center, probe_pos, radius, walls):
+            if self.walls_block_swept_circle(foot_center, probe_pos, radius, walls):
                 return True
         return False
 
@@ -722,6 +1104,39 @@ class Play:
                 if not self.is_path_blocked(player_box, candidate, walls):
                     return candidate
         return desired_vector
+
+    def is_path_blocked_angle(self, player_arg, angle_degrees, walls, distance=None):
+        if (
+            isinstance(player_arg, (list, tuple))
+            and len(player_arg) >= 4
+            and not isinstance(player_arg[0], (list, tuple, np.ndarray))
+        ):
+            return self.is_path_blocked(
+                player_arg,
+                self.vector_from_angle(angle_degrees),
+                walls,
+                distance=distance,
+            )
+        if distance is None:
+            distance = self.TILE_SIZE * self.window_controller.scale_factor
+        foot_x, foot_y = float(player_arg[0]), float(player_arg[1])
+        foot_radius = 4.0
+        foot_center = (foot_x, foot_y)
+        padding = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_padding", 0) or 0)
+        radius = foot_radius + padding
+        angle_rad = math.radians(angle_degrees)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+        probe_tiles = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_probe_tiles", 1.0) or 1.0)
+        probes = (distance * 0.5, distance, distance * max(1.0, probe_tiles))
+        for probe_distance in probes:
+            probe_pos = (
+                foot_center[0] + cos_a * probe_distance,
+                foot_center[1] + sin_a * probe_distance,
+            )
+            if self.walls_block_swept_circle(foot_center, probe_pos, radius, walls):
+                return True
+        return False
 
     @staticmethod
     def validate_game_data(data):
@@ -849,7 +1264,7 @@ class Play:
             return movement
 
         player_data = data["player"][0]
-        player_pos = self.get_entity_pos(player_data)
+        player_pos = self.get_player_pos(player_data)
         walls = data.get("wall") or []
         enemies = data.get("enemy") or []
         if not self.is_there_enemy(enemies):
@@ -1104,8 +1519,6 @@ class Play:
             return enemy_distance <= attack_range * 0.75
         return enemy_distance <= super_range
 
-    get_player_pos = get_entity_pos
-
     def _update_match_intent(self, brawler, data) -> None:
         try:
             import runtime_log
@@ -1116,7 +1529,7 @@ class Play:
             self.match_intent_summary = ""
             return
 
-        player_pos = self.get_entity_pos(data["player"][0])
+        player_pos = self.get_player_pos(data["player"][0])
         enemies = data.get("enemy") or []
         teammates = data.get("teammate") or []
         walls = data.get("wall") or []
@@ -1202,6 +1615,7 @@ class Play:
                 'get_effective_enemy_range': self.get_effective_enemy_range,
                 'get_enemy_spacing_movement': self.get_enemy_spacing_movement,
                 'get_player_pos': self.get_player_pos,
+                'get_player_foot_circle': self.get_player_foot_circle,
                 'should_use_super_on_enemy': self.should_use_super_on_enemy,
                 'try_use_super_on_enemy': self.try_use_super_on_enemy,
                 'should_use_gadget_on_enemy': self.should_use_gadget_on_enemy,
@@ -1222,6 +1636,7 @@ class Play:
                 'find_closest_teammate': self.find_closest_teammate,
                 'is_there_poison_gas': self.is_there_poison_gas,
                 'is_path_blocked': self.is_path_blocked,
+                'is_path_blocked_angle': self.is_path_blocked_angle,
                 'is_enemy_hittable': self.is_enemy_hittable,
                 'time': time,
                 'random': random,
@@ -1233,21 +1648,57 @@ class Play:
         movement = self.get_movement()
         movement = self.apply_los_evasion_movement(brawler, data, movement)
         self._update_match_intent(brawler, data)
+        self.current_frame = self.frame
+        escape_override = False
+        escape_angle = self.semicircle_escape_step(current_time)
+        if escape_angle is not None:
+            movement = self.vector_from_angle(escape_angle)
+            escape_override = True
+        elif self.movement_to_vector(movement) is not None:
+            if self.is_showdown and data.get("player") and self.frame is not None:
+                player_pos = self.get_player_pos(data["player"][0])
+                self._fog_check_counter += 1
+                if self._fog_check_counter >= self.fog_check_every_n_frames:
+                    self._refresh_fog_cache(self.frame, player_pos)
+                    self._fog_check_counter = 0
+                flee_angle = self._fog_direction_escape_cached
+                if flee_angle is None:
+                    flee_angle = self._fog_threat_cached
+                if flee_angle is not None:
+                    movement = self.vector_from_angle(flee_angle)
+
+            if self.escape_state.get("phase") is None and data.get("player"):
+                player_pos = self.get_player_pos(data["player"][0])
+                walls = data.get("wall") or []
+                if self.detect_wall_stuck(walls, player_pos, True, current_time):
+                    mv = self.movement_to_vector(movement)
+                    angle = self.angle_from_direction(mv[0], mv[1]) if mv else 0.0
+                    self.start_semicircle_escape(angle, current_time)
+                    self._reset_wall_stuck_state(current_time)
+                    esc = self.semicircle_escape_step(current_time)
+                    if esc is not None:
+                        movement = self.vector_from_angle(esc)
+                        escape_override = True
+
         if self.movement_to_vector(movement) is None:
             self.window_controller.release_movement()
             self.last_movement = ''
             return None
         movement = self.clamp_movement(movement)
         current_time = time.time()
-        if movement != self.last_movement:
-            if current_time - self.last_movement_change_time >= self.minimum_movement_delay:
-                self.last_movement = movement
-                self.last_movement_change_time = current_time
+        if not escape_override:
+            if movement != self.last_movement:
+                if current_time - self.last_movement_change_time >= self.minimum_movement_delay:
+                    self.last_movement = movement
+                    self.last_movement_change_time = current_time
+                else:
+                    movement = self.last_movement
             else:
-                movement = self.last_movement
+                self.last_movement_change_time = current_time
+            movement = self.unstuck_movement_if_needed(movement, current_time)
         else:
+            self.last_movement = movement
             self.last_movement_change_time = current_time
-        movement = self.unstuck_movement_if_needed(movement, current_time)
         return movement
 
     def check_if_hypercharge_ready(self, frame):
@@ -1356,7 +1807,7 @@ class Play:
         if isinstance(player_data, (list, tuple)) and player_data:
             first = player_data[0]
             if isinstance(first, (list, tuple, np.ndarray)) and len(first) >= 4:
-                return Play.get_entity_pos(first)
+                return Play.get_player_pos(first)
         return None
 
     @staticmethod
@@ -1374,6 +1825,25 @@ class Play:
 
     offset_tile_boxes = offset_tile_data
 
+    def _detect_tile_data(self, detector, frame, conf_tresh):
+        tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
+        primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
+        previous_primary_count = self.last_wall_primary_count
+        self.last_wall_primary_count = primary_count
+        if (
+            primary_count < self.wall_detection_retry_min_objects
+            and previous_primary_count < self.wall_detection_retry_min_objects
+            and self.wall_detection_retry_confidence < conf_tresh
+        ):
+            retry_data = detector.detect_objects(
+                frame,
+                conf_tresh=self.wall_detection_retry_confidence,
+            )
+            retry_count = sum(len(boxes or []) for boxes in (retry_data or {}).values())
+            if retry_count > primary_count:
+                tile_data = retry_data
+        return tile_data
+
     def get_tile_data(self, frame, player_data=None):
         player_pos = self._resolve_player_pos(player_data)
         if (
@@ -1384,9 +1854,10 @@ class Play:
             crop, crop_x, crop_y = self.crop_close_tile_region(frame, player_pos)
             if crop is not None:
                 crop_box = [crop_x, crop_y, crop_x + CLOSE_TILE_CROP_SIZE, crop_y + CLOSE_TILE_CROP_SIZE]
-                tile_data = self.Detect_close_tile_detector.detect_objects(
+                tile_data = self._detect_tile_data(
+                    self.Detect_close_tile_detector,
                     crop,
-                    conf_tresh=self.wall_detection_confidence,
+                    self.wall_detection_confidence,
                 )
                 self._set_tile_detection_debug("close", crop=crop_box)
                 self._log_tile_detection_event(
@@ -1411,9 +1882,10 @@ class Play:
         else:
             self._set_tile_detection_debug("full")
 
-        tile_data = self.Detect_tile_detector.detect_objects(
+        tile_data = self._detect_tile_data(
+            self.Detect_tile_detector,
             frame,
-            conf_tresh=self.wall_detection_confidence,
+            self.wall_detection_confidence,
         )
         if self.close_tile_detector_enabled:
             self._log_tile_detection_event(
@@ -1422,15 +1894,324 @@ class Play:
             )
         return tile_data
 
-    def process_tile_data(self, tile_data):
+    @staticmethod
+    def normalize_box(box):
+        x1, y1, x2, y2 = box[:4]
+        return [int(min(x1, x2)), int(min(y1, y2)), int(max(x1, x2)), int(max(y1, y2))]
+
+    @staticmethod
+    def box_iou(a, b):
+        ax1, ay1, ax2, ay2 = a
+        bx1, by1, bx2, by2 = b
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+        iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+        intersection = iw * ih
+        if intersection <= 0:
+            return 0.0
+        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+        union = area_a + area_b - intersection
+        return intersection / union if union > 0 else 0.0
+
+    @staticmethod
+    def box_center_distance(a, b):
+        acx, acy = (a[0] + a[2]) * 0.5, (a[1] + a[3]) * 0.5
+        bcx, bcy = (b[0] + b[2]) * 0.5, (b[1] + b[3]) * 0.5
+        return math.hypot(acx - bcx, acy - bcy)
+
+    def merge_wall_boxes(self, boxes, min_hits=1):
+        clusters = []
+        for raw_box in boxes:
+            box = self.normalize_box(raw_box)
+            width = box[2] - box[0]
+            height = box[3] - box[1]
+            if width < self.wall_box_min_size or height < self.wall_box_min_size:
+                continue
+
+            matched = None
+            for cluster in clusters:
+                if (
+                    self.box_iou(cluster["box"], box) >= self.wall_box_merge_iou
+                    or self.box_center_distance(cluster["box"], box) <= self.wall_box_merge_center_distance
+                ):
+                    matched = cluster
+                    break
+
+            if matched is None:
+                clusters.append({"box": box, "hits": 1})
+                continue
+
+            old = matched["box"]
+            hits = matched["hits"]
+            matched["box"] = [
+                int((old[0] * hits + box[0]) / (hits + 1)),
+                int((old[1] * hits + box[1]) / (hits + 1)),
+                int((old[2] * hits + box[2]) / (hits + 1)),
+                int((old[3] * hits + box[3]) / (hits + 1)),
+            ]
+            matched["hits"] = hits + 1
+
+        return [cluster["box"] for cluster in clusters if cluster["hits"] >= min_hits]
+
+    def process_tile_data(self, tile_data, frame=None):
+        map_objects = self.build_map_object_vision(tile_data, frame)
         walls = []
-        bushes = []
-        for class_name, boxes in tile_data.items():
-            if 'bush' not in class_name:
+        for class_name, boxes in map_objects.items():
+            if class_name in self.blocking_map_object_classes():
                 walls.extend(boxes)
-            else:
-                bushes.extend(boxes)
-        return walls, bushes
+        walls = self.merge_wall_boxes(walls)
+
+        self.wall_history.append(walls)
+        if len(self.wall_history) > self.wall_history_length:
+            self.wall_history.pop(0)
+        combined_walls = self.combine_walls_from_history()
+
+        return combined_walls, map_objects
+
+    @staticmethod
+    def blocking_map_object_classes():
+        return {
+            "wall",
+            "crate",
+            "barrel",
+            "fence",
+            "indestructible",
+            "themed",
+            "bouncer",
+            "gravity_push",
+            "gravity_pull",
+            "damageable",
+            "invisible_indestructible",
+        }
+
+    @staticmethod
+    def line_of_sight_map_object_classes():
+        return {
+            "wall",
+            "crate",
+            "barrel",
+            "fence",
+            "indestructible",
+            "themed",
+            "bouncer",
+            "gravity_push",
+            "gravity_pull",
+            "damageable",
+            "invisible_indestructible",
+        }
+
+    @staticmethod
+    def nonblocking_map_object_classes():
+        return {"bush", "close_bush", "fog"}
+
+    def map_object_boxes_for_classes(self, map_objects, class_names):
+        boxes = []
+        allowed = set(class_names)
+        for class_name, class_boxes in (map_objects or {}).items():
+            if class_name in allowed:
+                boxes.extend(class_boxes or [])
+        return self.merge_wall_boxes(boxes)
+
+    def build_map_object_vision(self, tile_data, frame=None):
+        objects = {}
+        for class_name, boxes in (tile_data or {}).items():
+            normalized_name = self.normalize_map_object_class(class_name)
+            normalized_boxes = [self.normalize_box(box) for box in boxes or []]
+            if normalized_boxes:
+                objects.setdefault(normalized_name, []).extend(normalized_boxes)
+
+        if self.map_object_vision_enabled and self.map_object_water_detection:
+            water_boxes = self.detect_water_tiles(frame)
+            if water_boxes:
+                objects.setdefault("water", []).extend(water_boxes)
+
+        wall_count = len(objects.get("wall") or [])
+        skip_color_fallback = self.last_wall_primary_count >= self.wall_detection_retry_min_objects
+        if (
+            self.map_object_vision_enabled
+            and self.map_object_wall_color_detection
+            and wall_count < self.wall_detection_retry_min_objects
+            and not skip_color_fallback
+        ):
+            color_wall_boxes = self.detect_wall_tiles_by_color(frame)
+            if color_wall_boxes:
+                objects.setdefault("wall", []).extend(color_wall_boxes)
+
+        return {
+            key: self.merge_wall_boxes(value)
+            for key, value in objects.items()
+            if value
+        }
+
+    @staticmethod
+    def normalize_map_object_class(class_name):
+        name = str(class_name or "").strip().lower().replace(" ", "_").replace("-", "_")
+        aliases = {
+            "closebush": "close_bush",
+            "forest": "bush",
+            "respawningforest": "bush",
+            "water_tile": "water",
+            "invisiblewater": "invisible_water",
+            "wall1": "wall",
+            "wall2": "wall",
+            "wallywall": "wall",
+            "wallyfillerwall": "wall",
+            "indestructiblefence": "fence",
+            "ropefence": "fence",
+            "damageable1": "damageable",
+            "damageable2": "damageable",
+            "damageable3": "damageable",
+            "damageable4": "damageable",
+            "gravitypush": "gravity_push",
+            "gravitypull": "gravity_pull",
+        }
+        return aliases.get(name, name)
+
+    def detect_water_tiles(self, frame):
+        if frame is None:
+            return []
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        water = cv2.inRange(
+            hsv,
+            np.array((98, 45, 80), dtype=np.uint8),
+            np.array((116, 210, 255), dtype=np.uint8),
+        )
+        water = cv2.morphologyEx(
+            water,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+        )
+        water = cv2.morphologyEx(
+            water,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (13, 13)),
+        )
+        contours, _ = cv2.findContours(water, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = frame.shape[:2]
+        scale = max(0.4, min(1.2, w / brawl_stars_width))
+        min_area = max(float(self.map_object_min_area), 700 * scale * scale)
+        max_area = max(min_area + 1, 70000 * scale * scale)
+        boxes = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area or area > max_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            if bw < 24 * scale or bh < 24 * scale:
+                continue
+            if y > h * 0.84 or x < w * 0.04 or x > w * 0.96:
+                continue
+            roi = hsv[y:y + bh, x:x + bw]
+            if roi.size == 0:
+                continue
+            sat_mean = float(roi[:, :, 1].mean())
+            val_mean = float(roi[:, :, 2].mean())
+            if sat_mean < 80 or val_mean < 85:
+                continue
+            boxes.append([x, y, x + bw, y + bh])
+
+        return self.merge_wall_boxes(boxes)
+
+    def detect_wall_tiles_by_color(self, frame):
+        if frame is None:
+            return []
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+        wall_mask = cv2.inRange(
+            hsv,
+            np.array((110, 35, 90), dtype=np.uint8),
+            np.array((135, 165, 215), dtype=np.uint8),
+        )
+        wall_mask = cv2.morphologyEx(
+            wall_mask,
+            cv2.MORPH_OPEN,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+        )
+        wall_mask = cv2.morphologyEx(
+            wall_mask,
+            cv2.MORPH_CLOSE,
+            cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
+        )
+        contours, _ = cv2.findContours(wall_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        h, w = frame.shape[:2]
+        scale = max(0.4, min(1.2, w / brawl_stars_width))
+        min_area = max(260, int(480 * scale * scale))
+        tile = max(24, int(self.TILE_SIZE * scale * 0.85))
+        boxes = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            if bw < 16 * scale or bh < 16 * scale:
+                continue
+            if y < h * 0.08 or y > h * 0.86 or x < w * 0.02 or x > w * 0.98:
+                continue
+            if bw > w * 0.38 or bh > h * 0.36:
+                continue
+
+            roi_mask = wall_mask[y:y + bh, x:x + bw]
+            roi_hsv = hsv[y:y + bh, x:x + bw]
+            if roi_mask.size == 0:
+                continue
+            masked = roi_hsv[roi_mask > 0]
+            if masked.size == 0 or float(masked[:, 1].mean()) > 150:
+                continue
+            masked_rgb = frame[y:y + bh, x:x + bw][roi_mask > 0]
+            if masked_rgb.size == 0:
+                continue
+            r_mean = float(masked_rgb[:, 0].mean())
+            g_mean = float(masked_rgb[:, 1].mean())
+            b_mean = float(masked_rgb[:, 2].mean())
+            if b_mean < g_mean + 12 or b_mean < r_mean + 10:
+                continue
+
+            step = max(14, int(tile * 0.52))
+            min_cell = max(12, int(tile * 0.42))
+            for cy in range(y, y + bh, step):
+                for cx in range(x, x + bw, step):
+                    x2 = min(cx + tile, x + bw)
+                    y2 = min(cy + tile, y + bh)
+                    if x2 - cx < min_cell or y2 - cy < min_cell:
+                        continue
+                    cell = wall_mask[cy:y2, cx:x2]
+                    if cell.size == 0:
+                        continue
+                    density = cv2.countNonZero(cell) / float(cell.size)
+                    if density < 0.42:
+                        continue
+
+                    ys, xs = np.nonzero(cell)
+                    if xs.size == 0:
+                        continue
+                    cell_rgb = frame[cy:y2, cx:x2][cell > 0]
+                    if cell_rgb.size == 0:
+                        continue
+                    r_cell = float(cell_rgb[:, 0].mean())
+                    g_cell = float(cell_rgb[:, 1].mean())
+                    b_cell = float(cell_rgb[:, 2].mean())
+                    if b_cell < g_cell + 12 or b_cell < r_cell + 10:
+                        continue
+                    bx1 = cx + int(xs.min())
+                    by1 = cy + int(ys.min())
+                    bx2 = cx + int(xs.max()) + 1
+                    by2 = cy + int(ys.max()) + 1
+                    if bx2 - bx1 >= min_cell and by2 - by1 >= min_cell:
+                        boxes.append([bx1, by1, bx2, by2])
+
+        return self.merge_wall_boxes(boxes)
+
+    def combine_walls_from_history(self):
+        if not self.wall_history:
+            return []
+        current_walls = self.wall_history[-1]
+        historical_walls = [wall for walls in self.wall_history for wall in walls]
+        stable_history = self.merge_wall_boxes(historical_walls, min_hits=max(1, self.wall_history_min_hits))
+        return self.merge_wall_boxes(current_walls + stable_history)
 
     def get_movement(self):
         movement, updated_globals = interpret_pyla_code(self.pyla_code, self.context)
@@ -1515,6 +2296,17 @@ class Play:
             if sleep_for > 0:
                 time.sleep(min(sleep_for, frame_delay))
 
+    def _draw_player_foot_circle_debug(self, img, box, sp, s):
+        foot_x, foot_y, foot_r = self.get_player_foot_circle(box)
+        center = sp((foot_x, foot_y))
+        radius = max(3, s(int(round(foot_r))))
+        green = (0, 255, 0)
+        overlay = img.copy()
+        cv2.circle(overlay, center, radius, green, -1, cv2.LINE_AA)
+        cv2.addWeighted(overlay, 0.24, img, 0.76, 0, img)
+        cv2.circle(img, center, radius, green, max(2, s(2)), cv2.LINE_AA)
+        cv2.circle(img, center, max(2, s(2)), (255, 255, 255), -1, cv2.LINE_AA)
+
     def show_visual_debug(self, frame, data, brawler=None, respect_throttle=True):
         now = time.time()
         if respect_throttle and now < self._visual_debug_next_frame_at:
@@ -1580,7 +2372,7 @@ class Play:
 
         players = data.get("player") or []
         if players:
-            px, py = self.get_entity_pos(players[0])
+            px, py = self.get_player_pos(players[0])
             center = sp((px, py))
             spacing_range = s(int(data.get("effective_enemy_range") or data.get("attack_range") or 0))
             attack_range = s(int(data.get("attack_range") or 0))
@@ -1594,7 +2386,7 @@ class Play:
 
         movement = data.get("movement")
         if movement and players:
-            px, py = self.get_entity_pos(players[0])
+            px, py = self.get_player_pos(players[0])
             mx, my = float(movement[0]), float(movement[1])
             cv2.arrowedLine(
                 img,
@@ -1651,6 +2443,10 @@ class Play:
                 1,
                 cv2.LINE_AA,
             )
+
+        for box in data.get("player") or []:
+            if len(box) >= 4:
+                self._draw_player_foot_circle_debug(img, box, sp, s)
 
         self._enqueue_visual_debug_display(img)
 
@@ -1721,15 +2517,31 @@ class Play:
         data = self.get_main_data(frame)
         if current_time - self.time_since_walls_checked > self.walls_treshold:
             tile_data = self.get_tile_data(frame, data.get("player"))
-            walls, bushes = self.process_tile_data(tile_data)
+            walls, map_objects = self.process_tile_data(tile_data, frame)
+            line_of_sight_walls = self.map_object_boxes_for_classes(
+                map_objects,
+                self.line_of_sight_map_object_classes(),
+            )
+            bushes = self.map_object_boxes_for_classes(
+                map_objects,
+                {"bush", "close_bush"},
+            )
             self.time_since_walls_checked = current_time
             self.last_walls_data = walls
-            data['wall'] = walls
+            self.last_map_object_data = map_objects
             self.last_bushes_data = bushes
-            data['bush'] = bushes
+            data['wall'] = walls
+            data['line_of_sight_wall'] = line_of_sight_walls
+            data['map_objects'] = map_objects
+            data['bushes'] = bushes
         else:
             data['wall'] = self.last_walls_data
-            data['bush'] = self.last_bushes_data
+            data['bushes'] = self.last_bushes_data
+            data['map_objects'] = self.last_map_object_data
+            data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
+                self.last_map_object_data,
+                self.line_of_sight_map_object_classes(),
+            )
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)

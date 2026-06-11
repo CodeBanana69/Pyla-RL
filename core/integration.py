@@ -53,6 +53,12 @@ def migrate_bot_config(bot_config: dict | None = None) -> dict:
     bot_config.setdefault("combat_los_dodge_enabled", "yes")
     bot_config.setdefault("combat_dodge_blend", 0.45)
     bot_config.setdefault("combat_dodge_jitter_degrees", 18.0)
+    bot_config.setdefault("fog_hsv_low", (50, 95, 215))
+    bot_config.setdefault("fog_hsv_high", (60, 125, 245))
+    bot_config.setdefault("fog_flee_distance", 130)
+    bot_config.setdefault("fog_min_blob_pixels", 20)
+    bot_config.setdefault("fog_min_pixels_in_radius", 20)
+    bot_config.setdefault("fog_check_every_n_frames", 3)
     return bot_config
 
 
