@@ -643,14 +643,16 @@ def find_template_center(main_img, template, threshold=0.8):
 
 
 def load_brawlers_info():
-    if os.path.exists(brawlers_info_file_path):
-        with open(brawlers_info_file_path, 'r') as f:
+    resolved_path = resolve_project_path(brawlers_info_file_path)
+    if os.path.exists(resolved_path):
+        with open(resolved_path, 'r') as f:
             return json.load(f)
     else:
         return {}
 
 def update_brawlers_info(brawlers_info):
-    with open(brawlers_info_file_path, 'w') as f:
+    resolved_path = resolve_project_path(brawlers_info_file_path)
+    with open(resolved_path, 'w') as f:
         json.dump(brawlers_info, f, indent=4)
 
 
