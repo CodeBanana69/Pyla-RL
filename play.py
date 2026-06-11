@@ -149,8 +149,16 @@ class Play:
         self.context = None
         self.frame = None
         self._spacing_strafe_side = 1
+        self._spacing_strafe_last_flip_at = 0.0
         self._spacing_action = None
         self._evasion_active = False
+        self._dodge_side = 1
+        self._dodge_committed_until = 0.0
+        self._dodge_vector = None
+        self._dodge_jitter_rad = 0.0
+        self._enemy_track = {"pos": None, "ts": 0.0, "velocity": (0.0, 0.0)}
+        self._combat_target = None
+        self._last_attack_tap_at = 0.0
         self.match_intent_summary = ""
         self.refresh_enemy_spacing_config()
         general_config = load_toml_as_dict("cfg/general_config.toml")
@@ -200,9 +208,121 @@ class Play:
         )
 
     def attack(self, touch_up=True, touch_down=True):
-        if touch_down and touch_up:
+        full_tap = bool(touch_down and touch_up)
+        if full_tap and not self._holding_attack():
+            now = time.time()
+            interval = float(getattr(self, "attack_min_interval", 0.35) or 0.35)
+            if now - float(getattr(self, "_last_attack_tap_at", 0) or 0) < interval:
+                return
+            if self._try_lead_aim_attack():
+                self._last_attack_tap_at = now
+                return
+            self._last_attack_tap_at = now
+        if full_tap:
             self._log_combat_action("attack")
         self.window_controller.press("attack", touch_up=touch_up, touch_down=touch_down)
+
+    @staticmethod
+    def lead_shot_angle(player_pos, enemy_pos, enemy_velocity, *, projectile_speed_px_s=1200.0):
+        px, py = player_pos
+        ex, ey = enemy_pos
+        vx, vy = enemy_velocity
+        dx = ex - px
+        dy = ey - py
+        distance = math.hypot(dx, dy)
+        if distance < 1:
+            return math.degrees(math.atan2(dy, dx))
+        speed = max(float(projectile_speed_px_s or 1200.0), 1.0)
+        travel_s = distance / speed
+        lead_x = ex + vx * travel_s
+        lead_y = ey + vy * travel_s
+        return math.degrees(math.atan2(lead_y - py, lead_x - px))
+
+    def get_tracked_enemy_velocity(self):
+        track = getattr(self, "_enemy_track", None) or {}
+        velocity = track.get("velocity", (0.0, 0.0))
+        if not isinstance(velocity, (tuple, list)) or len(velocity) != 2:
+            return (0.0, 0.0)
+        return float(velocity[0]), float(velocity[1])
+
+    def track_enemy(self, data, brawler=None):
+        track = getattr(self, "_enemy_track", None)
+        if track is None:
+            track = {"pos": None, "ts": 0.0, "velocity": (0.0, 0.0)}
+            self._enemy_track = track
+
+        self._combat_target = None
+        if not data or not data.get("player"):
+            return
+        enemies = data.get("enemy") or []
+        if not self.is_there_enemy(enemies):
+            return
+
+        player_pos = self.get_entity_pos(data["player"][0])
+        walls = data.get("wall") or []
+        enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
+        if not enemy_result:
+            return
+
+        enemy_pos, enemy_distance = enemy_result
+        now = time.time()
+        if track["pos"] is not None:
+            dt = max(now - float(track["ts"] or now), 0.001)
+            jump = math.hypot(enemy_pos[0] - track["pos"][0], enemy_pos[1] - track["pos"][1])
+            if jump > 150.0:
+                track["velocity"] = (0.0, 0.0)
+            else:
+                inst_vx = (enemy_pos[0] - track["pos"][0]) / dt
+                inst_vy = (enemy_pos[1] - track["pos"][1]) / dt
+                alpha = 0.35
+                old_vx, old_vy = track["velocity"]
+                track["velocity"] = (
+                    old_vx * (1.0 - alpha) + inst_vx * alpha,
+                    old_vy * (1.0 - alpha) + inst_vy * alpha,
+                )
+
+        track["pos"] = enemy_pos
+        track["ts"] = now
+        self._combat_target = {
+            "pos": enemy_pos,
+            "distance": float(enemy_distance),
+            "player_pos": player_pos,
+            "brawler": brawler,
+        }
+
+    def _try_lead_aim_attack(self) -> bool:
+        if not config_bool(getattr(self, "smart_aim_enabled", "yes"), True):
+            return False
+        if self._holding_attack():
+            return False
+        target = getattr(self, "_combat_target", None) or {}
+        player_pos = target.get("player_pos")
+        enemy_pos = target.get("pos")
+        if not player_pos or not enemy_pos:
+            return False
+
+        vx, vy = self.get_tracked_enemy_velocity()
+        speed = math.hypot(vx, vy)
+        if speed < 80.0:
+            return False
+
+        brawler = str(target.get("brawler") or self.current_brawler or "")
+        _, attack_range, _ = self.get_brawler_range(brawler) if brawler else (0, 0, 0)
+        if attack_range and float(target.get("distance", 0) or 0) > attack_range * 1.1:
+            return False
+
+        projectile_speed = float(getattr(self, "projectile_speed_px_s", 1200.0) or 1200.0)
+        scale = float(getattr(self.window_controller, "scale_factor", 1.0) or 1.0)
+        angle = self.lead_shot_angle(
+            player_pos,
+            enemy_pos,
+            (vx, vy),
+            projectile_speed_px_s=projectile_speed * scale,
+        )
+        if not hasattr(self.window_controller, "aim_attack_angle"):
+            return False
+        self.window_controller.aim_attack_angle(angle, radius=170.0, duration=0.04)
+        return True
 
     def use_hypercharge(self):
         self._log_combat_action("hypercharge")
@@ -657,16 +777,75 @@ class Play:
         self.combat_los_dodge_enabled = config_bool(bot_config.get("combat_los_dodge_enabled"), True)
         self.combat_dodge_blend = float(bot_config.get("combat_dodge_blend", 0.45))
         self.combat_dodge_jitter_degrees = float(bot_config.get("combat_dodge_jitter_degrees", 18.0))
+        self.combat_dodge_commit_seconds = float(bot_config.get("combat_dodge_commit_seconds", 0.6))
+        self.strafe_interval = float(bot_config.get("strafe_interval", 1.5))
+        self.attack_min_interval = float(bot_config.get("attack_min_interval", 0.35))
+        smart_aim = bot_config.get("smart_aim_enabled")
+        if smart_aim is None:
+            smart_aim = bot_config.get("lead_shots", "yes")
+        self.smart_aim_enabled = smart_aim
+        projectile_speed = bot_config.get("projectile_speed_px_s")
+        self.projectile_speed_px_s = float(projectile_speed if projectile_speed is not None else 1200.0)
+
+    def _clear_dodge_commitment(self, *, flip_side: bool = False) -> None:
+        if flip_side:
+            self._dodge_side = -int(getattr(self, "_dodge_side", 1) or 1)
+        self._dodge_committed_until = 0.0
+        self._dodge_vector = None
+        self._dodge_jitter_rad = 0.0
+
+    def _dodge_is_committed(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        return bool(self._dodge_vector) and float(getattr(self, "_dodge_committed_until", 0) or 0) > now
+
+    def _scale_movement_vector(self, vector):
+        magnitude = math.hypot(vector[0], vector[1])
+        if magnitude < 1:
+            return None
+        scale = min(JOYSTICK_RADIUS, magnitude) / magnitude
+        return (vector[0] * scale, vector[1] * scale)
+
+    def _compute_dodge_vector(self, player_pos, enemy_coords, side: int):
+        direction_x = enemy_coords[0] - player_pos[0]
+        direction_y = enemy_coords[1] - player_pos[1]
+        toward_angle = math.atan2(direction_y, direction_x)
+        dodge_angle = toward_angle + int(side) * (math.pi / 2) + float(getattr(self, "_dodge_jitter_rad", 0.0) or 0.0)
+        return self._scale_movement_vector((
+            math.cos(dodge_angle) * JOYSTICK_RADIUS,
+            math.sin(dodge_angle) * JOYSTICK_RADIUS,
+        ))
+
+    def _start_dodge_commitment(self, player_data, player_pos, enemy_coords, walls, *, flip_side: bool = True):
+        now = time.time()
+        if flip_side:
+            self._dodge_side = -int(getattr(self, "_dodge_side", 1) or 1)
+        jitter_degrees = float(getattr(self, "combat_dodge_jitter_degrees", 18.0))
+        self._dodge_jitter_rad = math.radians(random.uniform(-jitter_degrees, jitter_degrees))
+
+        for side in (self._dodge_side, -self._dodge_side):
+            dodge_vector = self._compute_dodge_vector(player_pos, enemy_coords, side)
+            if dodge_vector and not self.is_path_blocked(player_data, dodge_vector, walls):
+                self._dodge_side = side
+                self._dodge_vector = dodge_vector
+                self._dodge_committed_until = now + float(getattr(self, "combat_dodge_commit_seconds", 0.6) or 0.6)
+                self._evasion_active = True
+                self._spacing_action = "dodge"
+                return dodge_vector
+        self._clear_dodge_commitment()
+        return None
 
     def apply_los_evasion_movement(self, brawler, data, movement):
         self._evasion_active = False
         if not getattr(self, "combat_los_dodge_enabled", True):
+            self._clear_dodge_commitment()
             return movement
         if not data or not data.get("player"):
+            self._clear_dodge_commitment()
             return movement
 
         base = self.movement_to_vector(movement)
         if base is None:
+            self._clear_dodge_commitment()
             return movement
 
         player_data = data["player"][0]
@@ -674,63 +853,50 @@ class Play:
         walls = data.get("wall") or []
         enemies = data.get("enemy") or []
         if not self.is_there_enemy(enemies):
+            self._clear_dodge_commitment()
             return movement
 
         enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
         if not enemy_result:
+            self._clear_dodge_commitment()
             return movement
         enemy_coords, _enemy_distance = enemy_result
         if not self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack"):
+            self._clear_dodge_commitment(flip_side=True)
             return movement
 
         blend = clamp(float(getattr(self, "combat_dodge_blend", 0.45)), 0.0, 1.0)
         if blend <= 0:
+            self._clear_dodge_commitment()
             return movement
 
-        jitter_degrees = float(getattr(self, "combat_dodge_jitter_degrees", 18.0))
-        direction_x = enemy_coords[0] - player_pos[0]
-        direction_y = enemy_coords[1] - player_pos[1]
-        toward_angle = math.atan2(direction_y, direction_x)
-        dodge_angle = (
-            toward_angle
-            + random.choice([-1, 1]) * (math.pi / 2)
-            + math.radians(random.uniform(-jitter_degrees, jitter_degrees))
-        )
-
-        random_move = self.get_random_movement()
-        dodge_vector = (
-            math.cos(dodge_angle) * JOYSTICK_RADIUS * 0.8 + random_move[0] * 0.2,
-            math.sin(dodge_angle) * JOYSTICK_RADIUS * 0.8 + random_move[1] * 0.2,
-        )
-        blended = (
-            base[0] * (1.0 - blend) + dodge_vector[0] * blend,
-            base[1] * (1.0 - blend) + dodge_vector[1] * blend,
-        )
-        magnitude = math.hypot(blended[0], blended[1])
-        if magnitude < 1:
-            return movement
-        scale = min(JOYSTICK_RADIUS, magnitude) / magnitude
-        blended = (blended[0] * scale, blended[1] * scale)
-
-        if not self.is_path_blocked(player_data, blended, walls):
-            self._evasion_active = True
-            self._spacing_action = "dodge"
-            return blended
-
-        flipped_angle = dodge_angle + math.pi
-        flipped = (
-            base[0] * (1.0 - blend) + math.cos(flipped_angle) * JOYSTICK_RADIUS * blend,
-            base[1] * (1.0 - blend) + math.sin(flipped_angle) * JOYSTICK_RADIUS * blend,
-        )
-        flip_mag = math.hypot(flipped[0], flipped[1])
-        if flip_mag >= 1:
-            flip_scale = min(JOYSTICK_RADIUS, flip_mag) / flip_mag
-            flipped = (flipped[0] * flip_scale, flipped[1] * flip_scale)
-            if not self.is_path_blocked(player_data, flipped, walls):
+        now = time.time()
+        if self._dodge_is_committed(now):
+            committed = self._dodge_vector
+            if committed and not self.is_path_blocked(player_data, committed, walls):
                 self._evasion_active = True
                 self._spacing_action = "dodge"
-                return flipped
+                return committed
+            recommitted = self._start_dodge_commitment(
+                player_data,
+                player_pos,
+                enemy_coords,
+                walls,
+                flip_side=True,
+            )
+            if recommitted:
+                return recommitted
+            return movement
 
+        dodge_vector = self._start_dodge_commitment(
+            player_data,
+            player_pos,
+            enemy_coords,
+            walls,
+            flip_side=True,
+        )
+        if dodge_vector:
+            return dodge_vector
         return movement
 
     def get_effective_enemy_range(self, brawler):
@@ -748,6 +914,18 @@ class Play:
             return "retreat"
         return "hold"
 
+    def _maybe_flip_strafe_side(self, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        interval = float(getattr(self, "strafe_interval", 1.5) or 1.5)
+        last_flip = float(getattr(self, "_spacing_strafe_last_flip_at", 0.0) or 0.0)
+        if now - last_flip >= interval:
+            self._spacing_strafe_side = -int(getattr(self, "_spacing_strafe_side", 1) or 1)
+            self._spacing_strafe_last_flip_at = now
+
+    def _hold_strafe_vector(self, norm_x, norm_y):
+        strafe_side = int(getattr(self, "_spacing_strafe_side", 1) or 1)
+        return (-norm_y * JOYSTICK_RADIUS * strafe_side, norm_x * JOYSTICK_RADIUS * strafe_side)
+
     def get_enemy_spacing_movement(self, player_data, player_pos, enemy_coords, enemy_distance, brawler, walls):
         safe_range, _, _ = self.get_brawler_range(brawler)
         if getattr(self, "enemy_spacing_enabled", True):
@@ -758,8 +936,23 @@ class Play:
             action = "approach" if enemy_distance > safe_range else "retreat"
         self._spacing_action = action
 
-        direction_x = enemy_coords[0] - player_pos[0]
-        direction_y = enemy_coords[1] - player_pos[1]
+        toward_x = enemy_coords[0] - player_pos[0]
+        toward_y = enemy_coords[1] - player_pos[1]
+        vx, vy = self.get_tracked_enemy_velocity()
+
+        if action == "approach":
+            direction_x = toward_x
+            direction_y = toward_y
+        elif action == "retreat":
+            direction_x = -toward_x
+            direction_y = -toward_y
+            if math.hypot(vx, vy) > 1.0:
+                direction_x -= vx * 0.35
+                direction_y -= vy * 0.35
+        else:
+            direction_x = toward_x
+            direction_y = toward_y
+
         magnitude = math.hypot(direction_x, direction_y)
         if magnitude < 1:
             magnitude = 1.0
@@ -771,13 +964,14 @@ class Play:
             move_horizontal = (direction_x, 0)
             move_vertical = (0, direction_y)
         elif action == "retreat":
-            move_diagonal = (-direction_x, -direction_y)
-            move_horizontal = (-direction_x, 0)
-            move_vertical = (0, -direction_y)
+            move_diagonal = (direction_x, direction_y)
+            move_horizontal = (direction_x, 0)
+            move_vertical = (0, direction_y)
         else:
+            self._maybe_flip_strafe_side()
             if getattr(self, "enemy_spacing_hold_strafe", True):
                 strafe_side = getattr(self, "_spacing_strafe_side", 1)
-                strafe = (-norm_y * JOYSTICK_RADIUS * strafe_side, norm_x * JOYSTICK_RADIUS * strafe_side)
+                strafe = self._hold_strafe_vector(norm_x, norm_y)
                 if not self.is_path_blocked(player_data, strafe, walls):
                     self._spacing_action = "hold_strafe"
                     return strafe
@@ -787,7 +981,7 @@ class Play:
                     self._spacing_action = "hold_strafe"
                     return flipped
             self._spacing_action = "hold"
-            return self.get_random_movement()
+            return self._hold_strafe_vector(norm_x, norm_y)
 
         movement_options = [move_diagonal, move_vertical, move_horizontal]
         for move in movement_options:
@@ -986,6 +1180,7 @@ class Play:
 
     def loop(self, brawler, data, current_time):
         self.refresh_enemy_spacing_config()
+        self.track_enemy(data, brawler=brawler)
         self.context = {
                 'player_data': data['player'][0],
                 'enemy_data': data['enemy'],
@@ -1016,6 +1211,7 @@ class Play:
                 'use_super': self.use_super,
                 'use_gadget': self.use_gadget,
                 'get_random_movement': self.get_random_movement,
+                'get_tracked_enemy_velocity': self.get_tracked_enemy_velocity,
                 'current_brawler': self.current_brawler,
                 'last_movement': self.last_movement,
                 'last_movement_change_time': self.last_movement_change_time,

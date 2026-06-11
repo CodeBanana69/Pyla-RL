@@ -3240,6 +3240,26 @@ ApplicationWindow {
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_jitter_degrees")); from: 5.0; to: 45.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_jitter_degrees", value) } }
                         }
                         FieldRow {
+                            label: "Dodge Commit (sec)"
+                            hint: "Hold each dodge direction before switching sides."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_commit_seconds")); from: 0.2; to: 2.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_commit_seconds", value) } }
+                        }
+                        FieldRow {
+                            label: "Smart Aim"
+                            hint: "Lead shots at moving enemies instead of auto-aim taps."
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "smart_aim_enabled"); onToggled: function(value) { root.saveValue("settings", "smart_aim_enabled", value) } } }
+                        }
+                        FieldRow {
+                            label: "Attack Interval (sec)"
+                            hint: "Minimum time between full attack taps."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "attack_min_interval")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "attack_min_interval", value) } }
+                        }
+                        FieldRow {
+                            label: "Projectile Speed (px/s)"
+                            hint: "Used for lead-aim travel-time estimate."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "projectile_speed_px_s")); from: 400.0; to: 2400.0; onSaved: function(value) { root.saveValue("settings", "projectile_speed_px_s", value) } }
+                        }
+                        FieldRow {
                             label: "Run For Minutes"
                             hint: "0 disables the session timer."
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "run_for_minutes")); onSaved: function(value) { root.saveValue("settings", "run_for_minutes", value) } }

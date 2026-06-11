@@ -99,6 +99,10 @@ class HubStateStore:
         "combat_los_dodge_enabled": ("bot", "yesno"),
         "combat_dodge_blend": ("bot", "float"),
         "combat_dodge_jitter_degrees": ("bot", "float"),
+        "combat_dodge_commit_seconds": ("bot", "float"),
+        "attack_min_interval": ("bot", "float"),
+        "smart_aim_enabled": ("bot", "yesno"),
+        "projectile_speed_px_s": ("bot", "float"),
         "run_for_minutes": ("general", "int"),
         "emulator_autorestart": ("general", "yesno"),
         "scrcpy_max_width": ("general", "int"),
@@ -248,6 +252,10 @@ class HubStateStore:
         self.bot_config.setdefault("combat_los_dodge_enabled", "yes")
         self.bot_config.setdefault("combat_dodge_blend", 0.45)
         self.bot_config.setdefault("combat_dodge_jitter_degrees", 18.0)
+        self.bot_config.setdefault("combat_dodge_commit_seconds", 0.6)
+        self.bot_config.setdefault("attack_min_interval", 0.35)
+        self.bot_config.setdefault("smart_aim_enabled", self.bot_config.get("lead_shots", "yes"))
+        self.bot_config.setdefault("projectile_speed_px_s", 1200.0)
 
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
@@ -552,6 +560,7 @@ class HubStateStore:
                 "enemy_spacing_enabled",
                 "enemy_spacing_hold_strafe",
                 "combat_los_dodge_enabled",
+                "smart_aim_enabled",
                 "emulator_autorestart",
                 "super_debug",
                 "wall_stuck_debug",
