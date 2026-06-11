@@ -1,5 +1,13 @@
 ﻿# Pyla-RL
 
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/CodeBanana69/Pyla-RL)
+[![Focus](https://img.shields.io/badge/mode-Showdown%20(trio)-FF9F0A)](README.md#pyla-rl)
+[![CI](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
+[![GitHub stars](https://img.shields.io/github/stars/CodeBanana69/Pyla-RL?style=social)](https://github.com/CodeBanana69/Pyla-RL)
+
 This fork focuses on **Showdown** (trio). Other game modes still run off the upstream logic, but development effort and tuning here go into making Showdown play well end-to-end.
 
 What the bot does in Showdown:
@@ -85,7 +93,7 @@ Recovery features :
 - If Brawl Stars closes or another app is in front, the bot can relaunch Brawl Stars.
 - If the Brawl Stars Idle Disconnect / Reload dialog appears, the bot presses Reload.
 - If the scrcpy video feed freezes, the bot restarts the scrcpy feed instead of repeatedly restarting Brawl Stars.
-- While the bot is running, a small `Pyla-RL Control` window lets you pause and resume movement safely.
+- While the bot is running, a small `Pyla-RL Control` window lets you pause and resume movement safely (F8). Pause state is shown in the terminal status line, control window, and Discord/Telegram `/status`.
 
 Multi-instance mode (LDPlayer + MuMu):
 - Open the Hub **Instances** tab and enable **Multi-Instance**, then start each bot from that tab.

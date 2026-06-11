@@ -1,8 +1,11 @@
 # Getting Started
 
+[![Pyla-RL](https://img.shields.io/badge/Pyla--RL-Showdown%20fork-30D158)](https://github.com/CodeBanana69/Pyla-RL)
+[![Discord](https://img.shields.io/badge/Discord-support-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
+
 ## Install
 
-1. Download or clone Pyla-RL from [GitHub](https://github.com/CodeBanana69/Pyla-RL).
+1. Download or clone Pyla-RL from [GitHub](https://github.com/CodeBanana69/Pyla-RL) (see badges and links on the [main README](../../README.md)).
 2. Run `setup.exe` in the project folder.
 3. Wait for Python 3.11 and dependencies to install.
 

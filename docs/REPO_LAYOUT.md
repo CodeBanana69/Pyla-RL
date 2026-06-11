@@ -1,6 +1,9 @@
 # Repository layout
 
-Quick map of where code and data live in Pyla-RL.
+[![Pyla-RL](https://img.shields.io/badge/repo-Pyla--RL-8E8E93)](https://github.com/CodeBanana69/Pyla-RL)
+[![CI](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeBanana69/Pyla-RL/actions/workflows/ci.yml)
+
+Quick map of where code and data live in Pyla-RL. Project overview: [README](../README.md).
 
 ## Entry points
 

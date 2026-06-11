@@ -1,6 +1,12 @@
 # Pyla-RL Tutorials
 
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://github.com/CodeBanana69/Pyla-RL/blob/main/LICENSE)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
+
 Step-by-step guides for every major feature. Quick summaries are also available in the Hub **Help** tab and via **?** buttons on each tab.
+
+Back to the main [README](../README.md) for install links, badges, and feature overview.
 
 ## Setup and running
 
