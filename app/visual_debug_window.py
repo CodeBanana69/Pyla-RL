@@ -10,6 +10,8 @@ import numpy as np
 _opencv_highgui_available = None
 _opencv_highgui_warned = False
 _opencv_window_ready = False
+_cached_primary_monitor_rect = None
+_letterbox_canvas_cache = {}
 
 VISUAL_DEBUG_WINDOW_NAME = "PylaAi-XXZ Visual Debug"
 
@@ -19,13 +21,17 @@ OPENCV_REPAIR_CMD = (
 
 
 def reset_opencv_highgui_cache():
-    global _opencv_highgui_available, _opencv_window_ready
+    global _opencv_highgui_available, _opencv_window_ready, _cached_primary_monitor_rect
     _opencv_highgui_available = None
     _opencv_window_ready = False
+    _cached_primary_monitor_rect = None
 
 
 def _primary_monitor_rect():
     """Return (left, top, width, height) for the primary monitor work area."""
+    global _cached_primary_monitor_rect
+    if _cached_primary_monitor_rect is not None:
+        return _cached_primary_monitor_rect
     if sys.platform != "win32":
         return None
     import ctypes
@@ -43,18 +49,20 @@ def _primary_monitor_rect():
 
     rect = RECT()
     if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
-        return (
+        _cached_primary_monitor_rect = (
             int(rect.left),
             int(rect.top),
             int(rect.right - rect.left),
             int(rect.bottom - rect.top),
         )
-    return (
+        return _cached_primary_monitor_rect
+    _cached_primary_monitor_rect = (
         0,
         0,
         int(user32.GetSystemMetrics(0)),
         int(user32.GetSystemMetrics(1)),
     )
+    return _cached_primary_monitor_rect
 
 
 def _display_target_size(image_width, image_height):
@@ -64,8 +72,18 @@ def _display_target_size(image_width, image_height):
     return max(1, int(image_width)), max(1, int(image_height))
 
 
-def _fit_image_to_rect(rgb_image, target_w, target_h):
-    """Upscale/downscale with aspect ratio preserved; letterbox on black canvas."""
+def _letterbox_canvas(target_w, target_h):
+    key = (target_w, target_h)
+    canvas = _letterbox_canvas_cache.get(key)
+    if canvas is None:
+        canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        _letterbox_canvas_cache[key] = canvas
+    canvas.fill(0)
+    return canvas
+
+
+def _fit_image_to_rect(rgb_image, target_w, target_h, allow_upscale=False):
+    """Fit image into target rect with aspect ratio preserved; letterbox on black canvas."""
     target_w = max(1, int(target_w))
     target_h = max(1, int(target_h))
     if rgb_image is None or rgb_image.size == 0:
@@ -76,6 +94,8 @@ def _fit_image_to_rect(rgb_image, target_w, target_h):
         return np.zeros((target_h, target_w, 3), dtype=np.uint8)
 
     scale = min(target_w / source_w, target_h / source_h)
+    if not allow_upscale:
+        scale = min(1.0, scale)
     fitted_w = max(1, int(round(source_w * scale)))
     fitted_h = max(1, int(round(source_h * scale)))
     if fitted_w == source_w and fitted_h == source_h:
@@ -86,7 +106,7 @@ def _fit_image_to_rect(rgb_image, target_w, target_h):
     if fitted_w == target_w and fitted_h == target_h:
         return resized
 
-    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+    canvas = _letterbox_canvas(target_w, target_h)
     x0 = (target_w - fitted_w) // 2
     y0 = (target_h - fitted_h) // 2
     canvas[y0 : y0 + fitted_h, x0 : x0 + fitted_w] = resized

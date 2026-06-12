@@ -21,9 +21,16 @@ class FitImageToRectTests(unittest.TestCase):
 
     def test_fit_image_fills_square_target_when_aspect_matches(self):
         img = np.full((200, 200, 3), 64, dtype=np.uint8)
-        fitted = vdw._fit_image_to_rect(img, 400, 400)
+        fitted = vdw._fit_image_to_rect(img, 400, 400, allow_upscale=True)
         self.assertEqual(fitted.shape, (400, 400, 3))
         np.testing.assert_array_equal(fitted, np.full((400, 400, 3), 64, dtype=np.uint8))
+
+    def test_fit_image_skips_upscale_by_default(self):
+        img = np.full((200, 200, 3), 64, dtype=np.uint8)
+        fitted = vdw._fit_image_to_rect(img, 400, 400)
+        self.assertEqual(fitted.shape, (400, 400, 3))
+        self.assertTrue(np.all(fitted[0, :, :] == 0))
+        np.testing.assert_array_equal(fitted[100:300, 100:300, :], img)
 
     def test_fit_image_downscales_when_larger_than_target(self):
         img = np.full((800, 800, 3), 32, dtype=np.uint8)
