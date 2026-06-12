@@ -21,6 +21,7 @@ from utils import (
     load_brawlers_info,
     normalize_brawler_name,
     resolve_brawler_name_alias,
+    resolve_project_path,
 )
 
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
@@ -234,7 +235,7 @@ class LobbyAutomation:
                 from pathlib import Path
 
                 raw_aliases = json.loads(
-                    Path("cfg/names.json").read_text(encoding="utf-8")
+                    Path(resolve_project_path("cfg/names.json")).read_text(encoding="utf-8")
                 )
             except Exception:
                 raw_aliases = {}

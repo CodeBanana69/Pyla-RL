@@ -7,11 +7,12 @@ from utils import (
     get_brawler_list,
     load_brawl_stars_api_config,
     normalize_brawler_name,
+    resolve_project_path,
     save_brawler_data,
 )
 
-QUEUE_PATH = Path(DEFAULT_QUEUE_PATH)
-PUSH_ORDER_PATH = Path("cfg/push_order.json")
+QUEUE_PATH = Path(resolve_project_path(DEFAULT_QUEUE_PATH))
+PUSH_ORDER_PATH = Path(resolve_project_path("cfg/push_order.json"))
 
 QUEUE_SORT_MODES = {
     "cups_desc": "Cups high to low",
@@ -28,7 +29,10 @@ QUEUE_SORT_MODES = {
 
 def _active_queue_path(path=None):
     if path is not None:
-        return Path(path)
+        queue_path = Path(path)
+        if not queue_path.is_absolute():
+            return Path(resolve_project_path(path))
+        return queue_path
     try:
         from gui.instance_config import get_queue_path
 
@@ -89,7 +93,9 @@ def save_queue(data, path=None):
 
 
 def load_push_order(path=None):
-    order_path = Path(path or PUSH_ORDER_PATH)
+    order_path = Path(path) if path else PUSH_ORDER_PATH
+    if path:
+        order_path = Path(resolve_project_path(path)) if not order_path.is_absolute() else order_path
     if not order_path.exists():
         return []
     try:
@@ -100,7 +106,9 @@ def load_push_order(path=None):
 
 
 def save_push_order(order, path=None):
-    order_path = Path(path or PUSH_ORDER_PATH)
+    order_path = Path(path) if path else PUSH_ORDER_PATH
+    if path:
+        order_path = Path(resolve_project_path(path)) if not order_path.is_absolute() else order_path
     order_path.parent.mkdir(parents=True, exist_ok=True)
     order_path.write_text(json.dumps(list(order), indent=2), encoding="utf-8")
     return str(order_path.resolve())
@@ -119,7 +127,7 @@ def normalize_brawler_icon_name(brawler_name):
 
 def brawler_icon_path(brawler_name):
     safe_name = normalize_brawler_icon_name(brawler_name)
-    return Path("api") / "assets" / "brawler_icons" / f"{safe_name}.png"
+    return Path(resolve_project_path(f"api/assets/brawler_icons/{safe_name}.png"))
 
 
 def brawler_icon_uri(brawler_name):

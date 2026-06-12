@@ -41,7 +41,22 @@ class BrawlerApiAutofillTest(unittest.TestCase):
 
         self.assertEqual(get_config_player_tag(config), "#YOURTAG")
 
-    def test_failed_auto_refresh_does_not_mark_refresh_done(self):
+    def test_missing_credentials_skip_auto_refresh_without_force(self):
+        utils._brawl_stars_api_refresh_done = False
+        utils._brawl_stars_api_refresh_signature = None
+        config = {
+            "auto_refresh_token": True,
+            "developer_email": "",
+            "developer_password": "",
+            "api_token": "existing-token",
+        }
+
+        result = utils.refresh_brawl_stars_api_token_if_enabled(config)
+
+        self.assertEqual(result["api_token"], "existing-token")
+        self.assertTrue(utils._brawl_stars_api_refresh_done)
+
+    def test_missing_credentials_raise_when_force_refresh(self):
         utils._brawl_stars_api_refresh_done = False
         utils._brawl_stars_api_refresh_signature = None
         config = {
@@ -51,7 +66,7 @@ class BrawlerApiAutofillTest(unittest.TestCase):
         }
 
         with self.assertRaises(ValueError):
-            utils.refresh_brawl_stars_api_token_if_enabled(config)
+            utils.refresh_brawl_stars_api_token_if_enabled(config, force=True)
 
         self.assertFalse(utils._brawl_stars_api_refresh_done)
 
@@ -64,7 +79,7 @@ class BrawlerApiAutofillTest(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(ValueError, "developer_email_present=yes; developer_password_present=no"):
-            utils.refresh_brawl_stars_api_token_if_enabled(config)
+            utils.refresh_brawl_stars_api_token_if_enabled(config, force=True)
 
     @patch("utils.save_dict_as_toml")
     @patch("utils.get_public_ip", return_value="1.2.3.4")

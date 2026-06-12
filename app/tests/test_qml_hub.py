@@ -68,6 +68,23 @@ class QmlHubStateTests(unittest.TestCase):
             },
         )
 
+    def test_hub_state_creates_missing_default_configs(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        bundle = Path(temp.name) / "app"
+        (bundle / "cfg").mkdir(parents=True)
+
+        with patch("utils.project_root", return_value=str(bundle)):
+            clear_toml_cache()
+            store = HubStateStore()
+            bot_path = bundle / "cfg" / "bot_config.toml"
+            general_path = bundle / "cfg" / "general_config.toml"
+
+        self.assertTrue(bot_path.exists())
+        self.assertTrue(general_path.exists())
+        bot = toml.load(bot_path)
+        self.assertEqual(bot["gamemode"], store.bot_config["gamemode"])
+
     def test_qml_initial_state_uses_desktop_values(self):
         store, _ = self.make_store(
             {"gamemode_type": 3, "gamemode": "showdown"},

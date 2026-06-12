@@ -209,6 +209,11 @@ def refresh_brawl_stars_api_token_if_enabled(config, file_path="cfg/brawl_stars_
         return config
 
     if not email or not password:
+        if not force:
+            if existing_token:
+                _brawl_stars_api_refresh_done = True
+                _brawl_stars_api_refresh_signature = refresh_signature
+            return config
         _brawl_stars_api_refresh_done = False
         _brawl_stars_api_refresh_signature = None
         raise ValueError(
@@ -682,7 +687,8 @@ def update_missing_brawlers_info(brawlers):
                 save_brawler_icon(brawler)
             else:
                 print(f"Could not find info for brawler '{brawler}'")
-        if not os.path.exists(f"./api/assets/brawler_icons/{brawler}.png"):
+        icon_path = resolve_project_path(f"api/assets/brawler_icons/{brawler}.png")
+        if not os.path.exists(icon_path):
             save_brawler_icon(brawler)
 
 
@@ -719,7 +725,9 @@ def save_brawler_icon(brawler_name):
             if img_response.status_code == 200:
                 image = Image.open(BytesIO(img_response.content))
                 safe_name = os.path.basename(brawler_name_clean).replace('.', '').replace('/', '').replace('\\', '')
-                image.save(f"api/assets/brawler_icons/{safe_name}.png")
+                icon_path = resolve_project_path(f"api/assets/brawler_icons/{safe_name}.png")
+                os.makedirs(os.path.dirname(icon_path), exist_ok=True)
+                image.save(icon_path)
                 print(f"Saved icon for brawler '{brawler_name}'")
             else:
                 print(f"Failed to download icon for '{brawler_name}'")

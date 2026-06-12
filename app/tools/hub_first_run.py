@@ -2,6 +2,8 @@ from pathlib import Path
 
 import toml
 
+from utils import resolve_project_path
+
 HUB_LICENSE_MARKER = ".hub_license_acknowledged"
 
 
@@ -11,15 +13,21 @@ def _to_bool(value):
     return str(value).strip().lower() in {"1", "yes", "true", "on"}
 
 
-def _marker_path(project_dir):
-    return Path(project_dir) / "cfg" / HUB_LICENSE_MARKER
+def _cfg_dir(project_dir=None):
+    if project_dir and str(project_dir) not in {"", "."}:
+        return Path(project_dir) / "cfg"
+    return Path(resolve_project_path("cfg"))
 
 
-def hub_license_acknowledged(project_dir="."):
+def _marker_path(project_dir=None):
+    return _cfg_dir(project_dir) / HUB_LICENSE_MARKER
+
+
+def hub_license_acknowledged(project_dir=None):
     return _marker_path(project_dir).exists()
 
 
-def mark_hub_license_acknowledged(project_dir="."):
+def mark_hub_license_acknowledged(project_dir=None):
     marker = _marker_path(project_dir)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text("1", encoding="utf-8")
@@ -30,7 +38,7 @@ def ensure_hub_first_run_wizard(project_dir):
     if hub_license_acknowledged(project_dir):
         return False
 
-    config_path = Path(project_dir) / "cfg" / "general_config.toml"
+    config_path = _cfg_dir(project_dir) / "general_config.toml"
     config = toml.load(config_path) if config_path.exists() else {}
     config["first_run_wizard"] = "yes"
     config["license_accepted"] = "no"

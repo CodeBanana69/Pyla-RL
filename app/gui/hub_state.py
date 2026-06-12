@@ -1,20 +1,9 @@
 import json
+import os
 from pathlib import Path
 
-import toml
-
 from gui.hub_validators import validate_config_value
-
-
-def load_toml_as_dict(path):
-    if not Path(path).exists():
-        return {}
-    return toml.load(path)
-
-
-def save_dict_as_toml(data, path):
-    with open(path, "w", encoding="utf-8") as handle:
-        toml.dump(data, handle)
+from utils import load_toml_as_dict, resolve_project_path, save_dict_as_toml
 
 
 def _to_bool(value):
@@ -212,14 +201,30 @@ class HubStateStore:
         self.brawl_stars_api_config.update(load_toml_as_dict(brawl_stars_api_config_path))
         self._migrate_legacy_webhook_config(discord_config_path)
         self._apply_defaults()
+        self._ensure_config_files()
 
     def _migrate_legacy_webhook_config(self, discord_config_path):
-        legacy_path = Path(discord_config_path).parent / "webhook_config.toml"
-        discord_path = Path(discord_config_path)
-        if not discord_path.exists() and legacy_path.exists():
-            legacy_config = load_toml_as_dict(str(legacy_path))
-            save_dict_as_toml(legacy_config, str(discord_path))
+        legacy_path = resolve_project_path(
+            str(Path(discord_config_path).parent / "webhook_config.toml")
+        )
+        discord_path = resolve_project_path(discord_config_path)
+        if not os.path.exists(discord_path) and os.path.exists(legacy_path):
+            legacy_config = load_toml_as_dict(legacy_path)
+            save_dict_as_toml(legacy_config, discord_config_path)
             self.discord_config = dict(legacy_config)
+
+    def _ensure_config_files(self):
+        for data, path in (
+            (self.bot_config, self.bot_config_path),
+            (self.general_config, self.general_config_path),
+            (self.time_tresholds, self.time_tresholds_path),
+            (self.match_history, self.match_history_path),
+            (self.discord_config, self.discord_config_path),
+            (self.telegram_config, self.telegram_config_path),
+            (self.brawl_stars_api_config, self.brawl_stars_api_config_path),
+        ):
+            if not os.path.exists(resolve_project_path(path)):
+                save_dict_as_toml(data, path)
 
     def _apply_defaults(self):
         self.bot_config.setdefault("gamemode_type", 3)
@@ -402,7 +407,7 @@ class HubStateStore:
                 "licenseAccepted": _to_bool(self.general_config.get("license_accepted", "no")),
                 "sourceStatus": source_status,
                 "buildInfo": build_info,
-                "configDir": str(Path("cfg").resolve()),
+                "configDir": str(Path(resolve_project_path("cfg")).resolve()),
                 "pushOrder": load_push_order(),
                 "brawlers": brawler_names,
                 "brawlerOptions": [
@@ -675,7 +680,7 @@ class HubStateStore:
     def export_match_history_csv(self):
         from match_journal import read_all_matches
 
-        export_dir = Path("logs")
+        export_dir = Path(resolve_project_path("logs"))
         export_dir.mkdir(parents=True, exist_ok=True)
         export_path = export_dir / "match_history_export.csv"
         lines = ["brawler,victory,defeat,draw,games,win_rate"]

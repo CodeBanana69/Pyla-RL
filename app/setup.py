@@ -43,7 +43,9 @@ def force_install(reqs, no_deps=False):
 def save_gpu_runtime_config(variant, cards):
     import toml
 
-    config_path = Path("cfg") / "general_config.toml"
+    from utils import resolve_project_path
+
+    config_path = Path(resolve_project_path("cfg/general_config.toml"))
     config = toml.load(config_path) if config_path.exists() else {}
     apply_gpu_config(config, variant, cards)
     config_path.parent.mkdir(parents=True, exist_ok=True)

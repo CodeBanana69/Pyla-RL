@@ -126,11 +126,10 @@ def get_palette(mode=None):
 
 def load_ui_theme_mode(general_config_path="cfg/general_config.toml"):
     try:
-        import toml
-        from pathlib import Path
+        from utils import load_toml_as_dict
 
-        if Path(general_config_path).exists():
-            config = toml.load(general_config_path)
+        config = load_toml_as_dict(general_config_path)
+        if config:
             return normalize_theme_mode(config.get("ui_theme", "system"))
     except Exception:
         pass
@@ -139,11 +138,10 @@ def load_ui_theme_mode(general_config_path="cfg/general_config.toml"):
 
 def load_ui_animations_enabled(general_config_path="cfg/general_config.toml"):
     try:
-        import toml
-        from pathlib import Path
+        from utils import load_toml_as_dict
 
-        if Path(general_config_path).exists():
-            config = toml.load(general_config_path)
+        config = load_toml_as_dict(general_config_path)
+        if config:
             value = str(config.get("ui_animations", "yes")).strip().lower()
             return value in {"1", "yes", "true", "on"}
     except Exception:

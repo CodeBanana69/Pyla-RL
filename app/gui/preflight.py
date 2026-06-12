@@ -86,11 +86,11 @@ def _resolve_emulator_settings(general, emulator=None, port=None):
 def _persist_discovered_port(emulator, port, previous_port):
     if not port or port == previous_port:
         return
-    general_path = Path("cfg/general_config.toml")
-    general = load_toml_as_dict(str(general_path))
+    general_path = "cfg/general_config.toml"
+    general = load_toml_as_dict(general_path)
     general["current_emulator"] = emulator
     general["emulator_port"] = int(port)
-    save_dict_as_toml(general, str(general_path))
+    save_dict_as_toml(general, general_path)
 
 
 def check_emulator_status(emulator, port=None):

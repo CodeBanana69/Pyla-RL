@@ -99,7 +99,7 @@ class SelectBrawler:
             self.brawlers = [brawler for brawler in self.brawlers if brawler in api_trophies]
 
         for brawler in self.brawlers:
-            img_path = f"./api/assets/brawler_icons/{brawler}.png"
+            img_path = resolve_project_path(f"api/assets/brawler_icons/{brawler}.png")
             try:
                 img = Image.open(img_path)
             except FileNotFoundError:

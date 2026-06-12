@@ -4,7 +4,9 @@ import sys
 from datetime import datetime
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
-LOG_DIR = "logs"
+from utils import resolve_project_path
+
+LOG_DIR = resolve_project_path("logs")
 TIMESTAMP_FMT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -51,11 +53,13 @@ def setup_logging():
     return log_path
 
 
-def setup_logging_if_enabled(config_path="./cfg/general_config.toml"):
+def setup_logging_if_enabled(config_path="cfg/general_config.toml"):
     import toml
-    if not os.path.exists(config_path):
+
+    resolved_config_path = resolve_project_path(config_path)
+    if not os.path.exists(resolved_config_path):
         return None
-    with open(config_path, "r") as f:
+    with open(resolved_config_path, "r", encoding="utf-8") as f:
         enabled = toml.load(f).get("terminal_logging", "no")
     if str(enabled).lower() in ("yes", "true"):
         return setup_logging()

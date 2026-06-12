@@ -3,14 +3,20 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-RECOVERY_DIR = Path("logs/recovery")
+from utils import resolve_project_path
+
 MAX_SCREENSHOTS = 20
 
 
+def _recovery_dir() -> Path:
+    return Path(resolve_project_path("logs/recovery"))
+
+
 def save_recovery_screenshot(screenshot, step: str) -> str:
-    RECOVERY_DIR.mkdir(parents=True, exist_ok=True)
+    recovery_dir = _recovery_dir()
+    recovery_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{int(time.time())}_{step}.png"
-    path = RECOVERY_DIR / filename
+    path = recovery_dir / filename
     try:
         if screenshot is None:
             return ""
@@ -27,7 +33,7 @@ def save_recovery_screenshot(screenshot, step: str) -> str:
 
 
 def _prune_old_screenshots() -> None:
-    files = sorted(RECOVERY_DIR.glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
+    files = sorted(_recovery_dir().glob("*.png"), key=lambda item: item.stat().st_mtime, reverse=True)
     for stale in files[MAX_SCREENSHOTS:]:
         try:
             stale.unlink(missing_ok=True)

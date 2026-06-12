@@ -781,7 +781,9 @@ class QmlHub:
                 if action == "open-config-folder":
                     import os
 
-                    config_dir = Path("cfg").resolve()
+                    from utils import resolve_project_path
+
+                    config_dir = Path(resolve_project_path("cfg")).resolve()
                     os.startfile(str(config_dir))
                     return f"Opened {config_dir}"
                 if action == "complete-wizard":
@@ -801,8 +803,9 @@ class QmlHub:
                 if action == "accept-license":
                     self._store.update_config("settings", "license_accepted", "yes")
                     from tools.hub_first_run import mark_hub_license_acknowledged
+                    from utils import project_root
 
-                    mark_hub_license_acknowledged()
+                    mark_hub_license_acknowledged(project_root())
                     return "License accepted. Pyla-RL is free and must not be sold."
                 if action == "check-updates":
                     import webbrowser
@@ -829,7 +832,9 @@ class QmlHub:
                     def download_icons():
                         message = "Brawler icons ready."
                         try:
-                            icon_dir = Path("api") / "assets" / "brawler_icons"
+                            from utils import resolve_project_path
+
+                            icon_dir = Path(resolve_project_path("api/assets/brawler_icons"))
                             icon_dir.mkdir(parents=True, exist_ok=True)
                             from utils import get_brawler_list, update_missing_brawlers_info
 

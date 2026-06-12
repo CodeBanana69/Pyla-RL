@@ -4,8 +4,9 @@ import subprocess
 from pathlib import Path
 
 from gui.brand import OFFICIAL_GITHUB
+from utils import resolve_project_path
 
-BUILD_INFO_PATH = Path("cfg") / "build_info.json"
+BUILD_INFO_PATH = Path(resolve_project_path("cfg/build_info.json"))
 ALLOWED_GIT_REMOTES = ("CodeBanana69/Pyla-RL",)
 
 
