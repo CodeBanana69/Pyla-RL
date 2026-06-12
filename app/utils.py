@@ -425,6 +425,11 @@ def normalize_brawler_name(name):
     return re.sub(r"[^a-z0-9]", "", str(name).lower())
 
 
+def brawler_icon_file_path(brawler_name):
+    safe_name = normalize_brawler_name(brawler_name)
+    return resolve_project_path(f"api/assets/brawler_icons/{safe_name}.png")
+
+
 def load_brawler_name_aliases(file_path="cfg/names.json"):
     global _brawler_name_aliases
     if _brawler_name_aliases is not None:
@@ -688,8 +693,7 @@ def update_missing_brawlers_info(brawlers):
                 save_brawler_icon(brawler)
             else:
                 print(f"Could not find info for brawler '{brawler}'")
-        icon_path = resolve_project_path(f"api/assets/brawler_icons/{brawler}.png")
-        if not os.path.exists(icon_path):
+        if not os.path.exists(brawler_icon_file_path(brawler)):
             save_brawler_icon(brawler)
 
 
@@ -705,9 +709,11 @@ def get_brawler_info(brawler_name):
 
 
 def save_brawler_icon(brawler_name):
-    # Clean the brawler name for filename
-    brawler_name_clean = brawler_name.lower().replace(' ', '').replace('-', '').replace('.', '').replace('&',
-                                                                                                         '')
+    icon_path = brawler_icon_file_path(brawler_name)
+    if os.path.exists(icon_path):
+        return
+
+    brawler_name_clean = normalize_brawler_name(brawler_name)
     brawlers_url = "https://api.brawlify.com/v1/brawlers"
     response = requests.get(brawlers_url)
     if response.status_code != 200:
@@ -725,8 +731,6 @@ def save_brawler_icon(brawler_name):
             img_response = requests.get(icon_url)
             if img_response.status_code == 200:
                 image = Image.open(BytesIO(img_response.content))
-                safe_name = os.path.basename(brawler_name_clean).replace('.', '').replace('/', '').replace('\\', '')
-                icon_path = resolve_project_path(f"api/assets/brawler_icons/{safe_name}.png")
                 os.makedirs(os.path.dirname(icon_path), exist_ok=True)
                 image.save(icon_path)
                 print(f"Saved icon for brawler '{brawler_name}'")
