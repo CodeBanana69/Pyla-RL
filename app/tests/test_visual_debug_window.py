@@ -38,7 +38,7 @@ class PublishDebugViewTests(unittest.TestCase):
         with patch.object(play_module.Play, "get_brawler_range", return_value=(0, 120, 240)), patch.object(
             play_module.Play, "get_effective_enemy_range", return_value=150
         ), patch.object(play_module.Play, "is_there_poison_gas", return_value={}), patch.object(
-            play_module.Play, "get_player_foot_circle", return_value=((2, 3), 10)
+            play_module.Play, "get_player_foot_circle", return_value=(2, 3, 10)
         ):
             play_module.Play.publish_debug_view(self.play, frame, data, "match")
 

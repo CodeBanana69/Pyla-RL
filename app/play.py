@@ -2259,9 +2259,11 @@ class Play:
         if self.last_tile_detection_debug:
             debug_data["close_tile_debug"] = dict(self.last_tile_detection_debug)
         if debug_data.get("player"):
-            center, foot_r = self.get_player_foot_circle(debug_data["player"][0])
-            if center is not None:
-                debug_data["player_hit_circle"] = [int(center[0]), int(center[1]), int(round(foot_r))]
+            try:
+                foot_x, foot_y, foot_r = self.get_player_foot_circle(debug_data["player"][0])
+                debug_data["player_hit_circle"] = [int(foot_x), int(foot_y), int(round(foot_r))]
+            except (TypeError, ValueError, IndexError):
+                pass
         intent = getattr(self, "match_intent_summary", "")
         if intent:
             debug_data["match_intent"] = intent[:96]
