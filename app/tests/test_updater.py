@@ -149,6 +149,17 @@ class UpdaterTest(unittest.TestCase):
 
         self.assertIn('player_tag = "#GRR010Y1" # Brawl Stars player tag', merged)
 
+    def test_toml_merge_does_not_duplicate_quoted_bom_personal_webhook(self):
+        merged = merge_toml_text(
+            '"\\ufeffpersonal_webhook" = ""\nperformance_autotune = "no"\n',
+            '"\\ufeffpersonal_webhook" = "https://example.test"\nperformance_autotune = "yes"\n',
+        )
+
+        self.assertEqual(merged.count("personal_webhook"), 1)
+        self.assertIn('personal_webhook = "https://example.test"', merged)
+        self.assertIn('performance_autotune = "yes"', merged)
+        self.assertNotIn("Kept from your previous config", merged)
+
     def test_update_info_marker_round_trips_latest_sha(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)

@@ -325,18 +325,33 @@ def clean_preserved_toml_value(key: str, value: str) -> str:
     return value
 
 
+def normalize_toml_key(key: str) -> str:
+    key = key.strip()
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
+        key = key[1:-1]
+    stripped = key.replace("\\ufeff", "").lstrip("\ufeff")
+    if stripped == "personal_webhook":
+        return "personal_webhook"
+    return stripped or key
+
+
 def parse_simple_toml(text: str) -> dict:
     values = {}
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
-        key, raw_value = stripped.split("=", 1)
-        key = key.strip()
+        raw_key, raw_value = stripped.split("=", 1)
+        key = normalize_toml_key(raw_key)
         raw_value = split_toml_value_and_comment(raw_value.strip())[0].strip()
         if key:
             values[key] = clean_preserved_toml_value(key, raw_value)
     return values
+
+
+_TOML_KEY_PATTERN = re.compile(
+    r'^(\s*)("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z0-9_\-]+)(\s*=\s*)(.*)$'
+)
 
 
 def merge_toml_text(new_text: str, old_text: str) -> str:
@@ -344,14 +359,14 @@ def merge_toml_text(new_text: str, old_text: str) -> str:
     new_values = parse_simple_toml(new_text)
     merged_lines = []
     used_keys = set()
-    key_pattern = re.compile(r"^(\s*)([A-Za-z0-9_\-]+)(\s*=\s*)(.*)$")
 
     for line in new_text.splitlines():
-        match = key_pattern.match(line)
+        match = _TOML_KEY_PATTERN.match(line)
         if not match:
             merged_lines.append(line)
             continue
-        prefix, key, equals, new_value = match.groups()
+        prefix, raw_key, equals, new_value = match.groups()
+        key = normalize_toml_key(raw_key)
         _, suffix = split_toml_value_and_comment(new_value)
         if key in old_values:
             separator = " " if suffix and not suffix.startswith(" ") else ""
@@ -359,6 +374,7 @@ def merge_toml_text(new_text: str, old_text: str) -> str:
             used_keys.add(key)
         else:
             merged_lines.append(line)
+            used_keys.add(key)
 
     missing_user_keys = [key for key in old_values if key not in used_keys and key not in new_values]
     if missing_user_keys:
