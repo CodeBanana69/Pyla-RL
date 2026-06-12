@@ -18,6 +18,22 @@ for _path in (_APP_DIR, _INSTALL_ROOT):
     if _path.is_dir() and _entry not in sys.path:
         sys.path.insert(0, _entry)
 
+if __name__ == "__main__" and len(sys.argv) >= 9 and sys.argv[1] in ("--debug-viewer-worker", "--viewer-worker"):
+    from debug_view import DEFAULT_DEBUG_VIEW_FPS, run_viewer_worker
+
+    run_viewer_worker(
+        shared_memory_name=sys.argv[2],
+        debug_memory_name=sys.argv[3],
+        height=int(sys.argv[4]),
+        width=int(sys.argv[5]),
+        channels=int(sys.argv[6]),
+        dtype_text=sys.argv[7],
+        title=sys.argv[8],
+        clip_fps=float(sys.argv[9]) if len(sys.argv) >= 10 else DEFAULT_DEBUG_VIEW_FPS,
+        record_clips=(len(sys.argv) >= 11 and sys.argv[10] == "1"),
+    )
+    sys.exit(0)
+
 # requests<2.34 warns when urllib3>=2.7 is installed; harmless but noisy on every import.
 warnings.filterwarnings("ignore", message=".*doesn't match a supported version.*", module="requests")
 

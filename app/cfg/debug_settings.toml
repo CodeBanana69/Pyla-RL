@@ -1,2 +1,6 @@
 verbose_debug = "no"
 re_apply_movement = "yes"
+debug_view = "no"
+debug_view_fps = 30
+advanced_debug_visuals = "no"
+record_debug_preview_clips = "no"

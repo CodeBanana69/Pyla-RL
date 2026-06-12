@@ -695,6 +695,9 @@ class WindowController:
             self.re_apply_movement = str(debug_settings.get("re_apply_movement", "yes")).strip().lower() in (
                 "1", "true", "yes", "on"
             )
+            from debug_view import DebugViewPublisher
+
+            self.debug_view = DebugViewPublisher.from_config()
             self.start_scrcpy_client()
             atexit.register(self.close)
             print("Scrcpy client started successfully.")
@@ -1651,6 +1654,11 @@ class WindowController:
         return opened == BRAWL_STARS_PACKAGE
 
     def close(self):
+        try:
+            if hasattr(self, "debug_view"):
+                self.debug_view.close()
+        except Exception as exc:
+            print(f"Debug view close failed: {exc}")
         if hasattr(self, 'scrcpy_client'):
             client = self.scrcpy_client
             self.scrcpy_client = None

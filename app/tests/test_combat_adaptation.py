@@ -5,10 +5,7 @@ import unittest
 import cv2
 import numpy as np
 
-import play as play_module
 from play import Play
-
-play_module.visual_debug = False
 
 
 class CombatAdaptationTests(unittest.TestCase):

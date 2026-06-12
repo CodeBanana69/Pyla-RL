@@ -138,7 +138,7 @@ def main():
                     play.current_frame = frame
                     play.loop(brawler, data, time.time())
                     if args.visual_debug:
-                        play.show_visual_debug(frame, data, brawler)
+                        play.publish_debug_view(frame, data, "match")
                 elif time.time() - play.time_since_player_last_found > 1.0:
                     controller.keys_up(list("wasd"))
 

@@ -1,6 +1,5 @@
 ﻿import math
 import os
-import queue
 import random
 import threading
 import time
@@ -20,21 +19,12 @@ from core.integration import migrate_bot_config
 from state_finder import get_state
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, resolve_brawler_info_key, interpret_pyla_code, \
     count_mask_pixels, JOYSTICK_RADIUS, clamp, debug_beep, config_bool, resolve_project_path
-from visual_debug_window import (
-    log_visual_debug_startup,
-    opencv_highgui_available,
-    show_visual_debug_frame,
-)
+from visual_debug_window import log_visual_debug_startup
 
 brawl_stars_width, brawl_stars_height = 1920, 1080
 CLOSE_TILE_CROP_SIZE = 640
 CLOSE_TILE_MODEL_PATH = "models/closeTileDetector.onnx"
 DEBUG_FRAMES_DIR = resolve_project_path("debug_frames")
-visual_debug = str(load_toml_as_dict("cfg/general_config.toml").get("visual_debug", "no")).lower() in (
-    "yes",
-    "true",
-    "1",
-)
 super_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['super']
 gadget_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['gadget']
 hypercharge_crop_area = load_toml_as_dict("./cfg/lobby_config.toml")['pixel_counter_crop_area']['hypercharge']
@@ -215,21 +205,9 @@ class Play:
         self.refresh_enemy_spacing_config()
         general_config = load_toml_as_dict("cfg/general_config.toml")
         self.wall_stuck_debug = config_bool(general_config.get("wall_stuck_debug"), False)
-        global visual_debug
-        visual_debug = str(general_config.get("visual_debug", "no")).lower() in ("yes", "true", "1")
         self.advanced_visuals = str(general_config.get("advanced_visuals", "no")).lower() in ("yes", "true", "1")
-        self.visual_debug_scale = max(0.25, min(1.0, float(general_config.get("visual_debug_scale", 0.6))))
-        self.visual_debug_max_fps = max(1.0, float(general_config.get("visual_debug_max_fps", 30)))
-        self.visual_debug_max_boxes = max(20, int(general_config.get("visual_debug_max_boxes", 120)))
-        self._visual_debug_next_frame_at = 0.0
-        self._visual_debug_next_enqueue_at = 0.0
-        self._visual_debug_lock = threading.Lock()
-        self._visual_debug_payload = None
-        self._visual_debug_display_queue = queue.Queue(maxsize=1)
-        self._visual_debug_thread = None
-        self._visual_debug_stop = False
-        if visual_debug:
-            opencv_highgui_available()
+        debug_view = getattr(window_controller, "debug_view", None)
+        if debug_view is not None and debug_view.enabled:
             log_visual_debug_startup()
 
     @staticmethod
@@ -2231,245 +2209,13 @@ class Play:
         movement, updated_globals = interpret_pyla_code(self.pyla_code, self.context)
         return movement
 
-    def _copy_visual_debug_data(self, data):
-        copied = {}
-        for key, value in (data or {}).items():
-            if isinstance(value, list):
-                copied[key] = [
-                    list(item) if isinstance(item, (list, tuple, np.ndarray)) else item
-                    for item in value
-                ]
-            elif isinstance(value, dict):
-                if key == "close_tile_debug":
-                    copied[key] = dict(value)
-                else:
-                    copied[key] = dict(value)
-            else:
-                copied[key] = value
-        return copied
-
-    def _ensure_visual_debug_thread(self):
-        if self._visual_debug_thread and self._visual_debug_thread.is_alive():
-            return
-        self._visual_debug_stop = False
-        self._visual_debug_thread = threading.Thread(
-            target=self._visual_debug_loop,
-            name="PylaVisualDebug",
-            daemon=True,
-        )
-        self._visual_debug_thread.start()
-
-    def _enqueue_visual_debug_display(self, img):
-        while True:
-            try:
-                self._visual_debug_display_queue.get_nowait()
-            except queue.Empty:
-                break
-        try:
-            self._visual_debug_display_queue.put_nowait(img)
-        except queue.Full:
-            pass
-
-    def pump_visual_debug_display(self):
-        if not visual_debug:
-            return
-        try:
-            img = self._visual_debug_display_queue.get_nowait()
-        except queue.Empty:
-            return
-        show_visual_debug_frame(img)
-
-    def queue_visual_debug(self, frame, data, brawler=None):
-        now = time.time()
-        frame_delay = 1.0 / self.visual_debug_max_fps
-        if now < self._visual_debug_next_enqueue_at:
-            return
-        self._visual_debug_next_enqueue_at = now + frame_delay
-        self._ensure_visual_debug_thread()
-        payload = (
-            frame.copy() if isinstance(frame, np.ndarray) else np.array(frame),
-            self._copy_visual_debug_data(data),
-            brawler,
-        )
-        with self._visual_debug_lock:
-            self._visual_debug_payload = payload
-
-    def _visual_debug_loop(self):
-        frame_delay = 1.0 / self.visual_debug_max_fps
-        while not self._visual_debug_stop:
-            loop_started = time.time()
-            with self._visual_debug_lock:
-                payload = self._visual_debug_payload
-                self._visual_debug_payload = None
-            if payload is not None:
-                try:
-                    self.show_visual_debug(*payload, respect_throttle=False)
-                except Exception as exc:
-                    print(f"Visual debug renderer error: {exc}")
-            sleep_for = frame_delay - (time.time() - loop_started)
-            if sleep_for > 0:
-                time.sleep(min(sleep_for, frame_delay))
-
-    def _draw_player_foot_circle_debug(self, img, box, sp, s):
-        foot_x, foot_y, foot_r = self.get_player_foot_circle(box)
-        center = sp((foot_x, foot_y))
-        radius = max(3, s(int(round(foot_r))))
-        green = (0, 255, 0)
-        overlay = img.copy()
-        cv2.circle(overlay, center, radius, green, -1, cv2.LINE_AA)
-        cv2.addWeighted(overlay, 0.24, img, 0.76, 0, img)
-        cv2.circle(img, center, radius, green, max(2, s(2)), cv2.LINE_AA)
-        cv2.circle(img, center, max(2, s(2)), (255, 255, 255), -1, cv2.LINE_AA)
-
-    def show_visual_debug(self, frame, data, brawler=None, respect_throttle=True):
-        now = time.time()
-        if respect_throttle and now < self._visual_debug_next_frame_at:
-            return
-        if respect_throttle:
-            self._visual_debug_next_frame_at = now + (1.0 / self.visual_debug_max_fps)
-
-        scale = self.visual_debug_scale
-        if scale < 0.999:
-            img = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        else:
-            img = frame.copy() if isinstance(frame, np.ndarray) else np.array(frame)
-
-        def s(value):
-            return int(value * scale)
-
-        def sp(point):
-            return s(point[0]), s(point[1])
-
-        status = data.get("status") or data.get("state")
-        if status:
-            cv2.putText(
-                img,
-                str(status),
-                (8, max(24, s(24))),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.5, 0.7 * scale),
-                (255, 255, 0),
-                2,
-                cv2.LINE_AA,
-            )
-
-        colors = {
-            "player": (0, 255, 0),
-            "teammate": (0, 0, 255),
-            "enemy": (255, 0, 0),
-            "wall": (128, 128, 128),
-            "bush": (0, 180, 60),
-        }
-        boxes_drawn = 0
-        for key, color in colors.items():
-            boxes = data.get(key)
-            if not boxes:
-                continue
-            for box in boxes:
-                if boxes_drawn >= self.visual_debug_max_boxes:
-                    break
-                if len(box) < 4:
-                    continue
-                x1, y1, x2, y2 = map(int, box[:4])
-                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), color, max(1, s(2)))
-                if key != "wall":
-                    cv2.putText(
-                        img,
-                        key,
-                        sp((x1, max(y1 - 6, 0))),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        max(0.35, 0.5 * scale),
-                        color,
-                        1,
-                    )
-                boxes_drawn += 1
-
-        players = data.get("player") or []
-        if players:
-            px, py = self.get_player_pos(players[0])
-            center = sp((px, py))
-            spacing_range = s(int(data.get("effective_enemy_range") or data.get("attack_range") or 0))
-            attack_range = s(int(data.get("attack_range") or 0))
-            super_range = s(int(data.get("super_range") or 0))
-            if spacing_range > 0:
-                cv2.circle(img, center, spacing_range, (160, 32, 240), 2)
-            elif attack_range > 0:
-                cv2.circle(img, center, attack_range, (160, 32, 240), 2)
-            if super_range > 0:
-                cv2.circle(img, center, super_range, (255, 255, 0), 2)
-
-        movement = data.get("movement")
-        if movement and players:
-            px, py = self.get_player_pos(players[0])
-            mx, my = float(movement[0]), float(movement[1])
-            cv2.arrowedLine(
-                img,
-                sp((px, py)),
-                sp((px + mx * 80, py + my * 80)),
-                (0, 255, 255),
-                2,
-                tipLength=0.2,
-            )
-
-        joystick = data.get("joystick")
-        if joystick and len(joystick) >= 2:
-            jx, jy = int(joystick[0]), int(joystick[1])
-            radius = s(int(data.get("joystick_radius") or 50))
-            cv2.circle(img, sp((jx, jy)), radius, (255, 255, 255), 1)
-
-        close_tile_debug = data.get("close_tile_debug")
-        if close_tile_debug:
-            crop = close_tile_debug.get("crop")
-            if crop and len(crop) >= 4:
-                x1, y1, x2, y2 = map(int, crop[:4])
-                cv2.rectangle(img, sp((x1, y1)), sp((x2, y2)), (0, 220, 255), max(2, s(2)))
-            source = close_tile_debug.get("source", "full")
-            fallback = close_tile_debug.get("fallback")
-            if source == "close":
-                label = "Tile: close 640x640"
-                label_color = (0, 220, 255)
-            elif fallback:
-                label = f"Tile: full ({str(fallback).replace('_', ' ')})"
-                label_color = (255, 200, 80)
-            else:
-                label = "Tile: full"
-                label_color = (200, 200, 200)
-            cv2.putText(
-                img,
-                label,
-                (s(8), s(36)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.35, 0.5 * scale),
-                label_color,
-                max(1, s(1)),
-                cv2.LINE_AA,
-            )
-
-        intent = getattr(self, "match_intent_summary", "")
-        if intent:
-            cv2.putText(
-                img,
-                intent[:96],
-                (8, img.shape[0] - 12),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                max(0.4, 0.55 * scale),
-                (255, 255, 255),
-                1,
-                cv2.LINE_AA,
-            )
-
-        for box in data.get("player") or []:
-            if len(box) >= 4:
-                self._draw_player_foot_circle_debug(img, box, sp, s)
-
-        show_visual_debug_frame(img)
-
     def publish_debug_view(self, frame, data, state, movement=None):
-        self.frame = frame
-        advanced_visuals = self.advanced_visuals
         debug_view = getattr(self.window_controller, "debug_view", None)
-        if debug_view is not None:
-            advanced_visuals = bool(getattr(debug_view, "advanced_visuals", advanced_visuals))
+        if debug_view is None or not debug_view.enabled:
+            return
+
+        self.frame = frame
+        advanced_visuals = bool(getattr(debug_view, "advanced_visuals", self.advanced_visuals))
         debug_data = {
             "state": state,
             "player": [],
@@ -2512,17 +2258,16 @@ class Play:
             debug_data["movement"] = [float(movement[0]), float(movement[1])]
         if self.last_tile_detection_debug:
             debug_data["close_tile_debug"] = dict(self.last_tile_detection_debug)
+        if debug_data.get("player"):
+            center, foot_r = self.get_player_foot_circle(debug_data["player"][0])
+            if center is not None:
+                debug_data["player_hit_circle"] = [int(center[0]), int(center[1]), int(round(foot_r))]
+        intent = getattr(self, "match_intent_summary", "")
+        if intent:
+            debug_data["match_intent"] = intent[:96]
+        if not data:
+            debug_data["status"] = f"No detections ({state})"
 
-        if visual_debug:
-            if not data:
-                debug_data["status"] = f"No detections ({state})"
-            else:
-                debug_data["state"] = state
-            self.queue_visual_debug(frame, debug_data, self.current_brawler)
-            return
-
-        if debug_view is None:
-            return
         debug_view.publish(frame, debug_data)
 
     def main(self, frame, brawler, main):
