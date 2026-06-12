@@ -157,6 +157,8 @@ class Play:
         self._spacing_strafe_side = 1
         self._spacing_strafe_last_flip_at = 0.0
         self._spacing_action = None
+        self._spacing_threat_count = 0
+        self._spacing_force_vector = None
         self._evasion_active = False
         self._dodge_side = 1
         self._dodge_committed_until = 0.0
@@ -1193,6 +1195,70 @@ class Play:
         self.smart_aim_enabled = smart_aim
         projectile_speed = bot_config.get("projectile_speed_px_s")
         self.projectile_speed_px_s = float(projectile_speed if projectile_speed is not None else 1200.0)
+        self.multi_enemy_flee_weight = float(bot_config.get("multi_enemy_flee_weight", 0.45))
+        self.approach_flank_blend = float(bot_config.get("approach_flank_blend", 0.12))
+        self.retreat_strafe_fraction = float(bot_config.get("retreat_strafe_fraction", 0.5))
+
+    def iter_hittable_enemies(self, enemy_data, player_pos, walls, skill_type="attack"):
+        for enemy in enemy_data or []:
+            enemy_pos = self.get_entity_pos(enemy)
+            distance = self.get_distance(enemy_pos, player_pos)
+            if self.is_enemy_hittable(player_pos, enemy_pos, walls, skill_type):
+                yield enemy_pos, distance
+
+    @staticmethod
+    def compute_multi_enemy_spacing_forces(
+        player_pos,
+        enemies,
+        target,
+        tolerance,
+        flee_weight,
+        approach_blend,
+    ):
+        if not enemies:
+            return 0.0, 0.0, "hold", 0
+
+        closest_distance = min(distance for _pos, distance in enemies)
+        fx = 0.0
+        fy = 0.0
+        too_close = 0
+        too_far = 0
+        target = max(float(target), 1.0)
+        tolerance = max(float(tolerance), 0.0)
+        flee_weight = max(float(flee_weight), 0.0)
+        approach_blend = max(float(approach_blend), 0.0)
+
+        for enemy_pos, distance in enemies:
+            dx = enemy_pos[0] - player_pos[0]
+            dy = enemy_pos[1] - player_pos[1]
+            mag = math.hypot(dx, dy)
+            if mag < 1.0:
+                mag = 1.0
+            ux = dx / mag
+            uy = dy / mag
+
+            if distance < target - tolerance:
+                too_close += 1
+                weight = (target - tolerance - distance) / target
+                if distance > closest_distance + 1.0:
+                    weight *= 1.0 + flee_weight
+                fx -= ux * weight
+                fy -= uy * weight
+            elif distance > target + tolerance:
+                too_far += 1
+                weight = (distance - target - tolerance) / target * approach_blend
+                fx += ux * weight
+                fy += uy * weight
+
+        if too_close > 0:
+            action = "retreat"
+        elif too_far > 0:
+            action = "approach"
+        else:
+            action = "hold"
+
+        threat_count = len(enemies)
+        return fx, fy, action, threat_count
 
     def _clear_dodge_commitment(self, *, flip_side: bool = False) -> None:
         if flip_side:
@@ -1333,44 +1399,42 @@ class Play:
         strafe_side = int(getattr(self, "_spacing_strafe_side", 1) or 1)
         return (-norm_y * JOYSTICK_RADIUS * strafe_side, norm_x * JOYSTICK_RADIUS * strafe_side)
 
-    def get_enemy_spacing_movement(self, player_data, player_pos, enemy_coords, enemy_distance, brawler, walls):
-        safe_range, _, _ = self.get_brawler_range(brawler)
-        if getattr(self, "enemy_spacing_enabled", True):
-            target = self.get_effective_enemy_range(brawler)
-            tolerance = float(getattr(self, "enemy_spacing_tolerance", 40))
-            action = self.get_enemy_spacing_action(enemy_distance, target, tolerance)
-        else:
-            action = "approach" if enemy_distance > safe_range else "retreat"
+    def _enemy_spacing_movement_from_direction(
+        self,
+        player_data,
+        player_pos,
+        action,
+        direction_x,
+        direction_y,
+        walls,
+        *,
+        apply_retreat_velocity=True,
+    ):
         self._spacing_action = action
-
-        toward_x = enemy_coords[0] - player_pos[0]
-        toward_y = enemy_coords[1] - player_pos[1]
         vx, vy = self.get_tracked_enemy_velocity()
-
-        if action == "approach":
-            direction_x = toward_x
-            direction_y = toward_y
-        elif action == "retreat":
-            direction_x = -toward_x
-            direction_y = -toward_y
-            if math.hypot(vx, vy) > 1.0:
-                direction_x -= vx * 0.35
-                direction_y -= vy * 0.35
-        else:
-            direction_x = toward_x
-            direction_y = toward_y
+        if action == "retreat" and apply_retreat_velocity and math.hypot(vx, vy) > 1.0:
+            direction_x -= vx * 0.35
+            direction_y -= vy * 0.35
 
         magnitude = math.hypot(direction_x, direction_y)
         if magnitude < 1:
             magnitude = 1.0
         norm_x = direction_x / magnitude
         norm_y = direction_y / magnitude
+        self._spacing_force_vector = (norm_x, norm_y)
 
         if action == "approach":
             move_diagonal = (direction_x, direction_y)
             move_horizontal = (direction_x, 0)
             move_vertical = (0, direction_y)
         elif action == "retreat":
+            strafe_fraction = clamp(float(getattr(self, "retreat_strafe_fraction", 0.5)), 0.0, 1.0)
+            if strafe_fraction > 0:
+                strafe_side = int(getattr(self, "_spacing_strafe_side", 1) or 1)
+                tangent_x = -norm_y * strafe_side
+                tangent_y = norm_x * strafe_side
+                direction_x = direction_x * (1.0 - strafe_fraction) + tangent_x * JOYSTICK_RADIUS * strafe_fraction
+                direction_y = direction_y * (1.0 - strafe_fraction) + tangent_y * JOYSTICK_RADIUS * strafe_fraction
             move_diagonal = (direction_x, direction_y)
             move_horizontal = (direction_x, 0)
             move_vertical = (0, direction_y)
@@ -1406,6 +1470,103 @@ class Play:
             if not self.is_path_blocked(player_data, move, walls):
                 return move
         return move_diagonal
+
+    def get_multi_enemy_spacing_movement(self, player_data, player_pos, enemy_data, brawler, walls):
+        self._spacing_threat_count = 0
+        self._spacing_force_vector = None
+        enemies = list(self.iter_hittable_enemies(enemy_data, player_pos, walls, "attack"))
+        if not enemies:
+            unhittable = self.find_closest_enemy(enemy_data, player_pos, walls, "attack")
+            if not unhittable or unhittable[0] is None:
+                return (0, 0)
+            enemy_coords, enemy_distance = unhittable
+            return self.get_enemy_spacing_movement(
+                player_data, player_pos, enemy_coords, enemy_distance, brawler, walls
+            )
+
+        if len(enemies) == 1:
+            enemy_coords, enemy_distance = enemies[0]
+            return self.get_enemy_spacing_movement(
+                player_data, player_pos, enemy_coords, enemy_distance, brawler, walls
+            )
+
+        safe_range, _, _ = self.get_brawler_range(brawler)
+        if getattr(self, "enemy_spacing_enabled", True):
+            target = self.get_effective_enemy_range(brawler)
+            tolerance = float(getattr(self, "enemy_spacing_tolerance", 40))
+            flee_weight = float(getattr(self, "multi_enemy_flee_weight", 0.45))
+            approach_blend = float(getattr(self, "approach_flank_blend", 0.12))
+            fx, fy, action, threat_count = self.compute_multi_enemy_spacing_forces(
+                player_pos,
+                enemies,
+                target,
+                tolerance,
+                flee_weight,
+                approach_blend,
+            )
+            self._spacing_threat_count = threat_count
+            if math.hypot(fx, fy) < 0.01:
+                centroid_x = sum(pos[0] for pos, _dist in enemies) / len(enemies)
+                centroid_y = sum(pos[1] for pos, _dist in enemies) / len(enemies)
+                fx = centroid_x - player_pos[0]
+                fy = centroid_y - player_pos[1]
+            return self._enemy_spacing_movement_from_direction(
+                player_data,
+                player_pos,
+                action,
+                fx,
+                fy,
+                walls,
+            )
+
+        closest = min(enemies, key=lambda item: item[1])
+        enemy_coords, enemy_distance = closest
+        action = "approach" if enemy_distance > safe_range else "retreat"
+        toward_x = enemy_coords[0] - player_pos[0]
+        toward_y = enemy_coords[1] - player_pos[1]
+        if action == "retreat":
+            toward_x = -toward_x
+            toward_y = -toward_y
+        self._spacing_threat_count = len(enemies)
+        return self._enemy_spacing_movement_from_direction(
+            player_data,
+            player_pos,
+            action,
+            toward_x,
+            toward_y,
+            walls,
+        )
+
+    def get_enemy_spacing_movement(self, player_data, player_pos, enemy_coords, enemy_distance, brawler, walls):
+        safe_range, _, _ = self.get_brawler_range(brawler)
+        if getattr(self, "enemy_spacing_enabled", True):
+            target = self.get_effective_enemy_range(brawler)
+            tolerance = float(getattr(self, "enemy_spacing_tolerance", 40))
+            action = self.get_enemy_spacing_action(enemy_distance, target, tolerance)
+        else:
+            action = "approach" if enemy_distance > safe_range else "retreat"
+
+        toward_x = enemy_coords[0] - player_pos[0]
+        toward_y = enemy_coords[1] - player_pos[1]
+        if action == "approach":
+            direction_x = toward_x
+            direction_y = toward_y
+        elif action == "retreat":
+            direction_x = -toward_x
+            direction_y = -toward_y
+        else:
+            direction_x = toward_x
+            direction_y = toward_y
+
+        self._spacing_threat_count = 1
+        return self._enemy_spacing_movement_from_direction(
+            player_data,
+            player_pos,
+            action,
+            direction_x,
+            direction_y,
+            walls,
+        )
 
     def release_held_attack_for_super(self):
         persistent = getattr(self, "persistent_data", None)
@@ -1559,18 +1720,20 @@ class Play:
                 in_range = enemy_distance <= attack_range
                 hittable = self.is_enemy_hittable(player_pos, enemy_coords, walls, "attack")
                 dist = int(enemy_distance)
+                threat_count = int(getattr(self, "_spacing_threat_count", 0) or 0)
+                threat_suffix = f" ({threat_count} threats, target {target}px)" if threat_count > 1 else f" (target {target}px)"
                 if getattr(self, "_evasion_active", False) and hittable:
-                    intent = f"{label} — enemy has line of sight at {dist}px"
+                    intent = f"{label} — enemy has line of sight at {dist}px{threat_suffix}"
                     self.match_intent_summary = "Dodging"
                     key = "match:dodge"
                 elif in_range and hittable:
-                    intent = f"{label} — shooting at {dist}px (target {target}px)"
+                    intent = f"{label} — shooting at {dist}px{threat_suffix}"
                     self.match_intent_summary = "Shooting"
                 elif in_range:
-                    intent = f"{label} — in range at {dist}px but line of sight blocked"
+                    intent = f"{label} — in range at {dist}px but line of sight blocked{threat_suffix}"
                     self.match_intent_summary = "Blocked shot"
                 else:
-                    intent = f"{label} — {dist}px from enemy (target {target}px)"
+                    intent = f"{label} — {dist}px from enemy{threat_suffix}"
                     self.match_intent_summary = label
                 if not getattr(self, "_evasion_active", False):
                     key = f"match:{action}:{dist // 40}"
@@ -1606,6 +1769,7 @@ class Play:
                 'get_brawler_range': self.get_brawler_range,
                 'get_effective_enemy_range': self.get_effective_enemy_range,
                 'get_enemy_spacing_movement': self.get_enemy_spacing_movement,
+                'get_multi_enemy_spacing_movement': self.get_multi_enemy_spacing_movement,
                 'get_player_pos': self.get_player_pos,
                 'get_player_foot_circle': self.get_player_foot_circle,
                 'should_use_super_on_enemy': self.should_use_super_on_enemy,
@@ -2279,12 +2443,26 @@ class Play:
                 hints["markers"].append(self._debug_marker(teammate_pos, (0, 140, 255), "follow", 18))
 
         if self.is_there_enemy(enemies):
+            hittable_enemies = list(self.iter_hittable_enemies(enemies, player_pos, walls, "attack"))
             enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
-            if enemy_result:
-                enemy_pos, enemy_distance = enemy_result
-                hints["arrows"].append(self._debug_arrow(origin, enemy_pos, (0, 0, 255), "ENEMY"))
-                hints["markers"].append(self._debug_marker(enemy_pos, (0, 0, 255), "target", 16))
+            primary_pos = enemy_result[0] if enemy_result else None
+            for index, (enemy_pos, _enemy_distance) in enumerate(hittable_enemies):
+                is_primary = primary_pos is not None and enemy_pos == primary_pos
+                label = "TARGET" if is_primary else f"ENEMY{index + 1}"
+                color = (0, 0, 255) if is_primary else (120, 80, 255)
+                hints["arrows"].append(self._debug_arrow(origin, enemy_pos, color, label))
+                hints["markers"].append(self._debug_marker(enemy_pos, color, "target" if is_primary else "threat", 16))
 
+            spacing_force = getattr(self, "_spacing_force_vector", None)
+            if spacing_force and math.hypot(spacing_force[0], spacing_force[1]) > 0.01:
+                force_tip = (
+                    origin[0] + spacing_force[0] * 95,
+                    origin[1] + spacing_force[1] * 95,
+                )
+                hints["arrows"].append(self._debug_arrow(origin, force_tip, (160, 32, 240), "SPACING"))
+
+            if enemy_result and enemy_result[0] is not None:
+                enemy_pos, enemy_distance = enemy_result
                 track = getattr(self, "_enemy_track", None) or {}
                 tracked_pos = track.get("pos") or enemy_pos
                 vx, vy = self.get_tracked_enemy_velocity()

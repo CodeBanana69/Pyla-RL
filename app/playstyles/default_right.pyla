@@ -34,7 +34,7 @@ else:
         movement = no_enemy_movement(player_data, walls)
     else:
         if debug: print("found enemy pos:", enemy_coords)
-        movement = get_enemy_spacing_movement(player_data, player_pos, enemy_coords, enemy_distance, brawler, walls)
+        movement = get_multi_enemy_spacing_movement(player_data, player_pos, enemy_data, brawler, walls)
 
         if is_super_ready and persistent_data["time_since_holding_attack"] is None:
             super_type = brawler_info['super_type']

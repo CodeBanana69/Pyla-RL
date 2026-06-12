@@ -56,7 +56,7 @@ else:
     if enemy_coords is None:
         movement = anti_poison_gas_movement or teammate_follow_movement()
     else:
-        movement = get_enemy_spacing_movement(player_data, player_pos, enemy_coords, enemy_distance, brawler, walls)
+        movement = get_multi_enemy_spacing_movement(player_data, player_pos, enemy_data, brawler, walls)
 
         if persistent_data["time_since_holding_attack"] is None:
             try_use_super_on_enemy(brawler, brawler_info, player_pos, enemy_coords, enemy_distance, walls)

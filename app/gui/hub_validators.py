@@ -23,6 +23,7 @@ def validate_config_value(section, key, value):
         "ocr_scale_down_factor",
         "enemy_spacing_blend",
         "enemy_spacing_tolerance",
+        "multi_enemy_flee_weight",
         "combat_dodge_blend",
         "combat_dodge_jitter_degrees",
     }:
@@ -34,6 +35,11 @@ def validate_config_value(section, key, value):
         blend = float(text or "0")
         if blend < 0 or blend > 1:
             raise ValueError("Spacing aggression must be between 0 and 1.")
+
+    if section == "settings" and key == "multi_enemy_flee_weight":
+        weight = float(text or "0")
+        if weight < 0 or weight > 1:
+            raise ValueError("Multi-enemy threat weight must be between 0 and 1.")
 
     if section == "settings" and key == "combat_dodge_blend":
         blend = float(text or "0")

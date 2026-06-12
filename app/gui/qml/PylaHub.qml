@@ -3225,6 +3225,11 @@ ApplicationWindow {
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_hold_strafe"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_hold_strafe", value) } } }
                         }
                         FieldRow {
+                            label: "Multi-Enemy Threat Weight"
+                            hint: "Higher values flee harder from extra close enemies while kiting everyone at max range."
+                            NumericSlider { anchors.fill: parent; value: String(root.value("settings", "multi_enemy_flee_weight")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "multi_enemy_flee_weight", value) } }
+                        }
+                        FieldRow {
                             label: "Dodge Under Fire"
                             hint: "Random sideways jitter when an enemy has clear line of sight."
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "combat_los_dodge_enabled"); onToggled: function(value) { root.saveValue("settings", "combat_los_dodge_enabled", value) } } }

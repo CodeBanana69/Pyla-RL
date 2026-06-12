@@ -8,7 +8,7 @@ class PlaystyleLoadTests(unittest.TestCase):
         metadata, code = load_pyla_script("team_showdown.pyla")
         self.assertIn("name", metadata)
         self.assertIn("movement", code.lower())
-        self.assertIn("get_enemy_spacing_movement", code)
+        self.assertIn("get_multi_enemy_spacing_movement", code)
 
     def test_playstyles_list_not_empty(self):
         playstyles = get_playstyles_list()

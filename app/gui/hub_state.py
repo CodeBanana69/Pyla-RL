@@ -85,6 +85,7 @@ class HubStateStore:
         "enemy_spacing_blend": ("bot", "float"),
         "enemy_spacing_tolerance": ("bot", "float"),
         "enemy_spacing_hold_strafe": ("bot", "yesno"),
+        "multi_enemy_flee_weight": ("bot", "float"),
         "combat_los_dodge_enabled": ("bot", "yesno"),
         "combat_dodge_blend": ("bot", "float"),
         "combat_dodge_jitter_degrees": ("bot", "float"),
@@ -254,6 +255,7 @@ class HubStateStore:
             "enemy_spacing_hold_strafe",
             self.bot_config.get("strafe_while_attacking", "yes"),
         )
+        self.bot_config.setdefault("multi_enemy_flee_weight", 0.45)
         self.bot_config.setdefault("combat_los_dodge_enabled", "yes")
         self.bot_config.setdefault("combat_dodge_blend", 0.45)
         self.bot_config.setdefault("combat_dodge_jitter_degrees", 18.0)

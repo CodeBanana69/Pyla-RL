@@ -274,63 +274,11 @@ else:
         else:
             try_attack(enemy_coords, enemy_distance)
 
-        # ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
-        #  MOVIMENTA├ç├âO POR ARQU├ëTIPO (Sem travar ataque)
-        # ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
-        if archetype == "ASSASSIN":
-            if enemy_distance > attack_range * 0.40:
-                movement = move_toward(enemy_coords)
-            else:
-                movement = strafe_around(enemy_coords)
-
-        elif archetype == "TANK":
-            if enemy_distance > attack_range * 0.25:
-                movement = move_toward(enemy_coords)
-            else:
-                movement = strafe_around(enemy_coords)
-
-        elif archetype == "SNIPER":
-            min_safe = attack_range * 0.35
-            ideal_far = attack_range * 0.75
-
-            if enemy_distance < min_safe:
-                movement = move_away_from(enemy_coords)
-            elif enemy_distance <= ideal_far:
-                movement = strafe_around(enemy_coords)
-            else:
-                movement = move_toward(enemy_coords)
-
-        elif archetype == "LOBS":
-            ideal_dist = attack_range * 0.55
-
-            if enemy_distance < attack_range * 0.45:
-                movement = move_away_from(enemy_coords)
-            elif enemy_distance > ideal_dist:
-                movement = move_toward(enemy_coords)
-            else:
-                movement = strafe_around(enemy_coords)
-
-        else: # RANGED
-            min_safe = max(safe_range * 0.50, attack_range * 0.30)
-            ideal_far = attack_range * 0.60
-
-            if enemy_distance < min_safe:
-                movement = move_away_from(enemy_coords)
-            elif enemy_distance <= ideal_far:
-                movement = strafe_around(enemy_coords)
-            else:
-                movement = move_toward(enemy_coords)
-
-        # Tratamento contra paredes quando em combate
+        movement = get_multi_enemy_spacing_movement(player_data, player_pos, enemy_data, _brawler_name, walls)
         if is_blocked(movement):
-            if enemy_distance < safe_range:
-                movement = first_unblocked(
-                    [move_away_from(enemy_coords), strafe_around(enemy_coords), random_safe_movement()], movement
-                )
-            else:
-                movement = first_unblocked(
-                    [move_toward(enemy_coords), strafe_around(enemy_coords), random_safe_movement()], movement
-                )
+            movement = first_unblocked(
+                [move_away_from(enemy_coords), strafe_around(enemy_coords), random_safe_movement()], movement
+            )
 
 
 # ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
