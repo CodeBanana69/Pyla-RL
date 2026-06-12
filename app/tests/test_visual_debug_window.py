@@ -82,6 +82,11 @@ class VisualDebugDisplayPumpTests(unittest.TestCase):
         play_module.visual_debug = True
         self.play = object.__new__(play_module.Play)
         self.play._visual_debug_display_queue = queue.Queue(maxsize=1)
+        self.play.visual_debug_scale = 1.0
+        self.play.visual_debug_max_fps = 30.0
+        self.play.visual_debug_max_boxes = 120
+        self.play._visual_debug_next_frame_at = 0.0
+        self.play.match_intent_summary = ""
 
     def tearDown(self):
         play_module.visual_debug = self._previous_visual_debug
@@ -95,12 +100,12 @@ class VisualDebugDisplayPumpTests(unittest.TestCase):
         np.testing.assert_array_equal(queued, second)
 
     @patch("play.show_visual_debug_frame")
-    def test_pump_displays_latest_frame(self, mock_show):
+    def test_show_visual_debug_displays_frame(self, mock_show):
         img = np.zeros((8, 8, 3), dtype=np.uint8)
-        play_module.Play._enqueue_visual_debug_display(self.play, img)
-        play_module.Play.pump_visual_debug_display(self.play)
+        data = {"state": "match"}
+        play_module.Play.show_visual_debug(self.play, img, data, respect_throttle=False)
         mock_show.assert_called_once()
-        np.testing.assert_array_equal(mock_show.call_args.args[0], img)
+        np.testing.assert_array_equal(mock_show.call_args.args[0].shape, (8, 8, 3))
 
     @patch("play.show_visual_debug_frame")
     def test_pump_noops_when_queue_empty(self, mock_show):
@@ -150,7 +155,7 @@ class ShowVisualDebugFrameTests(unittest.TestCase):
         mock_resize_window.assert_called_once_with(vdw.VISUAL_DEBUG_WINDOW_NAME, 1920, 1080)
         mock_imshow.assert_called_once()
         displayed = mock_imshow.call_args.args[1]
-        self.assertEqual(displayed.shape, (1080, 1920, 3))
+        self.assertEqual(displayed.shape, (6, 6, 3))
 
     @patch.object(vdw, "_primary_monitor_rect", return_value=(0, 0, 1920, 1080))
     @patch.object(vdw, "opencv_highgui_available", return_value=True)

@@ -139,7 +139,6 @@ def main():
                     play.loop(brawler, data, time.time())
                     if args.visual_debug:
                         play.show_visual_debug(frame, data, brawler)
-                        play.pump_visual_debug_display()
                 elif time.time() - play.time_since_player_last_found > 1.0:
                     controller.keys_up(list("wasd"))
 

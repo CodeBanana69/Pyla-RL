@@ -1115,7 +1115,6 @@ def pyla_main(data):
                         brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
                         self.Play.current_brawler = brawler
                         self.Play.main(frame, brawler, self)
-                        self.Play.pump_visual_debug_display()
                         c += 1
                     time.sleep(0.005)
                     continue
@@ -1125,7 +1124,6 @@ def pyla_main(data):
                 brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
                 self.Play.current_brawler = brawler
                 self.Play.main(frame, brawler, self)
-                self.Play.pump_visual_debug_display()
                 c += 1
 
                 if self.max_ips and frame_start is not None:

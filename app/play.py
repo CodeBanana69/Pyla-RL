@@ -2462,7 +2462,7 @@ class Play:
             if len(box) >= 4:
                 self._draw_player_foot_circle_debug(img, box, sp, s)
 
-        self._enqueue_visual_debug_display(img)
+        show_visual_debug_frame(img)
 
     def publish_debug_view(self, frame, data, state, movement=None):
         self.frame = frame

@@ -169,13 +169,10 @@ def log_visual_debug_startup():
 
 
 def show_visual_debug_frame(img):
-    source_h, source_w = img.shape[:2]
-    target_w, target_h = _display_target_size(source_w, source_h)
-    display = _fit_image_to_rect(img, target_w, target_h)
-
     if opencv_highgui_available():
+        target_w, target_h = _display_target_size(img.shape[1], img.shape[0])
         _ensure_opencv_debug_window(target_w, target_h)
-        cv2.imshow(VISUAL_DEBUG_WINDOW_NAME, cv2.cvtColor(display, cv2.COLOR_RGB2BGR))
+        cv2.imshow(VISUAL_DEBUG_WINDOW_NAME, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
         cv2.waitKey(1)
         return
     warn_missing_opencv_highgui_once()
@@ -379,31 +376,41 @@ if sys.platform == "win32":
             if dest_w <= 0 or dest_h <= 0:
                 return
 
-            display = _fit_image_to_rect(rgb_image, dest_w, dest_h)
-            fitted_h, fitted_w = display.shape[:2]
+            source_h, source_w = rgb_image.shape[:2]
+            if source_w > dest_w or source_h > dest_h:
+                rgb_image = _fit_image_to_rect(rgb_image, dest_w, dest_h, allow_upscale=False)
+                source_h, source_w = rgb_image.shape[:2]
+
+            dest_x = max(0, (dest_w - source_w) // 2)
+            dest_y = max(0, (dest_h - source_h) // 2)
 
             hdc = user32.GetDC(hwnd)
             if not hdc:
                 return
             try:
-                bgr = np.ascontiguousarray(display[:, :, ::-1])
+                brush = gdi32.CreateSolidBrush(0x000000)
+                if brush:
+                    fill = RECT(0, 0, dest_w, dest_h)
+                    user32.FillRect(hdc, ctypes.byref(fill), brush)
+                    gdi32.DeleteObject(brush)
+                bgr = np.ascontiguousarray(rgb_image[:, :, ::-1])
                 bmi = BITMAPINFO()
                 bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-                bmi.bmiHeader.biWidth = fitted_w
-                bmi.bmiHeader.biHeight = -fitted_h
+                bmi.bmiHeader.biWidth = source_w
+                bmi.bmiHeader.biHeight = -source_h
                 bmi.bmiHeader.biPlanes = 1
                 bmi.bmiHeader.biBitCount = 24
                 bmi.bmiHeader.biCompression = BI_RGB
                 gdi32.StretchDIBits(
                     hdc,
+                    dest_x,
+                    dest_y,
+                    source_w,
+                    source_h,
                     0,
                     0,
-                    dest_w,
-                    dest_h,
-                    0,
-                    0,
-                    fitted_w,
-                    fitted_h,
+                    source_w,
+                    source_h,
                     bgr.ctypes.data,
                     ctypes.byref(bmi),
                     DIB_RGB_COLORS,
