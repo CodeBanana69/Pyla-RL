@@ -48,6 +48,17 @@ class NotifyUserTests(unittest.TestCase):
         )
         mock_run.assert_called_once()
 
+    @patch("utils.async_notify_user", new_callable=MagicMock)
+    @patch("asyncio.run")
+    def test_notify_user_accepts_explicit_details(self, mock_run, mock_async):
+        manager = MagicMock()
+        payload = {"message": "Daily summary", "matches": 3, "wins": 2}
+
+        notify_user("daily_digest", None, manager, details=payload)
+
+        mock_async.assert_called_once_with("daily_digest", None, details=payload)
+        mock_run.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

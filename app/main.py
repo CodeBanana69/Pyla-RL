@@ -970,15 +970,18 @@ def pyla_main(data):
 
             if not should_send_digest(last_sent_at=float(getattr(self, "_last_digest_sent_at", 0) or 0)):
                 return
-            payload = build_daily_digest(instance_id=self.instance_id or None)
-            text = format_daily_digest_text(payload)
-            notify_user(
-                "daily_digest",
-                None,
-                self.Stage_manager,
-                details={"message": text, **payload},
-            )
-            self._last_digest_sent_at = time.time()
+            try:
+                payload = build_daily_digest(instance_id=self.instance_id or None)
+                text = format_daily_digest_text(payload)
+                notify_user(
+                    "daily_digest",
+                    None,
+                    self.Stage_manager,
+                    details={"message": text, **payload},
+                )
+                self._last_digest_sent_at = time.time()
+            except Exception as exc:
+                runtime_log.log_warn("digest", f"Daily digest failed: {exc}")
 
         def main(self):
             s_time = time.time()

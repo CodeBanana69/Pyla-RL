@@ -1079,27 +1079,37 @@ def build_notification_details(message_type, stage_manager) -> dict:
     return details
 
 
-def notify_user(message_type, screenshot, stage_manager, *, match_record=None) -> None:
+def notify_user(
+    message_type,
+    screenshot,
+    stage_manager,
+    *,
+    match_record=None,
+    details=None,
+) -> None:
     import asyncio
 
-    if isinstance(stage_manager, dict):
-        details = stage_manager
+    if details is not None:
+        event_details = details
+        event_type = _map_notification_event_type(message_type)
+    elif isinstance(stage_manager, dict):
+        event_details = stage_manager
         event_type = message_type
     elif message_type == "match" and match_record is not None:
-        details = build_match_notification_details(stage_manager, match_record)
+        event_details = build_match_notification_details(stage_manager, match_record)
         event_type = "match"
     else:
-        details = build_notification_details(message_type, stage_manager)
+        event_details = build_notification_details(message_type, stage_manager)
         event_type = _map_notification_event_type(message_type)
 
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            asyncio.create_task(async_notify_user(event_type, screenshot, details=details))
+            asyncio.create_task(async_notify_user(event_type, screenshot, details=event_details))
             return
     except RuntimeError:
         pass
-    asyncio.run(async_notify_user(event_type, screenshot, details=details))
+    asyncio.run(async_notify_user(event_type, screenshot, details=event_details))
 
 
 def debug_beep():
