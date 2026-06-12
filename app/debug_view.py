@@ -15,7 +15,7 @@ from utils import config_bool, load_toml_as_dict, resolve_project_path
 DEFAULT_DEBUG_VIEW_FPS = 30
 DEBUG_DATA_SIZE = 262144
 DEBUG_DATA_HEADER_SIZE = 12
-DEBUG_VIEW_TITLE = "PylaAi-XXZ Debug View"
+DEBUG_VIEW_TITLE = "Mom Said It's My Turn To Watch"
 
 
 def _running_as_compiled_executable():
