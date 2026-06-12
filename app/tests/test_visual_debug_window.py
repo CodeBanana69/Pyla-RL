@@ -48,6 +48,39 @@ class PublishDebugViewTests(unittest.TestCase):
         self.assertEqual(published_data["state"], "match")
         self.assertEqual(published_data["match_intent"], "Shooting")
         self.assertEqual(published_data["player_hit_circle"], [2, 3, 10])
+        self.assertIn("arrows", published_data)
+
+    def test_build_debug_overlay_hints_adds_movement_arrow(self):
+        play = play_module.Play.__new__(play_module.Play)
+        play.match_intent_summary = "Shooting"
+        play.is_showdown = False
+        play._evasion_active = False
+        play._dodge_vector = None
+        play._fog_direction_escape_cached = None
+        play._fog_threat_cached = None
+        play._spacing_action = "hold"
+        play.escape_state = {"phase": None}
+        play._enemy_track = {"pos": (50, 50), "velocity": (20.0, 0.0)}
+        play.window_controller = MagicMock(scale_factor=1.0)
+        play.projectile_speed_px_s = 1200.0
+        with patch.object(play_module.Play, "movement_to_vector", return_value=(60.0, 0.0)), patch.object(
+            play_module.Play, "is_there_enemy", return_value=True
+        ), patch.object(
+            play_module.Play, "find_closest_enemy", return_value=((80, 50), 30.0)
+        ), patch.object(
+            play_module.Play, "get_tracked_enemy_velocity", return_value=(20.0, 0.0)
+        ), patch.object(
+            play_module.Play, "get_player_pos", return_value=(40.0, 50.0)
+        ), patch.object(
+            play_module.Play, "get_player_foot_circle", return_value=(40.0, 52.0, 10.0)
+        ):
+            hints = play_module.Play._build_debug_overlay_hints(
+                play,
+                {"player": [[30, 30, 50, 55]], "enemy": [[70, 40, 90, 60]], "wall": []},
+                (60.0, 0.0),
+            )
+        self.assertTrue(hints["arrows"])
+        self.assertIsNotNone(hints["enemy_prediction"])
 
     def test_publish_debug_view_noops_when_disabled(self):
         self.play.window_controller.debug_view.enabled = False

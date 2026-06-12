@@ -41,6 +41,24 @@ class DebugViewTests(unittest.TestCase):
         )
         self.assertTrue(np.any(image[:, :, 2] > 0))
 
+    def test_draw_debug_arrows_and_prediction(self):
+        image = np.zeros((120, 160, 3), dtype=np.uint8)
+        dv.draw_debug_arrows(
+            image,
+            [{"from": [10, 60], "to": [90, 60], "color": [0, 255, 255], "label": "MOVE"}],
+        )
+        dv.draw_enemy_prediction(
+            image,
+            {
+                "current": [40, 40],
+                "predicted": [80, 55],
+                "lead": [95, 70],
+                "velocity": [120.0, 40.0],
+                "speed": 126.0,
+            },
+        )
+        self.assertTrue(np.any(image))
+
 
 if __name__ == "__main__":
     unittest.main()

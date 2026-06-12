@@ -2209,6 +2209,137 @@ class Play:
         movement, updated_globals = interpret_pyla_code(self.pyla_code, self.context)
         return movement
 
+    @staticmethod
+    def _debug_arrow(origin, target, color, label):
+        return {
+            "from": [int(origin[0]), int(origin[1])],
+            "to": [int(target[0]), int(target[1])],
+            "color": [int(c) for c in color],
+            "label": str(label),
+        }
+
+    @staticmethod
+    def _debug_marker(pos, color, label, radius=14):
+        return {
+            "pos": [int(pos[0]), int(pos[1])],
+            "color": [int(c) for c in color],
+            "label": str(label),
+            "radius": int(radius),
+        }
+
+    def _movement_arrow_tip(self, origin, movement, length=130.0):
+        vector = self.movement_to_vector(movement)
+        if vector is None:
+            return None
+        magnitude = math.hypot(vector[0], vector[1])
+        if magnitude < 1:
+            return None
+        scale = min(length, magnitude * 1.35) / magnitude
+        return (origin[0] + vector[0] * scale, origin[1] + vector[1] * scale)
+
+    def _build_debug_overlay_hints(self, data, movement=None):
+        hints = {"arrows": [], "markers": [], "enemy_prediction": None}
+        if not data or not data.get("player"):
+            return hints
+
+        player_box = data["player"][0]
+        player_pos = self.get_player_pos(player_box)
+        foot_x, foot_y, _ = self.get_player_foot_circle(player_box)
+        origin = (foot_x, foot_y)
+        walls = data.get("wall") or []
+        intent = str(getattr(self, "match_intent_summary", "") or "")
+
+        move_color = (0, 255, 255)
+        move_label = intent or "MOVE"
+        if "Dodging" in intent:
+            move_color = (255, 0, 255)
+        elif "Following" in intent:
+            move_color = (0, 165, 255)
+        elif "Roaming" in intent:
+            move_color = (180, 180, 180)
+        elif "Shooting" in intent or "Closing" in intent:
+            move_color = (0, 140, 255)
+
+        move_tip = self._movement_arrow_tip(origin, movement)
+        if move_tip is not None:
+            hints["arrows"].append(self._debug_arrow(origin, move_tip, move_color, move_label))
+
+        if getattr(self, "_evasion_active", False):
+            dodge_vector = getattr(self, "_dodge_vector", None)
+            dodge_tip = self._movement_arrow_tip(origin, dodge_vector, length=110.0)
+            if dodge_tip is not None:
+                hints["arrows"].append(self._debug_arrow(origin, dodge_tip, (255, 0, 255), "DODGE"))
+
+        teammates = data.get("teammate") or []
+        enemies = data.get("enemy") or []
+        if teammates and (not self.is_there_enemy(enemies) or "Following" in intent):
+            teammate_pos, _ = self.find_closest_teammate(teammates, player_pos, walls)
+            if teammate_pos:
+                hints["arrows"].append(self._debug_arrow(origin, teammate_pos, (0, 140, 255), "TEAMMATE"))
+                hints["markers"].append(self._debug_marker(teammate_pos, (0, 140, 255), "follow", 18))
+
+        if self.is_there_enemy(enemies):
+            enemy_result = self.find_closest_enemy(enemies, player_pos, walls, "attack")
+            if enemy_result:
+                enemy_pos, enemy_distance = enemy_result
+                hints["arrows"].append(self._debug_arrow(origin, enemy_pos, (0, 0, 255), "ENEMY"))
+                hints["markers"].append(self._debug_marker(enemy_pos, (0, 0, 255), "target", 16))
+
+                track = getattr(self, "_enemy_track", None) or {}
+                tracked_pos = track.get("pos") or enemy_pos
+                vx, vy = self.get_tracked_enemy_velocity()
+                speed = math.hypot(vx, vy)
+                predicted = (
+                    tracked_pos[0] + vx * 0.45,
+                    tracked_pos[1] + vy * 0.45,
+                )
+                scale = float(getattr(self.window_controller, "scale_factor", 1.0) or 1.0)
+                projectile_speed = float(getattr(self, "projectile_speed_px_s", 1200.0) or 1200.0) * scale
+                travel_s = float(enemy_distance) / max(projectile_speed, 1.0)
+                lead_pos = (
+                    tracked_pos[0] + vx * travel_s,
+                    tracked_pos[1] + vy * travel_s,
+                )
+                hints["enemy_prediction"] = {
+                    "current": [int(tracked_pos[0]), int(tracked_pos[1])],
+                    "predicted": [int(predicted[0]), int(predicted[1])],
+                    "lead": [int(lead_pos[0]), int(lead_pos[1])],
+                    "velocity": [float(vx), float(vy)],
+                    "speed": float(speed),
+                }
+                if speed >= 80.0:
+                    hints["markers"].append(self._debug_marker(predicted, (0, 255, 255), "predict", 12))
+                    hints["markers"].append(self._debug_marker(lead_pos, (0, 255, 255), "lead", 10))
+
+        if getattr(self, "is_showdown", False):
+            flee_angle = getattr(self, "_fog_direction_escape_cached", None)
+            if flee_angle is None:
+                flee_angle = getattr(self, "_fog_threat_cached", None)
+            if flee_angle is not None:
+                ux, uy = self.angle_to_vector(flee_angle)
+                fog_tip = (origin[0] + ux * 145, origin[1] + uy * 145)
+                hints["arrows"].append(self._debug_arrow(origin, fog_tip, (80, 255, 80), "FOG"))
+
+        escape_phase = (getattr(self, "escape_state", None) or {}).get("phase")
+        if escape_phase:
+            retreat_angle = float((getattr(self, "escape_state", None) or {}).get("retreat_angle", 0.0) or 0.0)
+            ux, uy = self.angle_to_vector(retreat_angle)
+            escape_tip = (origin[0] + ux * 125, origin[1] + uy * 125)
+            hints["arrows"].append(self._debug_arrow(origin, escape_tip, (255, 120, 0), "STUCK"))
+
+        spacing_action = getattr(self, "_spacing_action", None)
+        if spacing_action and player_pos:
+            hints["markers"].append(
+                self._debug_marker(
+                    (player_pos[0], max(30, player_pos[1] - 42)),
+                    (255, 255, 255),
+                    str(spacing_action).replace("_", " "),
+                    0,
+                )
+            )
+
+        return hints
+
     def publish_debug_view(self, frame, data, state, movement=None):
         debug_view = getattr(self.window_controller, "debug_view", None)
         if debug_view is None or not debug_view.enabled:
@@ -2269,6 +2400,7 @@ class Play:
             debug_data["match_intent"] = intent[:96]
         if not data:
             debug_data["status"] = f"No detections ({state})"
+        debug_data.update(self._build_debug_overlay_hints(data, movement))
 
         debug_view.publish(frame, debug_data)
 

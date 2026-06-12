@@ -486,6 +486,116 @@ class DebugClipRecorder:
         self.stop()
 
 
+def _bgr_color(color):
+    if not color or len(color) < 3:
+        return (255, 255, 255)
+    return (int(color[0]), int(color[1]), int(color[2]))
+
+
+def draw_debug_arrows(image, arrows):
+    for arrow in arrows or []:
+        start = arrow.get("from") or []
+        end = arrow.get("to") or []
+        if len(start) < 2 or len(end) < 2:
+            continue
+        color = _bgr_color(arrow.get("color"))
+        x1, y1 = int(start[0]), int(start[1])
+        x2, y2 = int(end[0]), int(end[1])
+        cv2.arrowedLine(image, (x1, y1), (x2, y2), color, 5, tipLength=0.28, line_type=cv2.LINE_AA)
+        label = str(arrow.get("label") or "").strip()
+        if label:
+            mx = (x1 + x2) // 2
+            my = (y1 + y2) // 2
+            cv2.putText(
+                image,
+                label[:18],
+                (mx + 8, my - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 0, 0),
+                4,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                image,
+                label[:18],
+                (mx + 8, my - 8),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                color,
+                2,
+                cv2.LINE_AA,
+            )
+
+
+def draw_focus_markers(image, markers):
+    for marker in markers or []:
+        pos = marker.get("pos") or []
+        if len(pos) < 2:
+            continue
+        color = _bgr_color(marker.get("color"))
+        x, y = int(pos[0]), int(pos[1])
+        label = str(marker.get("label") or "").strip()
+        radius = int(marker.get("radius") or 0)
+        if radius > 0:
+            cv2.circle(image, (x, y), radius + 2, (0, 0, 0), 2, cv2.LINE_AA)
+            cv2.circle(image, (x, y), radius, color, 2, cv2.LINE_AA)
+            cv2.drawMarker(image, (x, y), color, markerType=cv2.MARKER_CROSS, markerSize=12, thickness=2)
+        if label:
+            cv2.putText(
+                image,
+                label[:16],
+                (x + 10, y - 10 if radius > 0 else y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 0, 0),
+                3,
+                cv2.LINE_AA,
+            )
+            cv2.putText(
+                image,
+                label[:16],
+                (x + 10, y - 10 if radius > 0 else y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1,
+                cv2.LINE_AA,
+            )
+
+
+def draw_enemy_prediction(image, prediction):
+    if not prediction:
+        return
+
+    current = prediction.get("current") or []
+    predicted = prediction.get("predicted") or []
+    lead = prediction.get("lead") or []
+    velocity = prediction.get("velocity") or []
+    if len(current) < 2:
+        return
+
+    cx, cy = int(current[0]), int(current[1])
+    if len(predicted) >= 2:
+        px, py = int(predicted[0]), int(predicted[1])
+        cv2.line(image, (cx, cy), (px, py), (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.circle(image, (px, py), 10, (0, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(image, "predict", (px + 8, py - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+
+    if len(lead) >= 2:
+        lx, ly = int(lead[0]), int(lead[1])
+        cv2.circle(image, (lx, ly), 8, (0, 200, 255), 2, cv2.LINE_AA)
+        cv2.line(image, (cx, cy), (lx, ly), (0, 180, 255), 1, cv2.LINE_AA)
+        cv2.putText(image, "lead", (lx + 8, ly + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 200, 255), 1, cv2.LINE_AA)
+
+    if len(velocity) >= 2:
+        vx, vy = float(velocity[0]), float(velocity[1])
+        speed = float(prediction.get("speed") or 0.0)
+        if speed >= 40.0:
+            tip = (int(cx + vx * 0.18), int(cy + vy * 0.18))
+            cv2.arrowedLine(image, (cx, cy), tip, (0, 120, 255), 3, tipLength=0.35, line_type=cv2.LINE_AA)
+
+
 def draw_joystick_path_probe(image, joystick, directions, joystick_radius):
     if not joystick or len(joystick) < 2 or not directions:
         return
@@ -549,6 +659,9 @@ def draw_debug_data(image, debug_data, width, height):
         draw_player_hit_circle(image, debug_data.get("player_hit_circle"))
     draw_boxes(image, debug_data.get("enemy"), (0, 0, 255))
     draw_boxes(image, debug_data.get("teammate"), (255, 0, 0))
+    draw_enemy_prediction(image, debug_data.get("enemy_prediction"))
+    draw_debug_arrows(image, debug_data.get("arrows"))
+    draw_focus_markers(image, debug_data.get("markers"))
     if advanced_visuals:
         draw_lines(image, debug_data.get("enemy_los_lines") or debug_data.get("clear_los_lines"), (0, 0, 120), 7)
         draw_lines(image, debug_data.get("teammate_los_lines"), (255, 180, 0), 7)
