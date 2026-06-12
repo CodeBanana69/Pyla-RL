@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from gui.instance_config import REPLIES_DIR
 from gui.instance_registry import require_resolved_instance
+from utils import resolve_project_path
 from runtime_control import (
     PAUSED,
     RUNNING,
@@ -30,7 +31,7 @@ class RemoteCommandRouter:
         self.timeout_seconds = timeout_seconds
 
     def _reply_path(self, command_id: str) -> Path:
-        return Path(REPLIES_DIR) / f"{command_id}.json"
+        return Path(resolve_project_path(REPLIES_DIR)) / f"{command_id}.json"
 
     def resolve_target(self, instance: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
         return require_resolved_instance(instance)

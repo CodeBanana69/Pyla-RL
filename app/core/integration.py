@@ -9,7 +9,7 @@ from pathlib import Path
 from runtime_control import PAUSED, RUNNING, STOP_REQUESTED, read_state, request_stop, set_runtime_state
 from utils import load_toml_as_dict, resolve_project_path
 
-RECOVERY_LOG_PATH = Path("logs/recovery_events.jsonl")
+RECOVERY_LOG_PATH = Path(resolve_project_path("logs/recovery_events.jsonl"))
 
 BOT_CONFIG_ALIASES = {
     "close_tile_detector_enabled": "centered_wall_detection",

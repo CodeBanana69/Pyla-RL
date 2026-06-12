@@ -29,6 +29,7 @@ from visual_debug_window import (
 brawl_stars_width, brawl_stars_height = 1920, 1080
 CLOSE_TILE_CROP_SIZE = 640
 CLOSE_TILE_MODEL_PATH = "models/closeTileDetector.onnx"
+DEBUG_FRAMES_DIR = resolve_project_path("debug_frames")
 visual_debug = str(load_toml_as_dict("cfg/general_config.toml").get("visual_debug", "no")).lower() in (
     "yes",
     "true",
@@ -93,8 +94,7 @@ class Play:
         self.centered_wall_crop_size = CLOSE_TILE_CROP_SIZE
         self.verbose_debug = config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False)
         if self.verbose_debug:
-            if not os.path.exists("debug_frames"):
-                os.makedirs("debug_frames")
+            os.makedirs(DEBUG_FRAMES_DIR, exist_ok=True)
         self.Detect_main_info = Detect(main_info_model, classes=['enemy', 'teammate', 'player'])
         self.tile_detector_model_classes = bot_config["wall_model_classes"]
         self.Detect_tile_detector = Detect(
@@ -1060,7 +1060,7 @@ class Play:
             for direction, img in debug_regions.items():
                 if img.size > 0:
                     cv2.imwrite(
-                        f"debug_frames/poison_gas_{direction}_debug_{ts}.png",
+                        os.path.join(DEBUG_FRAMES_DIR, f"poison_gas_{direction}_debug_{ts}.png"),
                         cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                     )
 
@@ -1724,7 +1724,7 @@ class Play:
         threshold = self._scaled_pixel_threshold(self.hypercharge_pixels_minimum, screenshot, self.hypercharge_crop_area)
         if getattr(self, "verbose_debug", False):
             print("hypercharge purple pixels:", purple_pixels, "(if > ", threshold, " then hypercharge is ready)")
-            cv2.imwrite(f"debug_frames/hypercharge_debug_{purple_pixels}_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(os.path.join(DEBUG_FRAMES_DIR, f"hypercharge_debug_{purple_pixels}_{int(time.time())}.png"), cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
 
         return purple_pixels > threshold
 
@@ -1737,7 +1737,7 @@ class Play:
         threshold = self._scaled_pixel_threshold(self.gadget_pixels_minimum, screenshot, self.gadget_crop_area)
         if getattr(self, "verbose_debug", False):
             print("gadget green pixels:", green_pixels, "(if > ", threshold, " then gadget is ready)")
-            cv2.imwrite(f"debug_frames/gadget_debug_{green_pixels}_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(os.path.join(DEBUG_FRAMES_DIR, f"gadget_debug_{green_pixels}_{int(time.time())}.png"), cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
 
         return green_pixels > threshold
 
@@ -1754,7 +1754,7 @@ class Play:
                 "super pixels yellow:", yellow_pixels, "orange:", orange_pixels,
                 "(if > ", threshold, " then super is ready)",
             )
-            cv2.imwrite(f"debug_frames/super_debug_{yellow_pixels}_{int(time.time())}.png", cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(os.path.join(DEBUG_FRAMES_DIR, f"super_debug_{yellow_pixels}_{int(time.time())}.png"), cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR))
 
         if yellow_pixels > threshold:
             return True

@@ -20,7 +20,7 @@ from gui.remote_formatting import (
     format_recovery_description,
     format_result,
 )
-from utils import _config_bool, load_toml_as_dict
+from utils import _config_bool, load_toml_as_dict, resolve_project_path
 
 
 DISCORD_CONFIG_PATH = "cfg/discord_config.toml"
@@ -124,7 +124,10 @@ RESULT_LABELS = {
 def load_webhook_settings() -> dict[str, Any]:
     general_config = load_toml_as_dict("cfg/general_config.toml")
     config_path = DISCORD_CONFIG_PATH
-    if not Path(config_path).exists() and Path(LEGACY_WEBHOOK_CONFIG_PATH).exists():
+    if (
+        not Path(resolve_project_path(config_path)).exists()
+        and Path(resolve_project_path(LEGACY_WEBHOOK_CONFIG_PATH)).exists()
+    ):
         config_path = LEGACY_WEBHOOK_CONFIG_PATH
     webhook_config = dict(load_toml_as_dict(config_path))
     webhook_config["webhook_url"] = normalize_discord_webhook_url(

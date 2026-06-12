@@ -3,14 +3,12 @@ import os
 import time
 from pathlib import Path
 
-
-def project_root() -> Path:
-    return Path(__file__).resolve().parent
+from utils import resolve_project_path
 
 
 def metrics_path_for_pid(pid=None):
     pid = os.getpid() if pid is None else pid
-    return project_root() / "logs" / f"runtime_metrics_{pid}.json"
+    return Path(resolve_project_path("logs")) / f"runtime_metrics_{pid}.json"
 
 
 def _write_metrics_text(path, text):

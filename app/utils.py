@@ -430,9 +430,10 @@ def load_brawler_name_aliases(file_path="cfg/names.json"):
     if _brawler_name_aliases is not None:
         return _brawler_name_aliases
 
+    resolved_file_path = resolve_project_path(file_path)
     aliases = {}
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(resolved_file_path, "r", encoding="utf-8") as f:
             raw_aliases = json.load(f)
     except FileNotFoundError:
         raw_aliases = {}
@@ -800,7 +801,7 @@ def current_wall_model_is_latest() -> bool:
     """
     Check if the current wall model is the latest version.
     """
-    local_hash = calculate_sha256("models/tileDetector.onnx")
+    local_hash = calculate_sha256(resolve_project_path("models/tileDetector.onnx"))
     online_hash = get_online_wall_model_hash()
     return local_hash == online_hash
 
@@ -809,7 +810,9 @@ def get_latest_wall_model_file():
     url = f'https://{api_base_url}/get_wall_model_file'
     response = requests.get(url)
     if response.status_code == 200:
-        with open("./models/tileDetector.onnx", "wb") as file:
+        model_path = resolve_project_path("models/tileDetector.onnx")
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        with open(model_path, "wb") as file:
             file.write(response.content)
         print("Downloaded the latest wall model.")
     else:

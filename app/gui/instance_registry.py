@@ -17,6 +17,7 @@ from gui.instance_config import (
 )
 from recovery_events import read_recent_events
 from runtime_control import process_is_alive
+from utils import resolve_project_path
 
 
 def compute_instance_health(instance_id: str, *, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -50,7 +51,7 @@ def compute_instance_health(instance_id: str, *, manifest: dict[str, Any] | None
 
 
 def manifest_path(instance_id: str) -> Path:
-    return Path(MANIFEST_DIR) / f"{instance_id}.json"
+    return Path(resolve_project_path(MANIFEST_DIR)) / f"{instance_id}.json"
 
 
 def write_manifest(instance_id: str, payload: dict[str, Any]) -> Path:
@@ -132,7 +133,7 @@ def update_manifest_heartbeat(instance_id: str, snapshot: dict[str, Any], *, sta
 
 
 def list_live_manifests() -> list[dict[str, Any]]:
-    root = Path(MANIFEST_DIR)
+    root = Path(resolve_project_path(MANIFEST_DIR))
     if not root.exists():
         return []
     manifests = []

@@ -1185,8 +1185,8 @@ def run_app():
 
 
 def write_crash_log(error):
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    log_dir = Path(resolve_project_path("logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
     crash_path = log_dir / "startup_crash.log"
     crash_path.write_text(
         "".join(traceback.format_exception(type(error), error, error.__traceback__)),

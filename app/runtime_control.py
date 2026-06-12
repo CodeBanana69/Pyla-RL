@@ -12,7 +12,7 @@ from runtime_metrics import (
     format_uptime,
     read_metrics,
 )
-from utils import load_toml_as_dict
+from utils import load_toml_as_dict, resolve_project_path
 
 
 RUNNING = "running"
@@ -284,7 +284,8 @@ def draw_ips_sparkline(canvas, samples, color, width=SPARKLINE_WIDTH, height=SPA
 
 class RuntimeControlWindow:
     def __init__(self, metrics_path=None):
-        state_dir = Path("logs")
+        state_dir = Path(resolve_project_path("logs"))
+        state_dir.mkdir(parents=True, exist_ok=True)
         self.state_path = state_dir / f"runtime_control_{os.getpid()}.state"
         self.metrics_path = metrics_path
         self.process = None

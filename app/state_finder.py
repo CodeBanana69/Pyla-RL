@@ -43,16 +43,18 @@ def is_template_in_region(image, template_path, region, threshold=0.7):
 
 cached_templates = {}
 def load_template(image_path, width, height):
-    if (image_path, width, height) in cached_templates:
-        return cached_templates[(image_path, width, height)]
+    resolved_image_path = resolve_project_path(image_path)
+    cache_key = (resolved_image_path, width, height)
+    if cache_key in cached_templates:
+        return cached_templates[cache_key]
     current_width_ratio, current_height_ratio = width / orig_screen_width, height / orig_screen_height
-    image = cv2.imread(image_path)
+    image = cv2.imread(resolved_image_path)
     if image is None:
         return None
     orig_height, orig_width = image.shape[:2]
     resized_image = cv2.resize(image, (int(orig_width * current_width_ratio), int(orig_height * current_height_ratio)))
     resized_colored_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
-    cached_templates[(image_path, width, height)] = resized_colored_image
+    cached_templates[cache_key] = resized_colored_image
     return resized_colored_image
 
 SHOWDOWN_PLACE_THRESHOLD = 0.9
@@ -487,5 +489,12 @@ def get_state(screenshot):
     if screenshot is None:
         raise ValueError("get_state called with None screenshot")
     state = get_in_game_state(screenshot)
-    if config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False): cv2.imwrite(f"./debug_frames/state_screenshot_{state}_{len(os.listdir('./debug_frames'))}.png", cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB))
+    if config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False):
+        debug_dir = resolve_project_path("debug_frames")
+        os.makedirs(debug_dir, exist_ok=True)
+        frame_path = os.path.join(
+            debug_dir,
+            f"state_screenshot_{state}_{len(os.listdir(debug_dir))}.png",
+        )
+        cv2.imwrite(frame_path, cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB))
     return state

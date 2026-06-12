@@ -4,12 +4,16 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-EVENTS_PATH = Path("logs/recovery_events.jsonl")
+from utils import resolve_project_path
+
+EVENTS_PATH = Path(resolve_project_path("logs/recovery_events.jsonl"))
 _recent_alerts = {}
 
 
 def log_recovery(event_type, detail="", notice="", session_id=None, path=None, screenshot_path=""):
-    events_path = Path(path or EVENTS_PATH)
+    events_path = Path(path) if path else EVENTS_PATH
+    if not events_path.is_absolute():
+        events_path = Path(resolve_project_path(events_path))
     events_path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -25,7 +29,9 @@ def log_recovery(event_type, detail="", notice="", session_id=None, path=None, s
 
 
 def read_recent_events(limit=10, path=None):
-    events_path = Path(path or EVENTS_PATH)
+    events_path = Path(path) if path else EVENTS_PATH
+    if not events_path.is_absolute():
+        events_path = Path(resolve_project_path(events_path))
     if not events_path.exists():
         return []
     lines = events_path.read_text(encoding="utf-8").splitlines()

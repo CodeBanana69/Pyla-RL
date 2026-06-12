@@ -24,6 +24,7 @@ from utils import (
     load_toml_as_dict,
     normalize_brawler_name,
     notify_user,
+    resolve_project_path,
     save_brawler_data,
 )
 
@@ -41,7 +42,7 @@ except (ImportError, ModuleNotFoundError):
 
 
 def load_image(image_path, scale_factor):
-    image = cv2.imread(image_path)
+    image = cv2.imread(resolve_project_path(image_path))
     orig_height, orig_width = image.shape[:2]
 
     new_width = int(orig_width * scale_factor)
