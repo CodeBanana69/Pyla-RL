@@ -19,7 +19,7 @@ except ImportError:
 from core.integration import migrate_bot_config
 from state_finder import get_state
 from utils import load_toml_as_dict, count_hsv_pixels, load_brawlers_info, resolve_brawler_info_key, interpret_pyla_code, \
-    count_mask_pixels, JOYSTICK_RADIUS, clamp, debug_beep, config_bool
+    count_mask_pixels, JOYSTICK_RADIUS, clamp, debug_beep, config_bool, resolve_project_path
 from visual_debug_window import (
     log_visual_debug_startup,
     opencv_highgui_available,
@@ -101,9 +101,9 @@ class Play:
             tile_detector_model,
             classes=self.tile_detector_model_classes,
         )
-        close_model_path = close_tile_detector_model
+        close_model_path = resolve_project_path(close_tile_detector_model)
         if self.close_tile_detector_enabled and not os.path.exists(close_model_path):
-            close_model_path = CLOSE_TILE_MODEL_PATH
+            close_model_path = resolve_project_path(CLOSE_TILE_MODEL_PATH)
         self.Detect_close_tile_detector = None
         if self.close_tile_detector_enabled:
             if os.path.exists(close_model_path):

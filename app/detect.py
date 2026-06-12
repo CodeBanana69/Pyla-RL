@@ -17,7 +17,7 @@ from gpu_support import (
     resolve_directml_device_id,
     resolve_inference_device,
 )
-from utils import load_toml_as_dict
+from utils import load_toml_as_dict, resolve_project_path
 
 warnings.filterwarnings(
     "ignore",
@@ -222,13 +222,13 @@ class Detect:
         optimal_threads = get_optimal_threads()
         cv2.setNumThreads(optimal_threads)
         self.preferred_device = load_toml_as_dict("cfg/general_config.toml")["cpu_or_gpu"]
-        self.model_path = model_path
+        self.model_path = resolve_project_path(model_path)
         self.classes = classes
         self.ignore_classes = set(ignore_classes) if ignore_classes else set()
         self.input_size = input_size
 
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found: {model_path}")
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Model file not found: {self.model_path}")
 
         self.model, self.device = self.load_model()
         self.input_name = self.model.get_inputs()[0].name

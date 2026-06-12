@@ -95,6 +95,7 @@ from utils import (
     load_pyla_script,
     load_toml_as_dict,
     notify_user,
+    resolve_project_path,
     update_missing_brawlers_info,
     update_wall_model_classes,
 )
@@ -498,11 +499,10 @@ def pyla_main(data):
 
         @staticmethod
         def load_models():
-            folder = "./models/"
             return [
-                folder + "mainInGameModel.onnx",
-                folder + "tileDetector.onnx",
-                folder + "closeTileDetector.onnx",
+                resolve_project_path("models/mainInGameModel.onnx"),
+                resolve_project_path("models/tileDetector.onnx"),
+                resolve_project_path("models/closeTileDetector.onnx"),
             ]
 
         def update_trophy_observer(self):
