@@ -2,7 +2,9 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOURNAL_PATH = Path("logs/matches.jsonl")
+from utils import resolve_project_path
+
+JOURNAL_PATH = Path(resolve_project_path("logs/matches.jsonl"))
 
 
 def append_match_record(

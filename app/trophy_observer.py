@@ -1,13 +1,13 @@
 ﻿import os
 import requests
-from utils import load_toml_as_dict, save_dict_as_toml, api_base_url, hash_playstyle, PYLA_VERSION
+from utils import load_toml_as_dict, api_base_url, hash_playstyle, PYLA_VERSION, resolve_project_path
 import pandas as pd
 from datetime import datetime
 
 class TrophyObserver:
 
     def __init__(self):
-        self.history_file = "./cfg/match_history.csv"
+        self.history_file = resolve_project_path("cfg/match_history.csv")
         self.current_trophies = None
         self.current_wins = None
         self.match_history = self.load_history()
@@ -36,7 +36,7 @@ class TrophyObserver:
             (2199,  (9,  4, -5, -11)),
             (float("inf"), (9, 4, -5, -11)),
         ]
-        self.trophies_multiplier = int(load_toml_as_dict("./cfg/general_config.toml")["trophies_multiplier"])
+        self.trophies_multiplier = int(load_toml_as_dict("cfg/general_config.toml")["trophies_multiplier"])
 
     def win_streak_gain(self):
         return min(self.win_streak - 1, 10) if self.current_trophies < 2000 else 0
@@ -70,6 +70,9 @@ class TrophyObserver:
         return history
 
     def save_history(self):
+        history_dir = os.path.dirname(self.history_file)
+        if history_dir:
+            os.makedirs(history_dir, exist_ok=True)
         self.match_history.to_csv(self.history_file, index=False)
 
     @staticmethod
