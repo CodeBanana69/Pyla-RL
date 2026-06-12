@@ -58,7 +58,16 @@ directions_xy_deltas_dict = {
 # --- Configuration ---
 brawl_stars_width, brawl_stars_height = 1920, 1080
 
-BRAWL_STARS_PACKAGE = load_toml_as_dict("cfg/general_config.toml")["brawl_stars_package"]
+DEFAULT_BRAWL_STARS_PACKAGE = "com.supercell.brawlstars"
+
+
+def resolve_brawl_stars_package(config=None):
+    if config is None:
+        config = load_toml_as_dict("cfg/general_config.toml")
+    return str(config.get("brawl_stars_package", DEFAULT_BRAWL_STARS_PACKAGE)).strip()
+
+
+BRAWL_STARS_PACKAGE = resolve_brawl_stars_package()
 
 COMMON_LDPLAYER_CONSOLES = [
     r"C:\LDPlayer\LDPlayer9\dnconsole.exe",
@@ -487,7 +496,12 @@ def _config_bool(value, default=False):
 
 
 class WindowController:
+    @property
+    def BRAWL_STARS_PACKAGE(self):
+        return self.brawl_stars_package
+
     def __init__(self):
+        self.brawl_stars_package = resolve_brawl_stars_package()
         self.scale_factor = None
         self.width = None
         self.height = None
@@ -590,9 +604,7 @@ class WindowController:
             raw_emulator = general_config.get("current_emulator", "LDPlayer")
             raw_port = general_config.get("emulator_port", 0)
             selected_emulator, configured_port = _normalize_emulator_config(raw_emulator, raw_port)
-            self.brawl_stars_package = str(
-                general_config.get("brawl_stars_package", BRAWL_STARS_PACKAGE)
-            ).strip()
+            self.brawl_stars_package = resolve_brawl_stars_package(general_config)
             if selected_emulator != raw_emulator or configured_port != raw_port:
                 print(
                     f"Using supported emulator config: {selected_emulator} "
@@ -1651,7 +1663,18 @@ class WindowController:
 
     def is_brawl_stars_running(self):
         opened = self.foreground_package(timeout=3)
-        return opened == BRAWL_STARS_PACKAGE
+        return opened == self.brawl_stars_package
+
+    def start_brawl_stars_app(self, *, display_id=0):
+        package = getattr(self, "brawl_stars_package", None) or resolve_brawl_stars_package()
+        serial = getattr(self, "connected_serial", None)
+        if serial and _start_android_app_on_display(serial, package, display_id=display_id):
+            return True
+        device = getattr(self, "device", None)
+        if device is not None:
+            device.app_start(package)
+            return True
+        return False
 
     def close(self):
         try:

@@ -3,10 +3,12 @@ from unittest.mock import patch
 
 from window_controller import (
     WindowController,
+    DEFAULT_BRAWL_STARS_PACKAGE,
     _foreground_package_from_text,
     _package_task_display_from_text,
     _valid_window_rect,
     _window_title_matches_emulator,
+    resolve_brawl_stars_package,
 )
 
 
@@ -301,6 +303,33 @@ class LongRunWatchdogTests(unittest.TestCase):
         controller.keys_down(["w"])
 
         self.assertFalse(controller.are_we_moving)
+
+    def test_resolve_brawl_stars_package_uses_default_when_missing(self):
+        self.assertEqual(
+            resolve_brawl_stars_package({}),
+            DEFAULT_BRAWL_STARS_PACKAGE,
+        )
+
+    def test_brawl_stars_package_property_matches_instance_value(self):
+        controller = object.__new__(WindowController)
+        controller.brawl_stars_package = "com.example.brawl"
+        self.assertEqual(controller.BRAWL_STARS_PACKAGE, "com.example.brawl")
+
+    def test_is_brawl_stars_running_uses_instance_package(self):
+        controller = object.__new__(WindowController)
+        controller.brawl_stars_package = "com.custom.brawl"
+        controller.foreground_package = lambda timeout=3: "com.custom.brawl"
+        self.assertTrue(controller.is_brawl_stars_running())
+
+    @patch("window_controller._start_android_app_on_display", return_value=False)
+    def test_start_brawl_stars_app_falls_back_to_device(self, _mock_adb_start):
+        controller = object.__new__(WindowController)
+        controller.brawl_stars_package = "com.supercell.brawlstars"
+        controller.connected_serial = "emulator-5554"
+        controller.device = unittest.mock.MagicMock()
+
+        self.assertTrue(controller.start_brawl_stars_app())
+        controller.device.app_start.assert_called_once_with("com.supercell.brawlstars")
 
 
 if __name__ == "__main__":
