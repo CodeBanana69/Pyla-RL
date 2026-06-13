@@ -39,6 +39,7 @@ SKIPPED_FILES = {
     "setup.exe",
     "telegram_chats.toml",
     "telegram_config.local.toml",
+    "support_reporting.local.toml",
     "updater.exe",
 }
 

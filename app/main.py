@@ -124,9 +124,12 @@ migrate_bot_config()
 def configure_terminal_output():
     import runtime_log
     from logger_setup import setup_logging_if_enabled
+    from support_reporter import install, set_terminal_log_path
 
     runtime_log.configure()
     log_path = setup_logging_if_enabled()
+    set_terminal_log_path(log_path)
+    install()
     if platform.architecture()[0] != "64bit":
         runtime_log.log_warn("startup", "Pyla-RL is running on 32-bit Python.")
     return log_path
@@ -472,6 +475,9 @@ def pyla_main(data):
 
             self.window_controller.screenshot()
             self.start_state_checker()
+            from support_reporter import set_runtime_context
+
+            set_runtime_context(self)
             self._wire_remote_control()
             if self.instance_id:
                 from gui.instance_registry import build_manifest, write_manifest
@@ -1065,6 +1071,18 @@ def pyla_main(data):
                                     "queue",
                                     f"Automatic brawler pick failed for {brawler_name}; continuing with current selection.",
                                 )
+                                from support_reporter import report_support_event
+
+                                report_support_event(
+                                    "brawler_pick_failed",
+                                    f"Automatic brawler pick failed for {brawler_name}",
+                                    screenshot=self.window_controller.screenshot(),
+                                    extra={
+                                        "brawler": brawler_name,
+                                        "attempts": attempts,
+                                        "queue_len": len(self.Stage_manager.brawlers_pick_data or []),
+                                    },
+                                )
                         finally:
                             self.lobby_automator.selecting_brawler = False
                     self.picked_first_brawler = True
@@ -1209,6 +1227,16 @@ def write_crash_log(error):
         "".join(traceback.format_exception(type(error), error, error.__traceback__)),
         encoding="utf-8",
     )
+    try:
+        from support_reporter import report_support_event
+
+        report_support_event(
+            "startup_crash",
+            f"{type(error).__name__}: {error}",
+            exc=error,
+        )
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

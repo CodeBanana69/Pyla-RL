@@ -60,7 +60,14 @@ def migrate_bot_config(bot_config: dict | None = None) -> dict:
     bot_config.setdefault("fog_min_blob_pixels", 20)
     bot_config.setdefault("fog_min_pixels_in_radius", 20)
     bot_config.setdefault("fog_check_every_n_frames", 3)
+    ensure_support_reporting_defaults()
     return bot_config
+
+
+def ensure_support_reporting_defaults() -> None:
+    from support_reporter import ensure_support_reporting_defaults as _ensure
+
+    _ensure()
 
 
 def get_queue_path() -> Path:
@@ -152,6 +159,16 @@ def emit_recovery_event(kind: str, detail: str = "") -> None:
     }
     with RECOVERY_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload) + "\n")
+    try:
+        from support_reporter import report_support_event
+
+        report_support_event(
+            f"recovery:{kind}",
+            detail or kind,
+            extra={"recovery_kind": kind},
+        )
+    except Exception:
+        pass
 
 
 class RuntimeControlBridge:

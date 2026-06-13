@@ -123,10 +123,25 @@ def _emit(level: int, category: str, message: str) -> None:
 
 def log_error(category: str, message: str) -> None:
     _emit(LEVEL_ERROR, category, message)
+    _report_runtime_log("log_error", category, message)
 
 
 def log_warn(category: str, message: str) -> None:
     _emit(LEVEL_WARN, category, message)
+    _report_runtime_log("log_warn", category, message)
+
+
+def _report_runtime_log(level: str, category: str, message: str) -> None:
+    try:
+        from support_reporter import report_support_event
+
+        report_support_event(
+            f"{level}:{category}",
+            message,
+            extra={"category": category, "log_level": level},
+        )
+    except Exception:
+        pass
 
 
 def log_info(category: str, message: str) -> None:

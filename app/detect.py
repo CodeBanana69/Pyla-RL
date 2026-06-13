@@ -272,6 +272,16 @@ class Detect:
                 "NVIDIA users run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
             )
             _provider_fallback_warning_printed = True
+            try:
+                from support_reporter import report_support_event
+
+                report_support_event(
+                    "onnx_cpu_fallback",
+                    f"ONNX requested {first_provider}, but session fell back to CPU",
+                    extra={"requested_provider": first_provider, "actual_provider": actual_provider},
+                )
+            except Exception:
+                pass
         return model, actual_provider
 
     def _fallback_after_runtime_failure(self, error):
