@@ -241,6 +241,7 @@ def connect_emulator_adb(
     preferred_port: int | None = None,
     *,
     probe_open_ports: bool = True,
+    max_ports: int | None = None,
 ) -> dict:
     selected = normalize_emulator_name(emulator)
     candidate_ports = ports_for_emulator(selected, preferred_port)
@@ -292,6 +293,13 @@ def connect_emulator_adb(
                 "detail": detail,
                 "ports_tried": candidate_ports,
             }
+
+    if max_ports is not None:
+        try:
+            limit = max(1, int(max_ports))
+        except (TypeError, ValueError):
+            limit = len(ports_to_try)
+        ports_to_try = ports_to_try[:limit]
 
     last_message = devices_error or ""
     for port in ports_to_try:

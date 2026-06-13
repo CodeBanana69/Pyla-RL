@@ -72,7 +72,7 @@ class PreflightTests(unittest.TestCase):
 
         result = run_preflight_checks(emulator="ldplayer", port=5555, persist_port=False)
 
-        mock_connect.assert_any_call("LDPlayer", 5555)
+        mock_connect.assert_any_call("LDPlayer", 5555, max_ports=4)
         self.assertEqual(result["emulator"], "LDPlayer")
         self.assertTrue(result["ready"])
 

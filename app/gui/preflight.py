@@ -135,6 +135,33 @@ def _emulator_status_summary(selected_emulator=None):
     }
 
 
+def _selected_emulator_status(selected_emulator, process_ok, process_detail, adb_result):
+    selected_key = normalize_emulator_name(selected_emulator).lower()
+    adb_ok = bool(adb_result.get("ok"))
+    adb_detail = str(adb_result.get("detail") or "ADB check failed")
+    if not process_ok:
+        return {
+            selected_key: {
+                "ok": False,
+                "process_ok": False,
+                "adb_ok": False,
+                "process_detail": process_detail,
+                "detail": process_detail,
+                "checked": True,
+            }
+        }
+    return {
+        selected_key: {
+            "ok": adb_ok,
+            "process_ok": True,
+            "adb_ok": adb_ok,
+            "process_detail": process_detail,
+            "detail": adb_detail,
+            "checked": True,
+        }
+    }
+
+
 def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_port=True):
     try:
         return _run_preflight_checks(
@@ -166,11 +193,21 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
     general = load_toml_as_dict("cfg/general_config.toml")
     selected_emulator, configured_port = _resolve_emulator_settings(general, emulator=emulator, port=port)
     previous_port = int(general.get("emulator_port", configured_port) or configured_port)
-    emulator_status = _emulator_status_summary(selected_emulator)
+    process_ok, process_detail = detect_emulator_process(selected_emulator)
 
     checks = []
 
-    adb_result = connect_emulator_adb(selected_emulator, configured_port)
+    adb_result = connect_emulator_adb(
+        selected_emulator,
+        configured_port,
+        max_ports=4,
+    )
+    emulator_status = _selected_emulator_status(
+        selected_emulator,
+        process_ok,
+        process_detail,
+        adb_result,
+    )
     adb_ok = bool(adb_result.get("ok"))
     serial = str(adb_result.get("serial") or "")
     connected_port = int(adb_result.get("port") or configured_port or 0)

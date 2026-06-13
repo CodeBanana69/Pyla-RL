@@ -77,7 +77,7 @@ class QmlHub:
     ):
         os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window=false")
         ensure_pyside6_available()
-        from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer, QThread
+        from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer, QThread, Qt
         from PySide6.QtGui import QGuiApplication, QIcon
         from PySide6.QtQml import QQmlApplicationEngine
         from gui.hub_action_runner import HubActionWorker, is_blocking_hub_action, pending_action_message
@@ -110,6 +110,10 @@ class QmlHub:
                 self._multi_instance_service = None
                 self._action_thread = None
                 self._action_busy = False
+                self._action_generation = 0
+                self._action_timeout_timer = QTimer()
+                self._action_timeout_timer.setSingleShot(True)
+                self._action_timeout_timer.timeout.connect(self._on_action_timeout)
                 state = store.initial_state()
                 self._mode = state["mode"]
                 self._emulator = state["emulator"]
@@ -142,13 +146,53 @@ class QmlHub:
                 self._action_busy = busy
                 self.actionBusyChanged.emit(busy)
 
+            def _clear_action_state(self):
+                self._action_timeout_timer.stop()
+                self._action_thread = None
+                self._set_action_busy(False)
+
+            def _on_action_timeout(self):
+                if not self._action_busy:
+                    return
+                thread = self._action_thread
+                self._action_generation += 1
+                self._action_timeout_timer.stop()
+                self._action_thread = None
+                self._set_action_busy(False)
+                if thread is not None and thread.isRunning():
+                    thread.requestInterruption()
+                    thread.terminate()
+                    thread.wait(3000)
+                self.actionFinished.emit(json.dumps({
+                    "ok": False,
+                    "message": (
+                        "Hub action timed out. If checks never finish, restart the Hub "
+                        "and confirm the emulator is running."
+                    ),
+                    "state": self._ui_state(),
+                }))
+
+            def _on_action_thread_finished(self, thread, generation):
+                if generation != self._action_generation:
+                    return
+                if self._action_thread is thread:
+                    self._action_thread = None
+                if self._action_busy:
+                    self._action_timeout_timer.stop()
+                    self._set_action_busy(False)
+
             def _start_background_action(self, action, payload_json="", *, start_pyla=False):
-                if self._action_thread is not None and self._action_thread.isRunning():
-                    return json.dumps({
-                        "ok": False,
-                        "message": "Another hub action is still running.",
-                        "state": self._ui_state(),
-                    })
+                if self._action_thread is not None:
+                    if self._action_thread.isRunning():
+                        return json.dumps({
+                            "ok": False,
+                            "message": "Another hub action is still running.",
+                            "state": self._ui_state(),
+                        })
+                    self._clear_action_state()
+
+                self._action_generation += 1
+                generation = self._action_generation
                 self._set_action_busy(True)
                 thread = QThread()
                 worker = HubActionWorker(
@@ -159,16 +203,25 @@ class QmlHub:
                 )
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                worker.finished.connect(self._on_background_action_finished)
+                worker.finished.connect(
+                    self._on_background_action_finished,
+                    Qt.ConnectionType.QueuedConnection,
+                )
                 worker.finished.connect(thread.quit)
                 worker.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
+                thread.finished.connect(
+                    lambda: self._on_action_thread_finished(thread, generation),
+                    Qt.ConnectionType.QueuedConnection,
+                )
                 self._action_thread = thread
                 thread.start()
+                self._action_timeout_timer.start(120_000)
                 message = pending_action_message("start-pyla" if start_pyla else action)
                 return json.dumps({"ok": True, "pending": True, "message": message})
 
             def _on_background_action_finished(self, payload_json):
+                self._action_timeout_timer.stop()
                 self._action_thread = None
                 self._set_action_busy(False)
                 self.actionFinished.emit(payload_json)

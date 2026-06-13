@@ -431,6 +431,11 @@ ApplicationWindow {
     }
 
     function runAction(action) {
+        if (root.hubBusy) {
+            statusText = "Please wait for the current hub action to finish."
+            statusOk = false
+            return
+        }
         statusText = "Working..."
         statusOk = true
         const result = applyBridgeResult(hubBridge.runAction(action))
@@ -440,6 +445,11 @@ ApplicationWindow {
     }
 
     function runActionWithPayload(action, payload) {
+        if (root.hubBusy) {
+            statusText = "Please wait for the current hub action to finish."
+            statusOk = false
+            return
+        }
         statusText = "Working..."
         statusOk = true
         const result = applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
@@ -2878,8 +2888,8 @@ ApplicationWindow {
                         }
                         RowLayout {
                             spacing: 10
-                            HubButton { label: "Run Checks"; secondary: true; onClicked: root.runAction("preflight-check") }
-                            HubButton { label: "Test Connection"; secondary: true; onClicked: root.runAction("test-emulator") }
+                            HubButton { label: "Run Checks"; secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("preflight-check") }
+                            HubButton { label: "Test Connection"; secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("test-emulator") }
                             HubButton { label: "Recovery Log"; secondary: true; onClicked: root.runAction("read-recovery-log") }
                         }
                         ColumnLayout {
@@ -4097,6 +4107,7 @@ ApplicationWindow {
                         label: "Run Checks"
                         secondary: true
                         visible: root.wizardStep === 1
+                        enabled: !root.hubBusy
                         onClicked: root.runAction("preflight-check")
                     }
                     HubButton {
