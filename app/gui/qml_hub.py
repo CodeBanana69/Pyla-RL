@@ -265,19 +265,8 @@ class QmlHub:
 
             @Slot(str, result=str)
             def runPreflightFix(self, action):
-                try:
-                    from gui.preflight_fixes import run_preflight_fix
-
-                    emulator, port = self._preflight_emulator_args()
-                    ok, message = run_preflight_fix(action, emulator=emulator, port=port)
-                    self._preflight_cache = self._run_preflight()
-                    return json.dumps({
-                        "ok": ok,
-                        "message": message,
-                        "state": self._ui_state(),
-                    })
-                except Exception as exc:
-                    return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
+                payload = json.dumps({"action": action})
+                return self._start_background_action("preflight-fix", payload)
 
             @Slot(result=str)
             def calibratePerformance(self):
@@ -602,12 +591,13 @@ class QmlHub:
 
             @Slot(result=str)
             def stateJson(self):
-                return self._store.state_json(correct_zoom=self._correct_zoom)
+                return json.dumps(self._ui_state())
 
             @Slot(str, str, str, result=str)
             def updateConfig(self, section, key, value):
                 try:
-                    return json.dumps({"ok": True, "state": self._store.update_config(section, key, value)})
+                    self._store.update_config(section, key, value)
+                    return json.dumps({"ok": True, "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -747,6 +737,19 @@ class QmlHub:
                         lines.append(f"{prefix}: {check['label']} - {check['detail']}")
                     summary = "Ready to start." if result["ready"] else "Fix required checks before START."
                     return summary + "\n" + "\n".join(lines)
+                if action == "preflight-fix":
+                    from gui.preflight_fixes import run_preflight_fix
+
+                    fix_action = str(payload.get("action", "") or "").strip()
+                    if not fix_action:
+                        raise ValueError("Missing pre-flight fix action.")
+                    emulator, port = self._preflight_emulator_args()
+                    ok, message = run_preflight_fix(fix_action, emulator=emulator, port=port)
+                    self._run_preflight()
+                    return {
+                        "ok": ok,
+                        "message": message,
+                    }
                 if action == "test-emulator":
                     from gui.preflight import test_emulator_connection
 

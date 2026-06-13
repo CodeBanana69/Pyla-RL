@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 BLOCKING_HUB_ACTIONS = frozenset({
     "build-push-all",
     "preflight-check",
+    "preflight-fix",
     "test-emulator",
     "api-test",
     "sort-queue",
@@ -23,6 +24,7 @@ BLOCKING_HUB_ACTIONS = frozenset({
 PENDING_ACTION_MESSAGES = {
     "build-push-all": "Building farm plan...",
     "preflight-check": "Running pre-flight checks...",
+    "preflight-fix": "Applying pre-flight fix...",
     "test-emulator": "Testing emulator connection...",
     "api-test": "Testing Brawl Stars API...",
     "sort-queue": "Sorting farm plan...",

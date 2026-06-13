@@ -460,6 +460,8 @@ ApplicationWindow {
 
     function startBot() {
         if (root.hubBusy) {
+            statusText = "Please wait for the current hub action to finish."
+            statusOk = false
             return
         }
         statusText = "Checking pre-flight..."
@@ -2918,6 +2920,7 @@ ApplicationWindow {
                                         visible: !!(modelData.fix && modelData.fix.action)
                                         label: modelData.fix ? modelData.fix.label : "Fix"
                                         secondary: true
+                                        enabled: !root.hubBusy
                                         onClicked: applyBridgeResult(hubBridge.runPreflightFix(modelData.fix.action))
                                     }
                                 }
