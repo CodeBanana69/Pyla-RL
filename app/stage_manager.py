@@ -25,6 +25,7 @@ from utils import (
     normalize_brawler_name,
     notify_user,
     resolve_project_path,
+    imread_unicode,
     save_brawler_data,
 )
 
@@ -42,7 +43,9 @@ except (ImportError, ModuleNotFoundError):
 
 
 def load_image(image_path, scale_factor):
-    image = cv2.imread(resolve_project_path(image_path))
+    image = imread_unicode(resolve_project_path(image_path))
+    if image is None:
+        raise FileNotFoundError(f"Could not load image: {image_path}")
     orig_height, orig_width = image.shape[:2]
 
     new_width = int(orig_width * scale_factor)

@@ -60,6 +60,30 @@ def resolve_project_path(file_path):
     return os.path.join(project_root(), normalized)
 
 
+def imread_unicode(file_path, flags=cv2.IMREAD_COLOR):
+    """Load an image when the path may contain non-ASCII characters (Windows)."""
+    resolved_path = os.fspath(file_path)
+    if not os.path.exists(resolved_path):
+        return None
+    data = np.fromfile(resolved_path, dtype=np.uint8)
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, flags)
+
+
+def imwrite_unicode(file_path, image, params=None):
+    """Write an image when the path may contain non-ASCII characters (Windows)."""
+    resolved_path = os.fspath(file_path)
+    ext = os.path.splitext(resolved_path)[1]
+    if not ext:
+        return False
+    success, encoded = cv2.imencode(ext, image, params or [])
+    if not success:
+        return False
+    encoded.tofile(resolved_path)
+    return True
+
+
 def _config_bool(value, default=False):
     if isinstance(value, bool):
         return value

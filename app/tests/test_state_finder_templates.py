@@ -1,10 +1,12 @@
 import os
+import tempfile
 import unittest
 
 import cv2
 import numpy as np
 
 from state_finder import find_game_result, get_state, load_template
+from utils import imread_unicode, resolve_project_path
 
 
 class StateFinderTemplateTests(unittest.TestCase):
@@ -18,6 +20,16 @@ class StateFinderTemplateTests(unittest.TestCase):
         template = load_template(path, 960, 544)
         self.assertIsNotNone(template)
         self.assertEqual(len(template.shape), 3)
+
+    def test_imread_unicode_loads_from_non_ascii_directory(self):
+        source = resolve_project_path("images/end_results/sd1st.png")
+        with tempfile.TemporaryDirectory(prefix="pyla-тест-") as temp_dir:
+            target = os.path.join(temp_dir, "template.png")
+            with open(source, "rb") as src, open(target, "wb") as dst:
+                dst.write(src.read())
+            image = imread_unicode(target)
+        self.assertIsNotNone(image)
+        self.assertEqual(len(image.shape), 3)
 
     def test_get_state_does_not_crash_on_blank_frame(self):
         frame = np.zeros((544, 960, 3), dtype=np.uint8)

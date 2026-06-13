@@ -3,7 +3,7 @@
 import cv2
 import numpy as np
 
-from utils import load_toml_as_dict, config_bool, resolve_project_path
+from utils import imread_unicode, imwrite_unicode, load_toml_as_dict, config_bool, resolve_project_path
 
 orig_screen_width, orig_screen_height = 1920, 1080
 
@@ -48,7 +48,7 @@ def load_template(image_path, width, height):
     if cache_key in cached_templates:
         return cached_templates[cache_key]
     current_width_ratio, current_height_ratio = width / orig_screen_width, height / orig_screen_height
-    image = cv2.imread(resolved_image_path)
+    image = imread_unicode(resolved_image_path)
     if image is None:
         return None
     orig_height, orig_width = image.shape[:2]
@@ -496,5 +496,5 @@ def get_state(screenshot):
             debug_dir,
             f"state_screenshot_{state}_{len(os.listdir(debug_dir))}.png",
         )
-        cv2.imwrite(frame_path, cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB))
+        imwrite_unicode(frame_path, cv2.cvtColor(screenshot, cv2.COLOR_BGR2RGB))
     return state
