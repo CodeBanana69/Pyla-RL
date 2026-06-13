@@ -128,7 +128,6 @@ def log_error(category: str, message: str) -> None:
 
 def log_warn(category: str, message: str) -> None:
     _emit(LEVEL_WARN, category, message)
-    _report_runtime_log("log_warn", category, message)
 
 
 def _report_runtime_log(level: str, category: str, message: str) -> None:

@@ -159,16 +159,6 @@ def emit_recovery_event(kind: str, detail: str = "") -> None:
     }
     with RECOVERY_LOG_PATH.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload) + "\n")
-    try:
-        from support_reporter import report_support_event
-
-        report_support_event(
-            f"recovery:{kind}",
-            detail or kind,
-            extra={"recovery_kind": kind},
-        )
-    except Exception:
-        pass
 
 
 class RuntimeControlBridge:
