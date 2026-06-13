@@ -2,9 +2,11 @@ from pathlib import Path
 
 import toml
 
-from utils import resolve_project_path
-
 HUB_LICENSE_MARKER = ".hub_license_acknowledged"
+
+
+def _default_cfg_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "cfg"
 
 
 def _to_bool(value):
@@ -16,7 +18,7 @@ def _to_bool(value):
 def _cfg_dir(project_dir=None):
     if project_dir and str(project_dir) not in {"", "."}:
         return Path(project_dir) / "cfg"
-    return Path(resolve_project_path("cfg"))
+    return _default_cfg_dir()
 
 
 def _marker_path(project_dir=None):

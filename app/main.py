@@ -433,6 +433,8 @@ def pyla_main(data):
             self.cooldown_start_time = 0
             self.cooldown_duration = 3 * 60
             self.picked_first_brawler = False
+            self.active_lobby_brawler = ""
+            self.pending_lobby_brawler_pick = False
             time_thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
             self.check_if_brawl_stars_crashed_timer = float(
                 time_thresholds.get("check_if_brawl_stars_crashed", 60)
@@ -898,10 +900,91 @@ def pyla_main(data):
 
         def _apply_remote_queue_change(self, new_queue, message):
             from gui.remote_formatting import format_command_result, format_queue_lines
+            from utils import normalize_brawler_name
 
+            if not new_queue:
+                write_state(self.control_window.state_path, RUNNING)
+                return format_command_result("Farm Plan Updated", message or "Farm plan is empty.", new_queue)
+
+            new_front = normalize_brawler_name(new_queue[0].get("brawler", ""))
             self.Stage_manager.stage_queue_update(new_queue, reason="remote")
+            if new_front and new_front != normalize_brawler_name(getattr(self, "active_lobby_brawler", "")):
+                self.pending_lobby_brawler_pick = True
             write_state(self.control_window.state_path, RUNNING)
             return format_command_result("Farm Plan Updated", message, new_queue)
+
+        def _maybe_pick_lobby_brawler(self):
+            from utils import normalize_brawler_name
+
+            if self.get_latest_state() != "lobby":
+                return
+
+            queue = self.Stage_manager.brawlers_pick_data or []
+            if not queue:
+                return
+
+            front = normalize_brawler_name(queue[0].get("brawler", ""))
+            active = normalize_brawler_name(getattr(self, "active_lobby_brawler", ""))
+            needs_pick = (
+                not self.picked_first_brawler
+                or getattr(self, "pending_lobby_brawler_pick", False)
+                or (front and front != active)
+            )
+            if not needs_pick:
+                return
+
+            row = queue[0]
+            if not row.get("automatically_pick"):
+                self.picked_first_brawler = True
+                self.pending_lobby_brawler_pick = False
+                if front:
+                    self.active_lobby_brawler = front
+                return
+
+            brawler_name = row["brawler"]
+            runtime_log.log_info("queue", f"Picking brawler automatically: {brawler_name}")
+            self.lobby_automator.selecting_brawler = True
+            try:
+                picked = self.lobby_automator.select_brawler(brawler_name)
+                attempts = 0
+                max_attempts = len(self.Stage_manager.brawlers_pick_data)
+                while not picked and attempts < max_attempts:
+                    if self.ping_when_stuck:
+                        notify_user(
+                            "bot_failed_brawler_selection",
+                            self.window_controller.screenshot(),
+                            self.Stage_manager,
+                        )
+                    failed = self.Stage_manager.brawlers_pick_data.pop(0)
+                    self.Stage_manager.brawlers_pick_data.append(failed)
+                    brawler_name = self.Stage_manager.brawlers_pick_data[0]["brawler"]
+                    self.Stage_manager.quit_shop()
+                    picked = self.lobby_automator.select_brawler(brawler_name)
+                    attempts += 1
+                if picked:
+                    self.active_lobby_brawler = normalize_brawler_name(brawler_name)
+                    self.pending_lobby_brawler_pick = False
+                    self.update_trophy_observer()
+                else:
+                    runtime_log.log_warn(
+                        "queue",
+                        f"Automatic brawler pick failed for {brawler_name}; continuing with current selection.",
+                    )
+                    from support_reporter import report_support_event
+
+                    report_support_event(
+                        "brawler_pick_failed",
+                        f"Automatic brawler pick failed for {brawler_name}",
+                        screenshot=self.window_controller.screenshot(),
+                        extra={
+                            "brawler": brawler_name,
+                            "attempts": attempts,
+                            "queue_len": len(self.Stage_manager.brawlers_pick_data or []),
+                        },
+                    )
+            finally:
+                self.lobby_automator.selecting_brawler = False
+            self.picked_first_brawler = True
 
         def discord_start_push(self, brawler, target=None):
             from discord_control import resolve_brawler_choice
@@ -1041,51 +1124,7 @@ def pyla_main(data):
                             self.stop_gracefully()
                             break
 
-                if not self.picked_first_brawler and self.get_latest_state() == "lobby":
-                    row = self.Stage_manager.brawlers_pick_data[0]
-                    if row.get("automatically_pick"):
-                        brawler_name = row["brawler"]
-                        runtime_log.log_info("queue", f"Picking brawler automatically: {brawler_name}")
-                        self.lobby_automator.selecting_brawler = True
-                        try:
-                            picked = self.lobby_automator.select_brawler(brawler_name)
-                            attempts = 0
-                            max_attempts = len(self.Stage_manager.brawlers_pick_data)
-                            while not picked and attempts < max_attempts:
-                                if self.ping_when_stuck:
-                                    notify_user(
-                                        "bot_failed_brawler_selection",
-                                        self.window_controller.screenshot(),
-                                        self.Stage_manager,
-                                    )
-                                failed = self.Stage_manager.brawlers_pick_data.pop(0)
-                                self.Stage_manager.brawlers_pick_data.append(failed)
-                                brawler_name = self.Stage_manager.brawlers_pick_data[0]["brawler"]
-                                self.Stage_manager.quit_shop()
-                                picked = self.lobby_automator.select_brawler(brawler_name)
-                                attempts += 1
-                            if picked:
-                                self.update_trophy_observer()
-                            else:
-                                runtime_log.log_warn(
-                                    "queue",
-                                    f"Automatic brawler pick failed for {brawler_name}; continuing with current selection.",
-                                )
-                                from support_reporter import report_support_event
-
-                                report_support_event(
-                                    "brawler_pick_failed",
-                                    f"Automatic brawler pick failed for {brawler_name}",
-                                    screenshot=self.window_controller.screenshot(),
-                                    extra={
-                                        "brawler": brawler_name,
-                                        "attempts": attempts,
-                                        "queue_len": len(self.Stage_manager.brawlers_pick_data or []),
-                                    },
-                                )
-                        finally:
-                            self.lobby_automator.selecting_brawler = False
-                    self.picked_first_brawler = True
+                self._maybe_pick_lobby_brawler()
 
                 now = time.time()
                 frame_start = time.perf_counter() if self.max_ips else None
