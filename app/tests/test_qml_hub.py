@@ -355,6 +355,17 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("function startBot()", qml)
         self.assertNotIn("gradient: Gradient", qml)
 
+    def test_preflight_actions_preserve_cache_and_stay_async(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        bridge = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+
+        self.assertIn("return json.dumps(self._ui_state())", bridge)
+        self.assertIn('return self._start_background_action("preflight-fix", payload)', bridge)
+        self.assertIn('if action == "preflight-fix":', bridge)
+        self.assertIn('return json.dumps({"ok": True, "state": self._ui_state()})', bridge)
+        self.assertIn("statusText = \"Please wait for the current hub action to finish.\"\n            statusOk = false", qml)
+        self.assertIn("enabled: !root.hubBusy\n                                        onClicked: applyBridgeResult(hubBridge.runPreflightFix", qml)
+
     def test_normalize_dialog_path_handles_file_urls(self):
         from gui.qml_hub import _normalize_dialog_path
 
