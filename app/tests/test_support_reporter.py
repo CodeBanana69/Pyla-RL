@@ -9,6 +9,8 @@ import toml
 from support_reporter import (
     DEFAULT_SUPPORT_WEBHOOK_ENC,
     _fingerprint,
+    _is_broken_pipe_error,
+    _safe_log,
     _should_send,
     build_support_embed,
     collect_support_context,
@@ -22,6 +24,14 @@ from support_reporter import (
 
 
 class SupportReporterTests(unittest.TestCase):
+    def test_safe_log_swallows_broken_pipe(self):
+        with patch("builtins.print", side_effect=OSError(22, "broken pipe")):
+            _safe_log("hello")
+
+    def test_is_broken_pipe_error_detects_windows_pipe_errors(self):
+        self.assertTrue(_is_broken_pipe_error(OSError(None, "pipe", None, 233)))
+        self.assertFalse(_is_broken_pipe_error(RuntimeError("boom")))
+
     def test_encrypt_decrypt_webhook_roundtrip(self):
         url = (
             "https://discord.com/api/webhooks/123456789012345678/"

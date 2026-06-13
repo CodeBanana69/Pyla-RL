@@ -243,11 +243,11 @@ class Client:
                 time.sleep(0.01)
                 if not self.block_frame:
                     self.__send_to_listeners(EVENT_FRAME, None)
-            except (ConnectionError, OSError) as e:  # Socket Closed
+            except (ConnectionError, OSError):  # Socket closed or reset by emulator/host
                 if self.alive:
                     self.__send_to_listeners(EVENT_DISCONNECT)
                     self.stop()
-                    raise e
+                return
 
     def add_listener(self, cls: str, listener: Callable[..., Any]) -> None:
         """

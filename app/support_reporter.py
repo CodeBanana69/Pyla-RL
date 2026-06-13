@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import errno
 import hashlib
 import io
 import json
@@ -74,6 +75,22 @@ _installed = False
 _original_excepthook = None
 _original_threading_excepthook = None
 _send_lock = threading.Lock()
+
+
+def _safe_log(message: str) -> None:
+    try:
+        print(message)
+    except OSError:
+        pass
+
+
+def _is_broken_pipe_error(exc: BaseException | None) -> bool:
+    if not isinstance(exc, OSError):
+        return False
+    winerror = getattr(exc, "winerror", None)
+    if winerror in (233, 109):
+        return True
+    return exc.errno in (getattr(errno, "EPIPE", None), getattr(errno, "ESHUTDOWN", None))
 
 
 def set_terminal_log_path(path: str | None) -> None:
@@ -413,7 +430,7 @@ async def async_send_support_report(
     webhook_url = settings.get("webhook_url", "")
     valid, normalized = validate_discord_webhook_url(webhook_url)
     if not valid:
-        print(f"Support report skipped: {normalized}")
+        _safe_log(f"Support report skipped: {normalized}")
         return False
 
     fingerprint = _fingerprint(trigger, message, exc)
@@ -446,10 +463,10 @@ async def async_send_support_report(
         async with aiohttp.ClientSession() as session:
             webhook = Webhook.from_url(normalized, session=session)
             await webhook.send(**send_kwargs)
-        print(f"Support report sent: {trigger}")
+        _safe_log(f"Support report sent: {trigger}")
         return True
     except Exception as send_exc:
-        print(f"Support report failed ({trigger}): {send_exc}")
+        _safe_log(f"Support report failed ({trigger}): {send_exc}")
         return False
 
 
@@ -473,7 +490,7 @@ def _dispatch_report(
                 )
             )
         except Exception as dispatch_exc:
-            print(f"Support report dispatch failed: {dispatch_exc}")
+            _safe_log(f"Support report dispatch failed: {dispatch_exc}")
 
     thread = threading.Thread(target=_runner, daemon=True, name="support-reporter")
     thread.start()
@@ -511,6 +528,11 @@ def _excepthook(exc_type, exc, tb):
 
 
 def _threading_excepthook(args):
+    thread = getattr(args, "thread", None)
+    if thread is not None and thread.name == "support-reporter":
+        return
+    if _is_broken_pipe_error(args.exc_value):
+        return
     _handle_exception(args.exc_type, args.exc_value, args.exc_traceback, trigger="thread_exception")
     if _original_threading_excepthook:
         _original_threading_excepthook(args)
