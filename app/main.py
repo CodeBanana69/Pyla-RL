@@ -434,6 +434,7 @@ def pyla_main(data):
             self.cooldown_duration = 3 * 60
             self.picked_first_brawler = False
             self.active_lobby_brawler = ""
+            self.active_match_brawler = ""
             self.pending_lobby_brawler_pick = False
             time_thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
             self.check_if_brawl_stars_crashed_timer = float(
@@ -761,6 +762,16 @@ def pyla_main(data):
                         self.Play.reset_match_control_state()
                     if previous_state in {"lobby", "match_making"}:
                         self.Stage_manager.reset_prestige_reward_gate()
+                        from utils import normalize_brawler_name
+
+                        active = normalize_brawler_name(getattr(self, "active_lobby_brawler", ""))
+                        if not active and self.Stage_manager.brawlers_pick_data:
+                            active = normalize_brawler_name(
+                                self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                            )
+                        if active:
+                            self.active_match_brawler = active
+                            self.Stage_manager.active_match_brawler = active
                 if state is not None:
                     self.handle_detected_state(state)
                 if state == "lobby":
@@ -906,12 +917,36 @@ def pyla_main(data):
                 write_state(self.control_window.state_path, RUNNING)
                 return format_command_result("Farm Plan Updated", message or "Farm plan is empty.", new_queue)
 
+            old_front = ""
+            if self.Stage_manager.brawlers_pick_data:
+                old_front = normalize_brawler_name(
+                    self.Stage_manager.brawlers_pick_data[0].get("brawler", "")
+                )
             new_front = normalize_brawler_name(new_queue[0].get("brawler", ""))
             self.Stage_manager.stage_queue_update(new_queue, reason="remote")
-            if new_front and new_front != normalize_brawler_name(getattr(self, "active_lobby_brawler", "")):
+            active_lobby = normalize_brawler_name(getattr(self, "active_lobby_brawler", ""))
+            active_match = normalize_brawler_name(
+                getattr(self, "active_match_brawler", "")
+                or getattr(self.Stage_manager, "active_match_brawler", "")
+            )
+            if new_front and (
+                new_front != old_front
+                or (active_lobby and new_front != active_lobby)
+                or (active_match and new_front != active_match)
+            ):
                 self.pending_lobby_brawler_pick = True
+                self.Stage_manager.pending_brawler_reselection = True
             write_state(self.control_window.state_path, RUNNING)
             return format_command_result("Farm Plan Updated", message, new_queue)
+
+        def _get_play_brawler_name(self):
+            from utils import normalize_brawler_name
+
+            active_match = normalize_brawler_name(getattr(self, "active_match_brawler", ""))
+            if self.get_latest_state() == "match" and active_match:
+                return active_match
+            queue = self.Stage_manager.brawlers_pick_data or []
+            return queue[0]["brawler"] if queue else ""
 
         def _maybe_pick_lobby_brawler(self):
             from utils import normalize_brawler_name
@@ -964,6 +999,9 @@ def pyla_main(data):
                 if picked:
                     self.active_lobby_brawler = normalize_brawler_name(brawler_name)
                     self.pending_lobby_brawler_pick = False
+                    self.Stage_manager.pending_brawler_reselection = False
+                    self.active_match_brawler = ""
+                    self.Stage_manager.active_match_brawler = ""
                     self.update_trophy_observer()
                 else:
                     runtime_log.log_warn(
@@ -1188,7 +1226,7 @@ def pyla_main(data):
                 frame_id = self.window_controller.get_latest_frame_id()
                 if frame_id == self.last_processed_frame_id:
                     if self.should_replay_duplicate_frame(last_ft):
-                        brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
+                        brawler = self._get_play_brawler_name()
                         self.Play.current_brawler = brawler
                         self.Play.main(frame, brawler, self)
                         c += 1
@@ -1197,7 +1235,7 @@ def pyla_main(data):
                 self.last_processed_frame_id = frame_id
 
                 self.manage_time_tasks(frame)
-                brawler = self.Stage_manager.brawlers_pick_data[0]["brawler"]
+                brawler = self._get_play_brawler_name()
                 self.Play.current_brawler = brawler
                 self.Play.main(frame, brawler, self)
                 c += 1

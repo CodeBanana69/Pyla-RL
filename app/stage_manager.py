@@ -102,6 +102,8 @@ class StageManager:
             False,
         )
         self._queue_file_mtime = None
+        self.pending_brawler_reselection = False
+        self.active_match_brawler = ""
         self.playstyle_info = playstyle_info
         self.get_latest_state = state_getting
         self.last_match_trophy_before = None
@@ -747,6 +749,8 @@ class StageManager:
         return False
 
     def requires_brawler_reselection(self, active_brawler=None):
+        if getattr(self, "pending_brawler_reselection", False):
+            return True
         brawlers_pick_data = getattr(self, "brawlers_pick_data", None)
         if not brawlers_pick_data:
             return False
@@ -785,8 +789,8 @@ class StageManager:
         except (TypeError, ValueError):
             return True
 
-    def _should_press_play_again(self, result, value, target):
-        if not self.should_use_play_again(value, target):
+    def _should_press_play_again(self, result, value, target, active_brawler=None):
+        if not self.should_use_play_again(value, target, active_brawler=active_brawler):
             return False
         if self.play_again_on_win and not self._is_win_result(result):
             return False
@@ -926,7 +930,10 @@ class StageManager:
         while current_state.startswith("end") and time.time() - end_screen_time < 35:
             if not stats_recorded:
                 found_game_result = '_'.join(current_state.split("_")[1:])
-                current_brawler = self.brawlers_pick_data[0]['brawler']
+                current_brawler = normalize_brawler_name(
+                    getattr(self, "active_match_brawler", "")
+                    or self.brawlers_pick_data[0].get("brawler", "")
+                )
                 power_level = None
                 if early_access and getattr(self, "player_tag", None):
                     player_info = get_player_info(self.player_tag)
@@ -968,7 +975,14 @@ class StageManager:
                 if not match_notified:
                     self._notify_match_summary(screenshot)
                     match_notified = True
-                use_play_again = self._should_press_play_again(found_game_result, value, target)
+                use_play_again = self._should_press_play_again(
+                    found_game_result,
+                    value,
+                    target,
+                    active_brawler=current_brawler,
+                )
+            elif self.requires_brawler_reselection():
+                use_play_again = False
 
             if use_play_again:
                 print("Post-match action: Play Again.")
@@ -986,6 +1000,11 @@ class StageManager:
             while time.time() - start_wait_time < 25:
                 if self._should_stop() or self._should_pause():
                     break
+                if self.requires_brawler_reselection():
+                    print("Queue changed during Play Again; returning to lobby for brawler reselection.")
+                    self.window_controller.press("proceed")
+                    time.sleep(2)
+                    return
                 screenshot = self.window_controller.screenshot()
                 current_state = get_state(screenshot)
                 if current_state == "match":
@@ -1034,9 +1053,15 @@ class StageManager:
         normalized = normalize_queue(new_queue)
         if not normalized:
             return False
+        old_front = ""
+        if self.brawlers_pick_data:
+            old_front = normalize_brawler_name(self.brawlers_pick_data[0].get("brawler", ""))
+        new_front = normalize_brawler_name(normalized[0].get("brawler", ""))
         self.brawlers_pick_data = normalized
         save_queue_data(normalized)
         self._queue_file_mtime = None
+        if new_front and old_front and new_front != old_front:
+            self.pending_brawler_reselection = True
         return True
 
     def do_state(self, state, data=None):
