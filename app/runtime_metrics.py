@@ -48,6 +48,7 @@ def _normalize_session(session):
     for key in (
         "session_wins",
         "session_losses",
+        "session_draws",
         "recovery_count_session",
         "scrcpy_restarts",
         "display_repairs",

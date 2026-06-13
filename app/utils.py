@@ -1040,6 +1040,7 @@ def build_match_notification_details(stage_manager, match_record: dict) -> dict:
             details.setdefault("trophies", trophy_observer.current_trophies)
             details.setdefault("wins", trophy_observer.current_wins)
             details.setdefault("win_streak", trophy_observer.win_streak)
+            details.update(trophy_observer.session_stats())
         if len(queue) > 1:
             details.setdefault("next_up", queue[1].get("brawler", ""))
     try:
@@ -1064,6 +1065,7 @@ def build_notification_details(message_type, stage_manager) -> dict:
             details["trophies"] = trophy_observer.current_trophies
             details["wins"] = trophy_observer.current_wins
             details["win_streak"] = trophy_observer.win_streak
+            details.update(trophy_observer.session_stats())
         if len(queue) > 1:
             details["next_up"] = queue[1].get("brawler", "")
             try:

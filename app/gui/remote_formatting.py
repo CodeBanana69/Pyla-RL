@@ -176,7 +176,7 @@ def format_field_value(key: str, value: Any) -> str:
         return str(value).title()
     if key == "trophy_delta":
         return format_trophy_delta(value)
-    if key in {"trophies", "started_trophies", "total_trophies", "target", "wins", "win_streak", "brawlers_left"}:
+    if key in {"trophies", "started_trophies", "total_trophies", "target", "wins", "win_streak", "brawlers_left", "session_wins", "session_losses", "session_draws"}:
         return format_number(value)
     if key == "state":
         return str(value).replace("_", " ").strip().title()

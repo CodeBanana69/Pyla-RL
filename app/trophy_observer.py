@@ -10,6 +10,9 @@ class TrophyObserver:
         self.history_file = resolve_project_path("cfg/match_history.csv")
         self.current_trophies = None
         self.current_wins = None
+        self.session_wins = 0
+        self.session_losses = 0
+        self.session_draws = 0
         self.match_history = self.load_history()
         self.last_sent_index = len(self.match_history)
         self.win_streak = 0
@@ -113,6 +116,7 @@ class TrophyObserver:
         else:
             print("Catastrophic failure")
             trophy_delta = 0
+        self._record_session_result(game_result)
         self.current_trophies += trophy_delta
         self.last_match_record = {
             "brawler": current_brawler,
@@ -135,6 +139,22 @@ class TrophyObserver:
     def add_win(self, game_result):
         if game_result == "victory":
             self.current_wins += 1
+
+    def _record_session_result(self, game_result: str) -> None:
+        result = str(game_result or "").strip().lower()
+        if result == "victory":
+            self.session_wins += 1
+        elif result == "defeat":
+            self.session_losses += 1
+        elif result == "draw":
+            self.session_draws += 1
+
+    def session_stats(self) -> dict[str, int]:
+        return {
+            "session_wins": int(self.session_wins or 0),
+            "session_losses": int(self.session_losses or 0),
+            "session_draws": int(self.session_draws or 0),
+        }
 
     def change_trophies(self, new):
         print(f"Trophies changed from {self.current_trophies} to {new}")

@@ -945,7 +945,7 @@ def pyla_main(data):
 
         def build_runtime_snapshot(self):
             current = self.Stage_manager.brawlers_pick_data[0] if self.Stage_manager.brawlers_pick_data else {}
-            total = self.Stage_manager.Trophy_observer.match_history.get("total", {})
+            session = self.Stage_manager.Trophy_observer.session_stats()
             runtime_label = self.runtime_control_label()
             return {
                 "uptime_s": time.time() - self.started_at,
@@ -953,9 +953,9 @@ def pyla_main(data):
                 "brawler": current.get("brawler", ""),
                 "target": current.get("push_until", ""),
                 "trophies": self.Stage_manager.Trophy_observer.current_trophies,
-                "session_wins": int(total.get("victory", 0) or 0),
-                "session_losses": int(total.get("defeat", 0) or 0),
-                "session_draws": int(total.get("draw", 0) or 0),
+                "session_wins": session["session_wins"],
+                "session_losses": session["session_losses"],
+                "session_draws": session["session_draws"],
                 "notice": runtime_label.title(),
                 "feed_fps": self.perf_feed_fps,
             }

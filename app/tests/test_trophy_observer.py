@@ -42,6 +42,22 @@ class TrophyObserverTests(unittest.TestCase):
 
         self.assertEqual(observer.win_streak_gain(), 0)
 
+    def test_session_stats_track_victory_defeat_and_draw(self):
+        observer = TrophyObserver()
+        observer.current_trophies = 100
+        playstyle = {"name": "test", "gamemodes": [], "brawlers": []}
+
+        with patch.object(observer, "save_history"), patch.object(observer, "send_results_to_api"):
+            observer.add_trophies("victory", "shelly", playstyle)
+            observer.add_trophies("defeat", "shelly", playstyle)
+            observer.add_trophies("draw", "shelly", playstyle)
+
+        self.assertEqual(observer.session_stats(), {
+            "session_wins": 1,
+            "session_losses": 1,
+            "session_draws": 1,
+        })
+
 
 if __name__ == "__main__":
     unittest.main()
