@@ -77,6 +77,13 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("setup.exe", source)
         self.assertIn("legacy_path.unlink()", source)
 
+    def test_setup_auto_installs_verified_gpu_runtime(self):
+        source = Path("app/setup.py").read_text(encoding="utf-8")
+
+        self.assertIn("auto_install_gpu_runtime", source)
+        self.assertIn("verify=True", source)
+        self.assertIn("PYLAAI_SETUP_AUTO", source)
+
     def test_setup_bootstrap_installs_into_project_venv(self):
         source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
 

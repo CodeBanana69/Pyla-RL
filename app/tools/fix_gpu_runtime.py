@@ -1,5 +1,4 @@
 import argparse
-import json
 from pathlib import Path
 import subprocess
 import sys
@@ -8,12 +7,17 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from gpu_runtime_install import (
+    auto_install_gpu_runtime,
+    install_and_verify_variant,
+    install_variant,
+    verify_cuda_dlls,
+)
 from gpu_support import (
     apply_gpu_config,
     auto_candidate_variants as gpu_auto_candidate_variants,
     detect_graphics_cards as gpu_detect_graphics_cards,
     detect_runtime_variant as gpu_detect_runtime_variant,
-    select_best_runtime_result,
 )
 
 
@@ -35,14 +39,6 @@ BASE_REQUIREMENTS = [
     "adbutils==2.12.0",
     "av==12.3.0",
 ]
-ONNX_VARIANTS = [
-    "onnxruntime",
-    "onnxruntime-gpu",
-    "onnxruntime-directml",
-    "onnxruntime-openvino",
-]
-CUDA_TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu124"
-BENCHMARK_MARKER = "PYLA_RUNTIME_BENCHMARK="
 
 
 def run(command):
@@ -86,50 +82,6 @@ def detect_runtime_variant():
     return gpu_detect_runtime_variant()
 
 
-def install_variant(variant):
-    package = {
-        "directml": "onnxruntime-directml",
-        "cuda": "onnxruntime-gpu",
-        "cpu": "onnxruntime",
-    }[variant]
-
-    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", *ONNX_VARIANTS], check=False)
-    if variant == "cuda":
-        run([
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "torch",
-            "torchvision",
-            "--index-url",
-            CUDA_TORCH_INDEX_URL,
-        ])
-    run([sys.executable, "-m", "pip", "install", "--upgrade", package])
-
-
-def prepare_cuda_dll_paths():
-    root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from cuda_runtime_paths import add_cuda_dll_directories, has_cuda_dependency_dlls
-
-    added_paths = add_cuda_dll_directories(verbose=True)
-    ok, missing = has_cuda_dependency_dlls()
-    if not ok:
-        print()
-        print(
-            "WARNING: CUDA provider files are installed, but these CUDA DLLs were not found: "
-            + ", ".join(missing)
-        )
-        print("Run this command again with Python 3.11 64-bit so PyTorch CUDA wheels install correctly:")
-        print("py -3.11-64 tools\\fix_gpu_runtime.py cuda")
-    elif added_paths:
-        print("CUDA dependency DLLs found.")
-    return ok
-
-
 def update_config(variant):
     root = Path(__file__).resolve().parents[1]
     if str(root) not in sys.path:
@@ -146,59 +98,30 @@ def update_config(variant):
     )
 
 
+def prepare_cuda_dll_paths():
+    ok, missing = verify_cuda_dlls(verbose=True)
+    if not ok:
+        print()
+        print(
+            "WARNING: CUDA provider files are installed, but these CUDA DLLs were not found: "
+            + ", ".join(missing)
+        )
+        print("Run this command again with Python 3.11 64-bit so PyTorch CUDA wheels install correctly:")
+        print("py -3.11-64 tools\\fix_gpu_runtime.py cuda")
+    else:
+        print("CUDA dependency DLLs found.")
+    return ok
+
+
 def benchmark_variant(variant, runs=12):
-    root = ROOT
-    code = f"""
-import json
-import sys
-import time
-from pathlib import Path
-import numpy as np
+    from gpu_runtime_install import smoke_test_variant
 
-root = Path({str(root)!r})
-if str(root) not in sys.path:
-    sys.path.insert(0, str(root))
-
-from detect import Detect
-
-model_path = root / "models" / "mainInGameModel.onnx"
-detector = Detect(str(model_path), classes=["enemy", "teammate", "player"])
-sample = np.zeros((1080, 1920, 3), dtype=np.uint8)
-for _ in range(2):
-    detector.detect_objects(sample, conf_tresh=0.75)
-started = time.perf_counter()
-for _ in range({int(runs)}):
-    detector.detect_objects(sample, conf_tresh=0.75)
-elapsed = max(time.perf_counter() - started, 1e-9)
-print({BENCHMARK_MARKER!r} + json.dumps({{
-    "variant": {variant!r},
-    "provider": detector.device,
-    "ips": {int(runs)} / elapsed,
-}}))
-"""
-    completed = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        timeout=180,
+    result = smoke_test_variant(variant, python=sys.executable, runs=runs)
+    print(
+        f"Runtime result: variant={variant} provider={result.get('provider') or 'none'} "
+        f"ips={float(result.get('ips') or 0):.2f} ok={result.get('ok')}"
     )
-    if completed.stdout.strip():
-        print(completed.stdout.strip())
-    if completed.stderr.strip():
-        print(completed.stderr.strip())
-    for line in completed.stdout.splitlines():
-        if line.startswith(BENCHMARK_MARKER):
-            result = json.loads(line[len(BENCHMARK_MARKER):])
-            result["ok"] = completed.returncode == 0
-            return result
-    return {
-        "variant": variant,
-        "provider": "",
-        "ips": 0.0,
-        "ok": False,
-        "error": (completed.stderr or completed.stdout or "benchmark did not return a result").strip(),
-    }
+    return result
 
 
 def install_and_benchmark_variant(variant):
@@ -206,14 +129,13 @@ def install_and_benchmark_variant(variant):
     print("=" * 60)
     print(f"Testing runtime: {variant}")
     print("=" * 60)
-    install_variant(variant)
+    result = install_and_verify_variant(variant, smoke_runs=12)
+    if variant == "cuda":
+        prepare_cuda_dll_paths()
     try:
         update_config(variant)
     except Exception as exc:
         print(f"WARNING: Could not update cfg/general_config.toml automatically: {exc}")
-    if variant == "cuda":
-        prepare_cuda_dll_paths()
-    result = benchmark_variant(variant)
     print(
         f"Runtime result: variant={variant} provider={result.get('provider') or 'none'} "
         f"ips={float(result.get('ips') or 0):.2f} ok={result.get('ok')}"
@@ -239,32 +161,23 @@ def main():
 
     install_base_requirements()
     cards = detect_graphics_cards()
-    variants = auto_candidate_variants(cards) if args.variant == "auto" else [args.variant]
-    print(f"Runtime test order: {', '.join(variants)}")
 
-    results = []
-    for variant in variants:
+    if args.variant == "auto":
+        chosen, _pytorch_label, _accel_label, results = auto_install_gpu_runtime(
+            cards=cards,
+            verify=True,
+            benchmark_runs=12,
+        )
         try:
-            results.append(install_and_benchmark_variant(variant))
+            update_config(chosen)
         except Exception as exc:
-            print(f"Runtime {variant} failed during install/test: {exc}")
-            results.append({"variant": variant, "provider": "", "ips": 0.0, "ok": False, "error": str(exc)})
-
-    working = [result for result in results if result.get("ok") and float(result.get("ips") or 0) > 0]
-    if not working:
-        print("No ONNX runtime worked. Leaving the last attempted runtime installed.")
-        return 1
-
-    best = select_best_runtime_result(results, cards)
-    if best is None:
-        print("No ONNX runtime worked. Leaving the last attempted runtime installed.")
-        return 1
-    best_variant = best["variant"]
-    if results[-1].get("variant") != best_variant:
-        print()
-        print(f"Reinstalling best runtime: {best_variant}")
-        install_variant(best_variant)
-    update_config(best_variant)
+            print(f"WARNING: Could not update cfg/general_config.toml automatically: {exc}")
+    else:
+        results = [install_and_benchmark_variant(args.variant)]
+        chosen = args.variant if results[-1].get("ok") else "cpu"
+        if chosen != args.variant:
+            install_variant("cpu")
+        update_config(chosen)
 
     import onnxruntime as ort
 
@@ -277,12 +190,13 @@ def main():
             f"  - {result.get('variant')}: provider={result.get('provider') or 'none'} "
             f"ips={float(result.get('ips') or 0):.2f} ok={result.get('ok')}"
         )
+    best = next((result for result in results if result.get("variant") == chosen), results[-1])
     print(
-        f"Selected best runtime: {best_variant} "
+        f"Selected best runtime: {chosen} "
         f"({best.get('provider')}, {float(best.get('ips') or 0):.2f} detector IPS)."
     )
     print("Restart Pyla after this tool finishes.")
-    return 0
+    return 0 if best.get("ok") else 1
 
 
 if __name__ == "__main__":

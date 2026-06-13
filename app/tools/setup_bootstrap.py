@@ -319,7 +319,7 @@ def main():
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"
     if progress_window:
-        progress_window.update("Installing Pyla-RL dependencies...")
+        progress_window.update("Installing Pyla-RL dependencies and GPU runtime...")
     run(venv_command + ["setup.py", "--pyla-install"], cwd=app_bundle, env=env)
 
     if progress_window:

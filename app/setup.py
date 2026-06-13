@@ -32,7 +32,13 @@ from gpu_support import (
     apply_gpu_config,
     detect_graphics_cards,
     get_gpu_data as detect_gpu_data,
-    recommended_setup_onnx_variant,
+)
+from gpu_runtime_install import (
+    auto_install_gpu_runtime,
+    install_variant as install_gpu_runtime_variant,
+    repair_cuda_torch,
+    variant_status_labels,
+    verify_cuda_dlls,
 )
 
 def force_install(reqs, no_deps=False):
@@ -54,16 +60,6 @@ def save_gpu_runtime_config(variant, cards):
         f"Saved GPU runtime config: cpu_or_gpu={config.get('cpu_or_gpu')}, "
         f"directml_device_id={config.get('directml_device_id', 'auto')}"
     )
-
-def remove_onnxruntime_variants():
-    subprocess.run([
-        sys.executable, "-m", "pip", "uninstall", "-y",
-        "onnxruntime", "onnxruntime-gpu", "onnxruntime-directml", "onnxruntime-openvino"
-    ], check=False)
-
-def install_onnxruntime_variant(req):
-    remove_onnxruntime_variants()
-    force_install([req])
 
 def get_gpu_data():
     return detect_gpu_data()
@@ -116,41 +112,36 @@ def setup_pyla():
 
     # --- THE CHOICE BRANCHES ---
 
-    def nvidia_cuda_torch_command():
-        if ver >= 10.0: # 50-Series Blackwell
-            return ["--pre", "torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/nightly/cu128"], "CUDA 12.8 (Blackwell)"
-        if ver >= 8.9: # 40-Series Ada
-            return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"], "CUDA 12.4 (Ada)"
-        return ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu121"], "CUDA 12.1 (Standard)"
-
     def install_acceleration_variant(variant):
         nonlocal status_pytorch, status_accel, onnx_installed, onnx_variant
+        install_gpu_runtime_variant(variant, compute_cap=ver if target == "nvidia" else 0.0)
         if variant == "cuda":
-            torch_cmd, status_accel = nvidia_cuda_torch_command()
-            force_install(torch_cmd)
-            install_onnxruntime_variant("onnxruntime-gpu")
-            status_pytorch = "CUDA Edition"
-            onnx_variant = "cuda"
-        elif variant == "directml":
-            install_onnxruntime_variant("onnxruntime-directml")
-            status_pytorch = "DirectML Edition"
-            status_accel = "DirectML"
-            onnx_variant = "directml"
-        elif variant == "openvino":
-            install_onnxruntime_variant("onnxruntime-openvino")
-            status_pytorch = "OpenVINO Edition"
-            status_accel = "OpenVINO"
-            onnx_variant = "openvino"
-        else:
-            return False
+            ok, missing = verify_cuda_dlls(verbose=True)
+            if not ok:
+                print(
+                    "CUDA DLLs still missing ("
+                    + ", ".join(missing)
+                    + "); repairing PyTorch CUDA wheels..."
+                )
+                ok, missing = repair_cuda_torch(compute_cap=ver, verbose=True)
+            if not ok:
+                print(
+                    "WARNING: CUDA acceleration installed but CUDA DLLs are still missing. "
+                    "Run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
+                )
+        status_pytorch, status_accel = variant_status_labels(variant)
+        onnx_variant = variant
         onnx_installed = True
         return True
 
     if auto_setup:
-        auto_variant = recommended_setup_onnx_variant(target, cards)
-        print(f"\nAuto setup: installing {auto_variant} acceleration for {name}.")
-        if auto_variant != "cpu":
-            install_acceleration_variant(auto_variant)
+        print(f"\nAuto setup: detecting and installing GPU acceleration for {name}...")
+        onnx_variant, status_pytorch, status_accel, _runtime_results = auto_install_gpu_runtime(
+            cards=cards,
+            compute_cap=ver if target == "nvidia" else 0.0,
+            verify=True,
+        )
+        onnx_installed = True
 
     # NVIDIA BRANCH (Series 10-50)
     elif target == "nvidia":
@@ -180,8 +171,8 @@ def setup_pyla():
     # FALLBACK BRANCH (If user skipped acceleration or has a generic CPU)
     if not onnx_installed:
         print("\n Installing standard CPU ONNX Runtime...")
-        install_onnxruntime_variant("onnxruntime")
-        status_accel = "Standard CPU"
+        install_gpu_runtime_variant("cpu")
+        status_pytorch, status_accel = variant_status_labels("cpu")
         onnx_variant = "cpu"
 
     if onnx_variant:
