@@ -345,6 +345,7 @@ def main():
         print("Setup did not finish cleanly. Try running:")
         print(f'  "{venv_executable}" -m pip install pandas>=2.0.0')
         print(f'  "{venv_executable}" -m pip install --force-reinstall --no-deps opencv-python==4.8.0.76')
+        print(f'  "{venv_executable}" tools\\fix_gpu_runtime.py auto')
         print(f'  "{venv_executable}" tools\\check_runtime.py')
         input("Press Enter to close...")
         return 1

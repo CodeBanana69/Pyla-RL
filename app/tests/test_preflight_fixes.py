@@ -34,6 +34,7 @@ class PreflightFixTests(unittest.TestCase):
         ok, message = run_preflight_fix("reconnect_adb", emulator="ldplayer", port=5555)
         self.assertTrue(ok)
         mock_run_adb.assert_called_with(["kill-server"])
+        mock_connect.assert_called_with("LDPlayer", 5555, max_ports=4)
 
     def test_unknown_action(self):
         ok, message = run_preflight_fix("not_a_real_action")

@@ -205,7 +205,7 @@ ApplicationWindow {
         id: statusToastTimer
         interval: 2500
         onTriggered: {
-            if (root.statusOk) {
+            if (root.statusOk && !root.hubBusy) {
                 root.statusText = ""
             }
         }
@@ -224,6 +224,7 @@ ApplicationWindow {
         const result = JSON.parse(resultText)
         if (result.pending) {
             root.hubBusy = true
+            statusToastTimer.stop()
             if (result.message) {
                 statusText = result.message
                 statusOk = true
@@ -439,7 +440,7 @@ ApplicationWindow {
         statusText = "Working..."
         statusOk = true
         const result = applyBridgeResult(hubBridge.runAction(action))
-        if (result.ok) {
+        if (result.ok && !result.pending) {
             statusToastTimer.restart()
         }
     }
@@ -453,7 +454,7 @@ ApplicationWindow {
         statusText = "Working..."
         statusOk = true
         const result = applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
-        if (result.ok) {
+        if (result.ok && !result.pending) {
             statusToastTimer.restart()
         }
     }
@@ -461,6 +462,12 @@ ApplicationWindow {
     function startBot() {
         if (root.hubBusy) {
             statusText = "Please wait for the current hub action to finish."
+            statusOk = false
+            return
+        }
+        if (!(hubState.preflight && hubState.preflight.ready)) {
+            root.activeTab = "Overview"
+            statusText = "Run pre-flight checks first, then press START."
             statusOk = false
             return
         }
@@ -509,6 +516,7 @@ ApplicationWindow {
         function onStateChanged(nextMode, nextEmulator) {
             root.mode = nextMode
             root.emulator = nextEmulator
+            reloadState()
         }
         function onQueueChanged() {
             reloadState()
@@ -3955,6 +3963,7 @@ ApplicationWindow {
                         label: "Checks"
                         secondary: true
                         compact: true
+                        enabled: !root.hubBusy
                         onClicked: {
                             root.activeTab = "Overview"
                             root.runAction("preflight-check")

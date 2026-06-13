@@ -73,8 +73,11 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("Run Pyla-RL.bat", source)
         self.assertIn("pyla-rl.bat", source)
         self.assertIn('import cv2', source)
+        self.assertIn("onnxruntime", source)
+        self.assertIn("get_available_providers", source)
         self.assertIn("pyla_python.txt", source)
         self.assertIn("setup.exe", source)
+        self.assertIn("fix_gpu_runtime.py auto", source)
         self.assertIn("legacy_path.unlink()", source)
 
     def test_setup_auto_installs_verified_gpu_runtime(self):
@@ -91,6 +94,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("verify_runtime_imports", source)
         self.assertIn("bundle_dir / \"setup.py\"", source)
         self.assertIn("cwd=bundle_dir", source)
+        self.assertIn("tools\\\\fix_gpu_runtime.py auto", source)
 
     def test_general_config_template_requires_first_run_wizard(self):
         source = Path("cfg/general_config.toml").read_text(encoding="utf-8")
@@ -114,6 +118,14 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("ModuleNotFoundError", source)
         launcher = Path("pyla-rl.bat").read_text(encoding="utf-8")
         self.assertIn("setup.exe", launcher)
+        self.assertIn("onnxruntime", launcher)
+
+    def test_setup_verifies_onnxruntime_before_completion(self):
+        source = Path("app/setup.py").read_text(encoding="utf-8")
+
+        self.assertIn("import onnxruntime as ort", source)
+        self.assertIn("ONNX Runtime verified", source)
+        self.assertIn("ort.get_available_providers()", source)
 
     def test_setup_splits_easyocr_from_core_batch(self):
         source = Path("app/setup.py").read_text(encoding="utf-8")

@@ -199,10 +199,12 @@ def setup_pyla():
         print(f"WARNING: Could not verify visual debug backend: {exc}")
 
     import cv2
+    import onnxruntime as ort
     import pandas as pd
 
     print(f"OpenCV verified: {cv2.__version__} ({sys.executable})")
     print(f"Pandas verified: {pd.__version__} ({sys.executable})")
+    print(f"ONNX Runtime verified: {ort.__version__} providers={ort.get_available_providers()}")
     # the setup completes
     os.system('cls')
     print("="*50)

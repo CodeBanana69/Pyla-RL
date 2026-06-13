@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from tools.python_runtime import (
     probe_cv2,
+    probe_runtime_imports,
     read_python_pin,
     verify_cv2_import,
     write_python_pin,
@@ -30,6 +31,20 @@ class PythonRuntimeTests(unittest.TestCase):
         with patch("tools.python_runtime.probe_cv2", return_value={"ok": False, "executable": "python", "error": "No module named 'cv2'"}):
             with self.assertRaises(RuntimeError):
                 verify_cv2_import(["python"])
+
+    def test_probe_runtime_imports_checks_onnxruntime(self):
+        captured = {}
+
+        def fake_check_output(command, **_kwargs):
+            captured["script"] = command[-1]
+            return '{"ok": true, "versions": {"onnxruntime": "1.0.0"}}'
+
+        with patch("tools.python_runtime.subprocess.check_output", side_effect=fake_check_output):
+            result = probe_runtime_imports(["python"])
+
+        self.assertTrue(result["ok"])
+        self.assertIn("onnxruntime", captured["script"])
+        self.assertIn("get_available_providers", captured["script"])
 
     def test_write_setup_status(self):
         with tempfile.TemporaryDirectory() as tmp:
