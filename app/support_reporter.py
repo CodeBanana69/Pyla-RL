@@ -66,6 +66,7 @@ SECRET_PATTERNS = [
 ]
 
 _NO_DEDUPE_TRIGGERS = frozenset({"unhandled_exception", "startup_crash", "thread_exception"})
+_SKIP_LOG_TAIL_TRIGGERS = frozenset({"support_probe"})
 _recent_fingerprints: dict[str, float] = {}
 _runtime_context_ref: weakref.ReferenceType | None = None
 _terminal_log_path: str | None = None
@@ -203,16 +204,10 @@ def _should_send(trigger: str, fingerprint: str, min_interval: float) -> bool:
 
 
 def _read_log_tail(max_lines: int = 40) -> str:
-    candidates = []
-    if _terminal_log_path and os.path.exists(_terminal_log_path):
-        candidates.append(Path(_terminal_log_path))
-    crash_path = Path(resolve_project_path("logs/startup_crash.log"))
-    if crash_path.exists():
-        candidates.append(crash_path)
-    if not candidates:
+    if not _terminal_log_path or not os.path.exists(_terminal_log_path):
         return ""
     try:
-        lines = candidates[0].read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = Path(_terminal_log_path).read_text(encoding="utf-8", errors="replace").splitlines()
         return "\n".join(lines[-max_lines:])
     except OSError:
         return ""
@@ -275,7 +270,9 @@ def collect_support_context(
         "emulator": str(general_config.get("current_emulator", "")),
         "playstyle": str(bot_config.get("current_playstyle", "")),
         "recent_recovery": _read_recent_recovery(),
-        "log_tail": _read_log_tail(),
+        "log_tail": ""
+        if trigger in _SKIP_LOG_TAIL_TRIGGERS or (extra or {}).get("test")
+        else _read_log_tail(),
     }
 
     if exc is not None:

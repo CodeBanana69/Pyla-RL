@@ -130,6 +130,20 @@ class SupportReporterTests(unittest.TestCase):
         )
         self.assertIn("[REDACTED]", context["webhook_url"])
 
+    @patch("support_reporter._read_log_tail", return_value="old crash log")
+    @patch("support_reporter.load_toml_as_dict", return_value={})
+    @patch("support_reporter._build_info", return_value={})
+    def test_collect_support_context_skips_log_tail_for_test_reports(
+        self, _mock_build, _mock_toml, _mock_log_tail
+    ):
+        context = collect_support_context(
+            "startup_crash",
+            "Intentional local crash test",
+            extra={"test": True},
+        )
+        self.assertEqual(context["log_tail"], "")
+        _mock_log_tail.assert_not_called()
+
     @patch("support_reporter._dispatch_report")
     def test_report_support_event_dispatches(self, mock_dispatch):
         report_support_event("test_trigger", "hello world")
