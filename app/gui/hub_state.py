@@ -203,6 +203,54 @@ class HubStateStore:
         self._migrate_legacy_webhook_config(discord_config_path)
         self._apply_defaults()
         self._ensure_config_files()
+        self._cached_static_meta = None
+        self._cached_source_status = None
+
+    def invalidate_static_ui_cache(self):
+        self._cached_static_meta = None
+        self._cached_source_status = None
+
+    def _static_ui_meta(self):
+        if self._cached_static_meta is not None:
+            return self._cached_static_meta
+
+        from gui.brawler_queue import brawler_icon_uri, load_push_order
+        from gui.hub_tutorials import tutorial_topics
+        from gui.official_source import read_build_info, verify_official_source
+        from performance_profile import PERFORMANCE_PROFILES
+        from utils import get_brawler_list, get_playstyles_list
+
+        if self._cached_source_status is None:
+            self._cached_source_status = verify_official_source()
+
+        brawler_names = get_brawler_list()
+        self._cached_static_meta = {
+            "profileDescriptions": {
+                key: profile.get("description", "")
+                for key, profile in PERFORMANCE_PROFILES.items()
+            },
+            "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
+            "licenseAccepted": _to_bool(self.general_config.get("license_accepted", "no")),
+            "sourceStatus": self._cached_source_status,
+            "buildInfo": read_build_info(),
+            "configDir": str(Path(resolve_project_path("cfg")).resolve()),
+            "pushOrder": load_push_order(),
+            "brawlers": brawler_names,
+            "brawlerOptions": [
+                {"name": name, "icon": brawler_icon_uri(name)}
+                for name in brawler_names
+            ],
+            "tutorials": tutorial_topics(),
+            "playstyles": [
+                {
+                    "filename": item.get("filename", ""),
+                    "name": (item.get("metadata") or {}).get("name", item.get("filename", "")),
+                    "description": (item.get("metadata") or {}).get("description", ""),
+                }
+                for item in get_playstyles_list()
+            ],
+        }
+        return self._cached_static_meta
 
     def _migrate_legacy_webhook_config(self, discord_config_path):
         legacy_path = resolve_project_path(
@@ -377,16 +425,8 @@ class HubStateStore:
         }
 
     def ui_state(self, preflight=None, correct_zoom=True):
-        from performance_profile import PERFORMANCE_PROFILES
-        from gui.brawler_queue import brawler_icon_uri, load_push_order, load_queue, queue_state_items
-        from gui.official_source import read_build_info, verify_official_source
-        from utils import get_brawler_list, get_playstyles_list
+        from gui.brawler_queue import load_queue, queue_state_items
 
-        from gui.hub_tutorials import tutorial_topics
-
-        brawler_names = get_brawler_list()
-        source_status = verify_official_source()
-        build_info = read_build_info()
         state = self.initial_state()
         if preflight is None:
             preflight = {"ready": False, "checks": []}
@@ -398,34 +438,9 @@ class HubStateStore:
             "timers": {key: self.time_tresholds.get(key) for key in self.TIMER_FIELDS},
             "history": self._history_state(),
             "preflight": preflight,
-            "queue": queue_state_items(load_queue()),
+            "queue": queue_state_items(load_queue(self._active_queue_path())),
             "multiInstance": self._multi_instance_state(),
-            "meta": {
-                "profileDescriptions": {
-                    key: profile.get("description", "")
-                    for key, profile in PERFORMANCE_PROFILES.items()
-                },
-                "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
-                "licenseAccepted": _to_bool(self.general_config.get("license_accepted", "no")),
-                "sourceStatus": source_status,
-                "buildInfo": build_info,
-                "configDir": str(Path(resolve_project_path("cfg")).resolve()),
-                "pushOrder": load_push_order(),
-                "brawlers": brawler_names,
-                "brawlerOptions": [
-                    {"name": name, "icon": brawler_icon_uri(name)}
-                    for name in brawler_names
-                ],
-                "tutorials": tutorial_topics(),
-                "playstyles": [
-                    {
-                        "filename": item.get("filename", ""),
-                        "name": (item.get("metadata") or {}).get("name", item.get("filename", "")),
-                        "description": (item.get("metadata") or {}).get("description", ""),
-                    }
-                    for item in get_playstyles_list()
-                ],
-            },
+            "meta": dict(self._static_ui_meta()),
         })
         return state
 

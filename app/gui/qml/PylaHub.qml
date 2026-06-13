@@ -23,7 +23,7 @@ ApplicationWindow {
     property bool statusOk: true
     property string performanceProfile: "balanced"
     property string settingsFilter: ""
-    property var preflightChecks: []
+    property bool hubBusy: false
     property bool showWizard: true
     property int wizardStep: 0
     property bool licenseTermsAccepted: false
@@ -221,6 +221,14 @@ ApplicationWindow {
 
     function applyBridgeResult(resultText) {
         const result = JSON.parse(resultText)
+        if (result.pending) {
+            root.hubBusy = true
+            if (result.message) {
+                statusText = result.message
+                statusOk = true
+            }
+            return result
+        }
         if (result.state) {
             hubState = result.state
             preflightChecks = (result.state.preflight && result.state.preflight.checks) ? result.state.preflight.checks : []
@@ -440,6 +448,9 @@ ApplicationWindow {
     }
 
     function startBot() {
+        if (root.hubBusy) {
+            return
+        }
         statusText = "Checking pre-flight..."
         statusOk = true
         applyBridgeResult(hubBridge.startPyla())
@@ -488,6 +499,13 @@ ApplicationWindow {
         }
         function onQueueChanged() {
             reloadState()
+        }
+        function onActionFinished(resultText) {
+            root.hubBusy = false
+            applyBridgeResult(resultText)
+        }
+        function onActionBusyChanged(busy) {
+            root.hubBusy = busy
         }
     }
 
@@ -2005,6 +2023,7 @@ ApplicationWindow {
                         HubButton {
                             label: "Build Queue"
                             compact: true
+                            enabled: !root.hubBusy
                             onClicked: {
                                 var target = root.trophyTargetFromUi(pushAllTargetInput.editText, root.pushAllTarget)
                                 if (target <= 0) {
@@ -3861,7 +3880,7 @@ ApplicationWindow {
                         color: (hubState.preflight && hubState.preflight.ready)
                             ? (startMouse.containsMouse ? theme.accentHover : theme.accent)
                             : theme.disabled
-                        opacity: (hubState.preflight && hubState.preflight.ready) ? 1.0 : 0.85
+                        opacity: (hubState.preflight && hubState.preflight.ready && !root.hubBusy) ? 1.0 : 0.85
                         border.width: 1
                         border.color: (hubState.preflight && hubState.preflight.ready) ? theme.accentBorder : theme.borderSoft
                         scale: startMouse.pressed ? 0.97 : 1.0
@@ -3881,7 +3900,8 @@ ApplicationWindow {
                             id: startMouse
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
+                            enabled: !root.hubBusy
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: root.startBot()
                         }
                     }

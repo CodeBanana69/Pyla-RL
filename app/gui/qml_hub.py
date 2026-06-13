@@ -77,9 +77,10 @@ class QmlHub:
     ):
         os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window=false")
         ensure_pyside6_available()
-        from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer
+        from PySide6.QtCore import QObject, QUrl, Signal, Slot, QFileSystemWatcher, QTimer, QThread
         from PySide6.QtGui import QGuiApplication, QIcon
         from PySide6.QtQml import QQmlApplicationEngine
+        from gui.hub_action_runner import HubActionWorker, is_blocking_hub_action, pending_action_message
 
         class HubBridge(QObject):
             stateChanged = Signal(str, str)
@@ -87,6 +88,8 @@ class QmlHub:
             queueChanged = Signal()
             closeRequested = Signal()
             instancesUpdated = Signal()
+            actionFinished = Signal(str)
+            actionBusyChanged = Signal(bool)
 
             def __init__(
                 self,
@@ -105,6 +108,8 @@ class QmlHub:
                 self._preflight_cache = {"ready": False, "checks": []}
                 self._icon_download_started = False
                 self._multi_instance_service = None
+                self._action_thread = None
+                self._action_busy = False
                 state = store.initial_state()
                 self._mode = state["mode"]
                 self._emulator = state["emulator"]
@@ -125,6 +130,54 @@ class QmlHub:
                     self._instances_timer.start()
                 else:
                     self._instances_timer.stop()
+
+            @Slot(result=bool)
+            def actionBusy(self):
+                return self._action_busy
+
+            def _set_action_busy(self, busy):
+                busy = bool(busy)
+                if self._action_busy == busy:
+                    return
+                self._action_busy = busy
+                self.actionBusyChanged.emit(busy)
+
+            def _start_background_action(self, action, payload_json="", *, start_pyla=False):
+                if self._action_thread is not None and self._action_thread.isRunning():
+                    return json.dumps({
+                        "ok": False,
+                        "message": "Another hub action is still running.",
+                        "state": self._ui_state(),
+                    })
+                self._set_action_busy(True)
+                thread = QThread()
+                worker = HubActionWorker(
+                    self,
+                    action=action,
+                    payload_json=payload_json,
+                    start_pyla=start_pyla,
+                )
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+                worker.finished.connect(self._on_background_action_finished)
+                worker.finished.connect(thread.quit)
+                worker.finished.connect(worker.deleteLater)
+                thread.finished.connect(thread.deleteLater)
+                self._action_thread = thread
+                thread.start()
+                message = pending_action_message("start-pyla" if start_pyla else action)
+                return json.dumps({"ok": True, "pending": True, "message": message})
+
+            def _on_background_action_finished(self, payload_json):
+                self._action_thread = None
+                self._set_action_busy(False)
+                self.actionFinished.emit(payload_json)
+                try:
+                    payload = json.loads(payload_json)
+                except json.JSONDecodeError:
+                    return
+                if payload.get("closeHub"):
+                    self.closeRequested.emit()
 
             @Slot(result=bool)
             def multiInstanceEnabled(self):
@@ -507,10 +560,14 @@ class QmlHub:
 
             @Slot(str, result=str)
             def runAction(self, action):
+                if is_blocking_hub_action(action):
+                    return self._start_background_action(action, "")
                 return self._run_action_json(action, "")
 
             @Slot(str, str, result=str)
             def runActionWithPayload(self, action, payload_json):
+                if is_blocking_hub_action(action):
+                    return self._start_background_action(action, payload_json)
                 return self._run_action_json(action, payload_json)
 
             def _run_action_json(self, action, payload_json):
@@ -847,6 +904,7 @@ class QmlHub:
                             message = f"Brawler icon download failed: {exc}"
                         finally:
                             self._icon_download_started = False
+                            self._store.invalidate_static_ui_cache()
                             self.iconsUpdated.emit(message)
 
                     import threading
@@ -854,6 +912,30 @@ class QmlHub:
                     threading.Thread(target=download_icons, daemon=True).start()
                     return "Downloading brawler icons..."
                 raise ValueError(f"Unknown action: {action}")
+
+            def _start_pyla_sync(self):
+                self._preflight_cache = self._run_preflight()
+                if not self._preflight_cache.get("ready"):
+                    return json.dumps({
+                        "ok": False,
+                        "message": "Pre-flight checks failed. Run checks on Overview and fix required items.",
+                        "state": self._ui_state(),
+                    })
+                self._store.apply_state({
+                    "mode": self._mode,
+                    "emulator": self._emulator,
+                })
+                queue = self._store.load_queue()
+                if queue:
+                    from gui.brawler_queue import persist_queue
+
+                    persist_queue(queue)
+                return json.dumps({
+                    "ok": True,
+                    "message": "Starting Pyla-RL...",
+                    "state": self._ui_state(),
+                    "closeHub": True,
+                })
 
             @Slot(result=str)
             def startPyla(self):
@@ -880,23 +962,7 @@ class QmlHub:
                         "message": "Accept the free-use license in the hub wizard or Settings → About before START.",
                         "state": self._ui_state(),
                     })
-                self._preflight_cache = self._run_preflight()
-                if not self._preflight_cache.get("ready"):
-                    return json.dumps({
-                        "ok": False,
-                        "message": "Pre-flight checks failed. Run checks on Overview and fix required items.",
-                        "state": self._ui_state(),
-                    })
-                self._store.apply_state({
-                    "mode": self._mode,
-                    "emulator": self._emulator,
-                })
-                queue = self._store.load_queue()
-                if queue:
-                    from gui.brawler_queue import persist_queue
-                    persist_queue(queue)
-                self.closeRequested.emit()
-                return json.dumps({"ok": True, "message": "Starting Pyla-RL...", "state": self._ui_state()})
+                return self._start_background_action("start-pyla", start_pyla=True)
 
             @Slot(result=str)
             def tutorialTopicsJson(self):

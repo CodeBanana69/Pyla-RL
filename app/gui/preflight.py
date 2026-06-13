@@ -125,7 +125,10 @@ def check_emulator_status(emulator, port=None):
     }
 
 
-def _emulator_status_summary():
+def _emulator_status_summary(selected_emulator=None):
+    if selected_emulator:
+        key = normalize_emulator_name(selected_emulator).lower()
+        return {key: check_emulator_status(key)}
     return {
         "ldplayer": check_emulator_status("ldplayer"),
         "mumu": check_emulator_status("mumu"),
@@ -152,7 +155,7 @@ def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_po
                     "required",
                 )
             ],
-            "emulator_status": _emulator_status_summary(),
+            "emulator_status": _emulator_status_summary(emulator or "LDPlayer"),
             "emulator": normalize_emulator_name(emulator or "LDPlayer"),
             "port": 0,
             "serial": "",
@@ -163,7 +166,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
     general = load_toml_as_dict("cfg/general_config.toml")
     selected_emulator, configured_port = _resolve_emulator_settings(general, emulator=emulator, port=port)
     previous_port = int(general.get("emulator_port", configured_port) or configured_port)
-    emulator_status = _emulator_status_summary()
+    emulator_status = _emulator_status_summary(selected_emulator)
 
     checks = []
 
