@@ -19,6 +19,7 @@ ApplicationWindow {
     property string emulator: hubBridge ? hubBridge.emulator() : "ldplayer"
     property string activeTab: "Overview"
     property var hubState: ({ settings: {}, discord: {}, telegram: {}, api: {}, timers: {}, history: { items: [], summary: {}, recent: [] }, queue: [], preflight: { ready: false, checks: [] } })
+    property var preflightChecks: []
     property string statusText: ""
     property bool statusOk: true
     property string performanceProfile: "balanced"
@@ -2884,7 +2885,7 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 6
-                            visible: root.preflightChecks.length > 0
+                            visible: root.preflightChecks && root.preflightChecks.length > 0
                             Repeater {
                                 model: root.preflightChecks
                                 delegate: RowLayout {
