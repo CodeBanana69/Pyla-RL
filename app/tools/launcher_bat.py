@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 RUN_BAT_NAME = "pyla-rl.bat"
-_RUNTIME_IMPORT_CHECK = "import cv2, pandas"
+_RUNTIME_IMPORT_CHECK = "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()"
 LEGACY_BAT_NAMES = (
     "Run Pyla-RL.bat",
     "Run PylaAi-XXZ.bat",
@@ -105,6 +105,7 @@ if errorlevel 1 (
     )
     echo.
     echo Diagnostic: %PY% app\\tools\\check_runtime.py
+    echo Runtime repair: %PY% app\\tools\\fix_gpu_runtime.py auto
     echo.
     pause
     exit /b 1
