@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from gui.hub_state import HubStateStore, _to_bool as _to_bool_setting
@@ -106,9 +107,11 @@ class QmlHub:
                 self._on_multi_instance_enabled = on_multi_instance_enabled
                 self._on_multi_instance_disabled = on_multi_instance_disabled
                 self._preflight_cache = {"ready": False, "checks": []}
+                self._preflight_cache_checked_at = 0.0
                 self._icon_download_started = False
                 self._multi_instance_service = None
                 self._action_thread = None
+                self._action_worker = None
                 self._action_busy = False
                 self._action_generation = 0
                 self._action_timeout_timer = QTimer()
@@ -149,6 +152,7 @@ class QmlHub:
             def _clear_action_state(self):
                 self._action_timeout_timer.stop()
                 self._action_thread = None
+                self._action_worker = None
                 self._set_action_busy(False)
 
             def _on_action_timeout(self):
@@ -158,6 +162,7 @@ class QmlHub:
                 self._action_generation += 1
                 self._action_timeout_timer.stop()
                 self._action_thread = None
+                self._action_worker = None
                 self._set_action_busy(False)
                 if thread is not None and thread.isRunning():
                     thread.requestInterruption()
@@ -215,14 +220,21 @@ class QmlHub:
                     Qt.ConnectionType.QueuedConnection,
                 )
                 self._action_thread = thread
+                self._action_worker = worker
                 thread.start()
                 self._action_timeout_timer.start(120_000)
                 message = pending_action_message("start-pyla" if start_pyla else action)
                 return json.dumps({"ok": True, "pending": True, "message": message})
 
             def _on_background_action_finished(self, payload_json):
+                worker = self.sender()
+                if self._action_worker is None:
+                    return
+                if worker is not None and worker is not self._action_worker:
+                    return
                 self._action_timeout_timer.stop()
                 self._action_thread = None
+                self._action_worker = None
                 self._set_action_busy(False)
                 self.actionFinished.emit(payload_json)
                 try:
@@ -495,6 +507,18 @@ class QmlHub:
                     preflight = self._preflight_cache
                 return self._store.ui_state(preflight=preflight, correct_zoom=self._correct_zoom)
 
+            def _invalidate_preflight_cache(self):
+                self._preflight_cache = {"ready": False, "checks": []}
+                self._preflight_cache_checked_at = 0.0
+
+            def _has_fresh_ready_preflight(self, max_age_seconds=300):
+                if not self._preflight_cache.get("ready"):
+                    return False
+                if not self._preflight_cache.get("checks"):
+                    return False
+                checked_at = float(self._preflight_cache_checked_at or 0.0)
+                return checked_at > 0 and (time.monotonic() - checked_at) <= max_age_seconds
+
             def _active_queue_path(self):
                 return self._store._active_queue_path()
 
@@ -573,6 +597,7 @@ class QmlHub:
                         }],
                         "emulator_status": {},
                     }
+                self._preflight_cache_checked_at = time.monotonic()
                 return self._preflight_cache
 
             @Slot(str, str)
@@ -587,6 +612,7 @@ class QmlHub:
                     "mode": self._mode,
                     "emulator": self._emulator,
                 })
+                self._invalidate_preflight_cache()
                 self.stateChanged.emit(self._mode, self._emulator)
 
             @Slot(result=str)
@@ -970,7 +996,8 @@ class QmlHub:
                 raise ValueError(f"Unknown action: {action}")
 
             def _start_pyla_sync(self):
-                self._preflight_cache = self._run_preflight()
+                if not self._has_fresh_ready_preflight():
+                    self._preflight_cache = self._run_preflight()
                 if not self._preflight_cache.get("ready"):
                     return json.dumps({
                         "ok": False,

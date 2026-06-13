@@ -66,14 +66,14 @@ def _start_emulator(emulator: str, port: int) -> tuple[bool, str]:
 
 def _reconnect_adb(emulator: str, port: int) -> tuple[bool, str]:
     run_adb(["kill-server"])
-    result = connect_emulator_adb(emulator_display_name(emulator), port)
+    result = connect_emulator_adb(emulator_display_name(emulator), port, max_ports=4)
     if result.get("ok"):
         return True, str(result.get("detail") or "ADB reconnected.")
     return False, str(result.get("detail") or "ADB reconnect failed.")
 
 
 def _launch_game(emulator: str, port: int) -> tuple[bool, str]:
-    result = connect_emulator_adb(emulator_display_name(emulator), port)
+    result = connect_emulator_adb(emulator_display_name(emulator), port, max_ports=4)
     if not result.get("ok"):
         return False, str(result.get("detail") or "ADB not connected.")
     serial = str(result.get("serial") or "")
