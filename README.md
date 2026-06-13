@@ -145,7 +145,13 @@ Re-capture README screenshots after major UI changes: `python app/tools/capture_
 ## Tests
 
 ```bash
-python -m unittest discover
+python -m unittest discover -s app/tests -t app
+```
+
+Single module from repo root:
+
+```bash
+python -m unittest app.tests.test_support_reporter -q
 ```
 
 CI runs a core subset on every push to `main`.

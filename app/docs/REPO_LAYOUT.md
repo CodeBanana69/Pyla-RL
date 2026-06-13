@@ -31,6 +31,7 @@ Quick map of where code and data live in Pyla-RL. Project overview: [README](../
 From the install root:
 
 ```bash
-set PYTHONPATH=app
-python -m unittest discover -s app/tests -p "test_*.py"
+python -m unittest discover -s app/tests -t app -p "test_*.py"
 ```
+
+Or set `PYTHONPATH=app` (CMD) / `$env:PYTHONPATH="app"` (PowerShell) before running unittest.
