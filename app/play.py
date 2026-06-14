@@ -306,18 +306,52 @@ class Play:
 
     def attack(self, touch_up=True, touch_down=True):
         full_tap = bool(touch_down and touch_up)
+        starting_hold = bool(touch_down and not touch_up)
+        if (full_tap or starting_hold) and not self._holding_attack():
+            now = time.time()
+            if full_tap:
+                interval = float(getattr(self, "attack_min_interval", 0.35) or 0.35)
+                if now - float(getattr(self, "_last_attack_tap_at", 0) or 0) < interval:
+                    return
+            if self._try_aim_attack(release=not starting_hold):
+                if full_tap:
+                    self._last_attack_tap_at = now
+                    self._log_combat_action("attack")
+                return
+            if full_tap:
+                self._last_attack_tap_at = now
+        if full_tap:
+            self._log_combat_action("attack")
+        self.window_controller.press("attack", touch_up=touch_up, touch_down=touch_down)
+
+    def aimed_attack(self, angle_degrees, touch_up=True, touch_down=True):
+        full_tap = bool(touch_down and touch_up)
+        starting_hold = bool(touch_down and not touch_up)
+        if not config_bool(getattr(self, "aimed_attacks_enabled", "yes"), True):
+            return self.attack(touch_up=touch_up, touch_down=touch_down)
+
         if full_tap and not self._holding_attack():
             now = time.time()
             interval = float(getattr(self, "attack_min_interval", 0.35) or 0.35)
             if now - float(getattr(self, "_last_attack_tap_at", 0) or 0) < interval:
-                return
-            if self._try_lead_aim_attack():
-                self._last_attack_tap_at = now
-                return
+                return False
             self._last_attack_tap_at = now
-        if full_tap:
-            self._log_combat_action("attack")
-        self.window_controller.press("attack", touch_up=touch_up, touch_down=touch_down)
+
+        if hasattr(self.window_controller, "aim_attack_angle"):
+            radius = float(getattr(self, "aim_swipe_radius", 250.0) or 250.0)
+            duration = float(getattr(self, "aim_swipe_duration", 0.18) or 0.18)
+            hold = float(getattr(self, "aim_swipe_hold", 0.06) or 0.06)
+            self.window_controller.aim_attack_angle(
+                float(angle_degrees),
+                radius=radius,
+                duration=duration,
+                hold=hold,
+                release=not starting_hold,
+            )
+            if full_tap:
+                self._log_combat_action("attack")
+            return True
+        return self.attack(touch_up=touch_up, touch_down=touch_down)
 
     @staticmethod
     def lead_shot_angle(player_pos, enemy_pos, enemy_velocity, *, projectile_speed_px_s=1200.0):
@@ -387,11 +421,12 @@ class Play:
             "brawler": brawler,
         }
 
-    def _try_lead_aim_attack(self) -> bool:
-        if not config_bool(getattr(self, "smart_aim_enabled", "yes"), True):
+    def _try_aim_attack(self, release=True) -> bool:
+        aimed = config_bool(getattr(self, "aimed_attacks_enabled", "yes"), True)
+        smart = config_bool(getattr(self, "smart_aim_enabled", "yes"), True)
+        if not aimed and not smart:
             return False
-        if self._holding_attack():
-            return False
+
         target = getattr(self, "_combat_target", None) or {}
         player_pos = target.get("player_pos")
         enemy_pos = target.get("pos")
@@ -400,7 +435,7 @@ class Play:
 
         vx, vy = self.get_tracked_enemy_velocity()
         speed = math.hypot(vx, vy)
-        if speed < 80.0:
+        if not aimed and speed < 80.0:
             return False
 
         brawler = str(target.get("brawler") or self.current_brawler or "")
@@ -408,17 +443,34 @@ class Play:
         if attack_range and float(target.get("distance", 0) or 0) > attack_range * 1.1:
             return False
 
-        projectile_speed = float(getattr(self, "projectile_speed_px_s", 1200.0) or 1200.0)
-        scale = float(getattr(self.window_controller, "scale_factor", 1.0) or 1.0)
-        angle = self.lead_shot_angle(
-            player_pos,
-            enemy_pos,
-            (vx, vy),
-            projectile_speed_px_s=projectile_speed * scale,
-        )
+        if speed >= 80.0:
+            projectile_speed = float(getattr(self, "projectile_speed_px_s", 1200.0) or 1200.0)
+            scale = float(getattr(self.window_controller, "scale_factor", 1.0) or 1.0)
+            angle = self.lead_shot_angle(
+                player_pos,
+                enemy_pos,
+                (vx, vy),
+                projectile_speed_px_s=projectile_speed * scale,
+            )
+        else:
+            angle = self.angle_from_direction(
+                enemy_pos[0] - player_pos[0],
+                enemy_pos[1] - player_pos[1],
+            )
+
         if not hasattr(self.window_controller, "aim_attack_angle"):
             return False
-        self.window_controller.aim_attack_angle(angle, radius=170.0, duration=0.04)
+
+        radius = float(getattr(self, "aim_swipe_radius", 250.0) or 250.0)
+        duration = float(getattr(self, "aim_swipe_duration", 0.18) or 0.18)
+        hold = float(getattr(self, "aim_swipe_hold", 0.06) or 0.06)
+        self.window_controller.aim_attack_angle(
+            angle,
+            radius=radius,
+            duration=duration,
+            hold=hold,
+            release=release,
+        )
         return True
 
     def use_hypercharge(self):
@@ -1785,6 +1837,10 @@ class Play:
         self.combat_dodge_commit_seconds = float(bot_config.get("combat_dodge_commit_seconds", 0.6))
         self.strafe_interval = float(bot_config.get("strafe_interval", 1.5))
         self.attack_min_interval = float(bot_config.get("attack_min_interval", 0.35))
+        self.aimed_attacks_enabled = bot_config.get("aimed_attacks", "yes")
+        self.aim_swipe_radius = float(bot_config.get("aim_swipe_radius", 250.0))
+        self.aim_swipe_duration = float(bot_config.get("aim_swipe_duration", 0.18))
+        self.aim_swipe_hold = float(bot_config.get("aim_swipe_hold", 0.06))
         smart_aim = bot_config.get("smart_aim_enabled")
         if smart_aim is None:
             smart_aim = bot_config.get("lead_shots", "yes")

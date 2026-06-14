@@ -10,6 +10,10 @@ class CombatSmartAttackTests(unittest.TestCase):
     def _make_play(self):
         play = Play.__new__(Play)
         play.smart_aim_enabled = "yes"
+        play.aimed_attacks_enabled = "yes"
+        play.aim_swipe_radius = 250.0
+        play.aim_swipe_duration = 0.18
+        play.aim_swipe_hold = 0.06
         play.attack_min_interval = 0.35
         play.projectile_speed_px_s = 1200.0
         play.current_brawler = "shelly"
@@ -69,7 +73,7 @@ class CombatSmartAttackTests(unittest.TestCase):
         play.window_controller.aim_attack_angle.assert_called_once()
         play.window_controller.press.assert_not_called()
 
-    def test_stationary_enemy_uses_auto_aim_tap(self):
+    def test_stationary_enemy_uses_directional_aim_swipe(self):
         play = self._make_play()
         play._combat_target = {
             "player_pos": (50, 50),
@@ -79,8 +83,12 @@ class CombatSmartAttackTests(unittest.TestCase):
         }
         play._enemy_track["velocity"] = (0.0, 0.0)
         play.attack()
-        play.window_controller.press.assert_called_once()
-        play.window_controller.aim_attack_angle.assert_not_called()
+        play.window_controller.aim_attack_angle.assert_called_once()
+        play.window_controller.press.assert_not_called()
+        args, kwargs = play.window_controller.aim_attack_angle.call_args
+        self.assertAlmostEqual(args[0], 0.0, places=3)
+        self.assertGreaterEqual(kwargs.get("radius", args[1] if len(args) > 1 else 0), 200.0)
+        self.assertGreaterEqual(kwargs.get("duration", 0.0), 0.1)
 
     def test_attack_pacing_suppresses_rapid_taps(self):
         play = self._make_play()
@@ -94,9 +102,10 @@ class CombatSmartAttackTests(unittest.TestCase):
         play.attack(touch_up=False, touch_down=True)
         play.window_controller.press.assert_called_once_with("attack", touch_up=False, touch_down=True)
 
-    def test_smart_aim_disabled_always_taps(self):
+    def test_smart_aim_disabled_falls_back_to_tap_without_aimed_attacks(self):
         play = self._make_play()
         play.smart_aim_enabled = "no"
+        play.aimed_attacks_enabled = "no"
         play._combat_target = {
             "player_pos": (50, 50),
             "pos": (300, 50),

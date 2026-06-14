@@ -9,7 +9,7 @@ import types
 def cv2_is_usable() -> bool:
     try:
         import cv2
-    except ImportError:
+    except (ImportError, AttributeError):
         return False
     return hasattr(cv2, "IMREAD_COLOR") and callable(getattr(cv2, "cvtColor", None))
 

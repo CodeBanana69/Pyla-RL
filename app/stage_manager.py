@@ -8,6 +8,7 @@ from state_finder import (
     get_prestige_next_button_center,
     get_skin_reward_continue_button_center,
     get_skin_reward_equip_button_center,
+    get_star_drop_type,
     get_state,
     is_in_prestige_reward,
 )
@@ -76,6 +77,9 @@ class StageManager:
             'match': lambda: 0,
             'match_making': lambda: 0,
             'lobby': self.start_game,
+            'star_drop': self.handle_star_drop,
+            'daily_star_drop': self.handle_star_drop,
+            'nova_star_drop': self.handle_star_drop,
             'star_drop_regular': lambda: self.click_star_drop("regular"),
             'star_drop_angelic': lambda: self.click_star_drop("angelic"),
             'star_drop_demonic': lambda: self.click_star_drop("demonic"),
@@ -668,6 +672,53 @@ class StageManager:
         self.window_controller.press("proceed")
         print("Pressed to start a match")
         time.sleep(2)
+
+    def handle_star_drop(self):
+        screenshot = self.window_controller.screenshot()
+        screenshot_bgr = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
+        drop_type = get_star_drop_type(screenshot_bgr)
+        if drop_type is None:
+            return
+
+        label = {
+            "daily_hold": "Daily Wins hold",
+            "starr_nova_hold": "Starr Nova hold",
+            "angelic": "Angelic",
+            "demonic": "Demonic",
+            "standard": "Standard",
+        }.get(drop_type, str(drop_type).replace("_", " ").title())
+        log_info("star_drop", f"{label} star drop detected; opening drop.")
+        self.window_controller.keys_up(list("wasd"))
+        current_height, current_width = screenshot.shape[:2]
+        width_ratio = current_width / 1920
+        height_ratio = current_height / 1080
+        x = int(965 * width_ratio)
+        y = int(525 * height_ratio)
+        if drop_type == "starr_nova_hold":
+            for duration in (5.0, 10.0):
+                if hasattr(self.window_controller, "long_press"):
+                    self.window_controller.long_press(x, y, duration=duration)
+                else:
+                    self.window_controller.click(x, y, delay=duration)
+                time.sleep(0.25)
+
+                followup = self.window_controller.screenshot()
+                followup_bgr = cv2.cvtColor(followup, cv2.COLOR_RGB2BGR)
+                if get_star_drop_type(followup_bgr) != "starr_nova_hold":
+                    break
+                if duration == 5.0:
+                    log_info("star_drop", "Starr Nova hold still detected after 5s; trying 10s hold.")
+        elif drop_type in ("angelic", "demonic", "daily_hold"):
+            for _ in range(2):
+                if hasattr(self.window_controller, "long_press"):
+                    self.window_controller.long_press(x, y, duration=1.15)
+                else:
+                    self.window_controller.click(x, y, delay=1.15)
+                time.sleep(0.25)
+        else:
+            for _ in range(5):
+                self.window_controller.click(x, y, delay=0.04)
+                time.sleep(0.08)
 
     def click_star_drop(self, drop_type="regular"):
         if hasattr(self, '_star_drop_thread') and self._star_drop_thread.is_alive():

@@ -14,6 +14,8 @@ images_with_star_drop = []
 for file in os.listdir(star_drops_path):
     if "star_drop" in file:
         images_with_star_drop.append(file)
+images_with_star_drop.sort(key=lambda name: 0 if name in ("angelic_star_drop.png", "demonic_star_drop.png") else 1)
+STAR_DROP_TEMPLATE_THRESHOLD = 0.99
 
 end_results_path = resolve_project_path("images/end_results/")
 
@@ -21,9 +23,9 @@ match_result_crop_region = load_toml_as_dict("./cfg/lobby_config.toml")['lobby']
 region_data = load_toml_as_dict("./cfg/lobby_config.toml")['template_matching']
 
 
-def is_template_in_region(image, template_path, region, threshold=0.7):
+def template_match_score_in_region(image, template_path, region):
     if not os.path.exists(template_path):
-        return False
+        return 0.0
     current_height, current_width = image.shape[:2]
     orig_x, orig_y, orig_width, orig_height = region
     width_ratio, height_ratio = current_width / orig_screen_width, current_height / orig_screen_height
@@ -31,17 +33,29 @@ def is_template_in_region(image, template_path, region, threshold=0.7):
     new_x, new_y = int(orig_x * width_ratio), int(orig_y * height_ratio)
     new_width, new_height = int(orig_width * width_ratio), int(orig_height * height_ratio)
     cropped_image = image[new_y:new_y + new_height, new_x:new_x + new_width]
-    current_height, current_width = image.shape[:2]
-    loaded_template = load_template(template_path, current_width, current_height)
-    if loaded_template is None:
-        return False
-    result = cv2.matchTemplate(cropped_image, loaded_template,
-                               cv2.TM_CCOEFF_NORMED)
-    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    return max_val > threshold
+    if cropped_image.size == 0:
+        return 0.0
+    loaded_template = load_match_template(template_path, current_width, current_height)
+    if (
+        loaded_template is None
+        or loaded_template.size == 0
+        or cropped_image.shape[0] < loaded_template.shape[0]
+        or cropped_image.shape[1] < loaded_template.shape[1]
+    ):
+        return 0.0
+    result = cv2.matchTemplate(cropped_image, loaded_template, cv2.TM_CCOEFF_NORMED)
+    _, max_val, _, _ = cv2.minMaxLoc(result)
+    return float(max_val)
+
+
+def is_template_in_region(image, template_path, region, threshold=0.7):
+    return template_match_score_in_region(image, template_path, region) > threshold
 
 
 cached_templates = {}
+match_templates = {}
+
+
 def load_template(image_path, width, height):
     resolved_image_path = resolve_project_path(image_path)
     cache_key = (resolved_image_path, width, height)
@@ -56,6 +70,24 @@ def load_template(image_path, width, height):
     resized_colored_image = cv2.cvtColor(resized_image, cv2.COLOR_BGR2RGB)
     cached_templates[cache_key] = resized_colored_image
     return resized_colored_image
+
+
+def load_match_template(image_path, width, height):
+    resolved_image_path = resolve_project_path(image_path)
+    cache_key = (resolved_image_path, width, height)
+    if cache_key in match_templates:
+        return match_templates[cache_key]
+    image = imread_unicode(resolved_image_path)
+    if image is None:
+        return None
+    current_width_ratio, current_height_ratio = width / orig_screen_width, height / orig_screen_height
+    orig_height, orig_width = image.shape[:2]
+    resized_image = cv2.resize(
+        image,
+        (int(orig_width * current_width_ratio), int(orig_height * current_height_ratio)),
+    )
+    match_templates[cache_key] = resized_image
+    return resized_image
 
 SHOWDOWN_PLACE_THRESHOLD = 0.9
 showdown_place_templates = {
@@ -99,9 +131,14 @@ def get_in_game_state(image):
     if is_in_offer_popup(image): return "popup"
     if is_in_brawl_pass(image) or is_in_star_road(image): return "shop"
 
-    star_drop_type = is_in_star_drop(image)
-    if star_drop_type:
-        return f"star_drop_{star_drop_type}"
+    if is_in_daily_wins_hold_drop(image) or is_in_daily_wins_drop(image):
+        return "daily_star_drop"
+
+    star_drop_type = get_star_drop_type(image)
+    if star_drop_type == "starr_nova_hold":
+        return "nova_star_drop"
+    if star_drop_type is not None:
+        return "star_drop"
 
     if is_in_reward_unlock(image):
         return "reward_unlock"
@@ -384,16 +421,6 @@ def is_in_starr_nova_event(image):
     return is_template_in_region(image, states_path + "starr_nova_event.png", region_data['starr_nova_event'])
 
 
-def is_in_star_drop(image):
-    for image_filename in images_with_star_drop:
-        if is_template_in_region(image, star_drops_path + image_filename, region_data['star_drop']):
-            if "angelic" in image_filename.lower(): return "angelic"
-            if "demonic" in image_filename.lower(): return "demonic"
-            if "starr_nova" in image_filename.lower(): return "starr_nova"
-            return "regular"
-    return False
-
-
 def crop_scaled_region(image, region):
     current_height, current_width = image.shape[:2]
     orig_x, orig_y, orig_width, orig_height = region
@@ -411,6 +438,209 @@ def mask_ratio(crop, lower, upper):
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array(lower, dtype=np.uint8), np.array(upper, dtype=np.uint8))
     return cv2.countNonZero(mask) / max(1, crop.shape[0] * crop.shape[1])
+
+
+def is_in_star_drop(image):
+    return get_star_drop_type(image) is not None
+
+
+def get_star_drop_type(image):
+    if is_in_daily_wins_hold_drop(image):
+        return "daily_hold"
+    if is_in_daily_wins_drop(image):
+        return "standard"
+    for image_filename in images_with_star_drop:
+        match_score = template_match_score_in_region(
+            image,
+            star_drops_path + image_filename,
+            region_data['star_drop'],
+        )
+        if match_score <= STAR_DROP_TEMPLATE_THRESHOLD:
+            continue
+        if image_filename in ("angelic_star_drop.png", "demonic_star_drop.png"):
+            if not has_special_star_drop_screen_context(image):
+                return None
+            return "angelic" if image_filename == "angelic_star_drop.png" else "demonic"
+        if image_filename == "starr_nova_star_drop.png":
+            if not has_starr_nova_star_drop_screen_context(image):
+                return None
+            return "starr_nova_hold"
+        if not has_standard_star_drop_screen_context(image):
+            return None
+        return "standard"
+    return None
+
+
+def has_special_star_drop_screen_context(image):
+    background = crop_scaled_region(image, [0, 0, 1920, 1080])
+    top_title = crop_scaled_region(image, [520, 20, 880, 170])
+    if background.size == 0 or top_title.size == 0:
+        return False
+    purple_ratio = (
+        mask_ratio(background, (124, 55, 70), (168, 255, 255))
+        + mask_ratio(background, (0, 55, 70), (8, 255, 255))
+    )
+    blue_ratio = mask_ratio(background, (86, 55, 70), (126, 255, 255))
+    title_white = mask_ratio(top_title, (0, 0, 160), (179, 95, 255))
+    title_dark = mask_ratio(top_title, (0, 0, 0), (179, 255, 85))
+    return (purple_ratio + blue_ratio) > 0.22 and title_white > 0.025 and title_dark > 0.018
+
+
+def has_starr_nova_star_drop_screen_context(image):
+    background = crop_scaled_region(image, [0, 0, 1920, 1080])
+    center = crop_scaled_region(image, [600, 220, 720, 660])
+    if background.size == 0 or center.size == 0:
+        return False
+    white_ratio = mask_ratio(background, (0, 0, 165), (179, 95, 255))
+    cyan_ratio = mask_ratio(background, (80, 60, 100), (105, 255, 255))
+    magenta_ratio = mask_ratio(background, (135, 60, 100), (172, 255, 255))
+    dark_ratio = mask_ratio(center, (0, 0, 0), (179, 255, 85))
+    return white_ratio > 0.16 and cyan_ratio > 0.018 and magenta_ratio > 0.010 and dark_ratio > 0.008
+
+
+def has_standard_star_drop_screen_context(image):
+    background = crop_scaled_region(image, [340, 75, 1240, 830])
+    if background.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(background, cv2.COLOR_BGR2HSV)
+    green_mask = cv2.inRange(
+        hsv,
+        np.array((38, 55, 55), dtype=np.uint8),
+        np.array((92, 255, 255), dtype=np.uint8),
+    )
+    green_ratio = cv2.countNonZero(green_mask) / max(1, background.shape[0] * background.shape[1])
+    if green_ratio < 0.16:
+        return False
+
+    top_title = crop_scaled_region(image, [690, 20, 540, 155])
+    if top_title.size == 0:
+        return False
+    title_hsv = cv2.cvtColor(top_title, cv2.COLOR_BGR2HSV)
+    bright_text = cv2.inRange(
+        title_hsv,
+        np.array((35, 0, 120), dtype=np.uint8),
+        np.array((95, 255, 255), dtype=np.uint8),
+    )
+    return cv2.countNonZero(bright_text) > int(
+        2200 * (image.shape[1] / orig_screen_width) * (image.shape[0] / orig_screen_height)
+    )
+
+
+def is_in_daily_wins_drop(image):
+    current_height, current_width = image.shape[:2]
+    width_ratio, height_ratio = current_width / orig_screen_width, current_height / orig_screen_height
+
+    def scaled_region(region):
+        x, y, w, h = region
+        return (
+            int(x * width_ratio),
+            int(y * height_ratio),
+            int(w * width_ratio),
+            int(h * height_ratio),
+        )
+
+    cx, cy, cw, ch = scaled_region([430, 90, 900, 760])
+    center = image[cy:cy + ch, cx:cx + cw]
+    if center.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(center, cv2.COLOR_BGR2HSV)
+    bright_green_mask = cv2.inRange(
+        hsv,
+        np.array((42, 100, 120), dtype=np.uint8),
+        np.array((78, 255, 255), dtype=np.uint8),
+    )
+    bright_green_pixels = cv2.countNonZero(bright_green_mask)
+    green_ratio = bright_green_pixels / max(1, center.shape[0] * center.shape[1])
+    if green_ratio < 0.10:
+        return False
+
+    tx, ty, tw, th = scaled_region([0, 0, 520, 170])
+    title = image[ty:ty + th, tx:tx + tw]
+    if title.size == 0:
+        return False
+
+    title_hsv = cv2.cvtColor(title, cv2.COLOR_BGR2HSV)
+    white_mask = cv2.inRange(
+        title_hsv,
+        np.array((0, 0, 160), dtype=np.uint8),
+        np.array((179, 80, 255), dtype=np.uint8),
+    )
+    white_pixels = cv2.countNonZero(white_mask)
+    dark_title_ratio = mask_ratio(title, (0, 0, 0), (179, 255, 85))
+    if white_pixels <= int(1800 * width_ratio * height_ratio) or dark_title_ratio < 0.08:
+        return False
+
+    rx, ry, rw, rh = scaled_region([690, 20, 540, 170])
+    rarity = image[ry:ry + rh, rx:rx + rw]
+    if rarity.size == 0:
+        return False
+    rarity_green = mask_ratio(rarity, (42, 90, 100), (95, 255, 255))
+    rarity_dark = mask_ratio(rarity, (0, 0, 0), (179, 255, 85))
+    if rarity_green <= 0.055 or rarity_dark <= 0.035:
+        return False
+
+    sx, sy, sw, sh = scaled_region([620, 170, 680, 720])
+    star = image[sy:sy + sh, sx:sx + sw]
+    if star.size == 0:
+        return False
+    star_yellow = mask_ratio(star, (16, 70, 120), (42, 255, 255))
+    star_dark = mask_ratio(star, (0, 0, 0), (179, 255, 85))
+    star_white = mask_ratio(star, (0, 0, 180), (179, 70, 255))
+    return star_yellow > 0.075 and star_dark > 0.025 and star_white > 0.010
+
+
+def is_in_daily_wins_hold_drop(image):
+    current_height, current_width = image.shape[:2]
+    width_ratio, height_ratio = current_width / orig_screen_width, current_height / orig_screen_height
+
+    def scaled_region(region):
+        x, y, w, h = region
+        return (
+            int(x * width_ratio),
+            int(y * height_ratio),
+            int(w * width_ratio),
+            int(h * height_ratio),
+        )
+
+    background = crop_scaled_region(image, [0, 0, 1920, 1080])
+    if background.size == 0:
+        return False
+    purple_ratio = (
+        mask_ratio(background, (124, 65, 90), (168, 255, 255))
+        + mask_ratio(background, (0, 65, 90), (8, 255, 255))
+    )
+    if purple_ratio < 0.34:
+        return False
+
+    tx, ty, tw, th = scaled_region([0, 0, 540, 170])
+    title = image[ty:ty + th, tx:tx + tw]
+    if title.size == 0:
+        return False
+    title_white = mask_ratio(title, (0, 0, 160), (179, 90, 255))
+    title_dark = mask_ratio(title, (0, 0, 0), (179, 255, 85))
+    if title_white < 0.11 or title_dark < 0.08:
+        return False
+
+    sx, sy, sw, sh = scaled_region([520, 160, 720, 520])
+    star = image[sy:sy + sh, sx:sx + sw]
+    if star.size == 0:
+        return False
+    star_cyan = mask_ratio(star, (82, 45, 130), (108, 255, 255))
+    star_pink = mask_ratio(star, (138, 45, 130), (174, 255, 255))
+    star_white = mask_ratio(star, (0, 0, 178), (179, 85, 255))
+    star_dark = mask_ratio(star, (0, 0, 0), (179, 255, 85))
+    if star_cyan < 0.055 or star_pink < 0.035 or star_white < 0.065 or star_dark < 0.035:
+        return False
+
+    bx, by, bw, bh = scaled_region([680, 760, 560, 130])
+    bottom = image[by:by + bh, bx:bx + bw]
+    if bottom.size == 0:
+        return False
+    bottom_white = mask_ratio(bottom, (0, 0, 170), (179, 85, 255))
+    bottom_dark = mask_ratio(bottom, (0, 0, 0), (179, 255, 85))
+    return bottom_white > 0.075 and bottom_dark > 0.05
 
 
 def get_starr_nova_hub_back_button_center(image):
@@ -488,6 +718,8 @@ def is_starr_nova_hub_screen(image):
 def get_state(screenshot):
     if screenshot is None:
         raise ValueError("get_state called with None screenshot")
+    if screenshot.ndim == 3 and screenshot.shape[2] == 3:
+        screenshot = cv2.cvtColor(screenshot, cv2.COLOR_RGB2BGR)
     state = get_in_game_state(screenshot)
     if config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False):
         debug_dir = resolve_project_path("debug_frames")

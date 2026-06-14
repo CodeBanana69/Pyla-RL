@@ -1604,37 +1604,70 @@ class WindowController:
             print(f"Could not press Android Back through ADB: {e}")
             return False
 
-    def aim_attack_angle(self, angle_degrees: float, radius: float = 170.0, duration: float = 0.04):
+    def aim_attack_angle(
+        self,
+        angle_degrees: float,
+        radius: float = 250.0,
+        duration: float = 0.18,
+        hold: float = 0.06,
+        release: bool = True,
+    ):
         x, y = key_coords_dict["M"]
         start_x = x * self.width_ratio
         start_y = y * self.height_ratio
-        scaled_radius = radius * self.scale_factor
+        scale = float(self.scale_factor or 1.0)
+        scaled_radius = radius * scale
         angle_rad = math.radians(angle_degrees)
         end_x = start_x + math.cos(angle_rad) * scaled_radius
         end_y = start_y + math.sin(angle_rad) * scaled_radius
-        self.swipe(start_x, start_y, end_x, end_y, duration=duration)
+        return self.swipe(
+            start_x,
+            start_y,
+            end_x,
+            end_y,
+            duration=duration,
+            step_len=12.0,
+            hold=hold,
+            release=release,
+            pointer_id=self.PID_ATTACK,
+        )
 
-    def swipe(self, start_x, start_y, end_x, end_y, duration=0.2):
+    def swipe(
+        self,
+        start_x,
+        start_y,
+        end_x,
+        end_y,
+        duration=0.2,
+        step_len=25.0,
+        hold=0.0,
+        release=True,
+        pointer_id=None,
+    ):
         dist_x = end_x - start_x
         dist_y = end_y - start_y
         distance = math.sqrt(dist_x ** 2 + dist_y ** 2)
 
         if distance == 0:
-            return
+            return False
 
-        step_len = 25
-        steps = max(int(distance / step_len), 1)
+        pointer_id = self.PID_ATTACK if pointer_id is None else pointer_id
+        steps = max(int(distance / max(step_len, 1.0)), 1)
         step_delay = duration / steps
 
-        if not self.touch_down(int(start_x), int(start_y), pointer_id=self.PID_ATTACK):
+        if not self.touch_down(int(start_x), int(start_y), pointer_id=pointer_id):
             return False
         for i in range(1, steps + 1):
             t = i / steps
             cx = start_x + dist_x * t
             cy = start_y + dist_y * t
             time.sleep(step_delay)
-            self.touch_move(int(cx), int(cy), pointer_id=self.PID_ATTACK)
-        return self.touch_up(int(end_x), int(end_y), pointer_id=self.PID_ATTACK)
+            self.touch_move(int(cx), int(cy), pointer_id=pointer_id)
+        if hold > 0:
+            time.sleep(hold)
+        if release:
+            return self.touch_up(int(end_x), int(end_y), pointer_id=pointer_id)
+        return True
 
     def move(self, x, y):
         """Upstream-compatible vector joystick movement."""
