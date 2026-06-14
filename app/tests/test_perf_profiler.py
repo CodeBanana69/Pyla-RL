@@ -64,6 +64,45 @@ class RuntimeMetricsPerfTests(unittest.TestCase):
 
 
 class InferenceHealthTests(unittest.TestCase):
+    @patch("gpu_runtime_install.smoke_test_variant")
+    @patch("tools.python_runtime.probe_runtime_imports")
+    @patch("tools.launcher_bat.candidate_python_commands")
+    @patch("inference_health.detect_graphics_cards", return_value=[("nvidia", "NVIDIA GeForce GTX 960")])
+    @patch("inference_health.primary_vendor", return_value="nvidia")
+    @patch("inference_health.resolve_inference_device", return_value="cuda")
+    def test_preflight_audit_uses_project_venv_python(
+        self,
+        mock_resolve,
+        mock_vendor,
+        mock_cards,
+        mock_candidates,
+        mock_probe,
+        mock_smoke,
+    ):
+        from inference_health import audit_inference_for_preflight
+
+        mock_candidates.return_value = [
+            ("pinned", [r"C:\project\.venv\Scripts\python.exe"]),
+            ("py-3.11-64", ["py", "-3.11-64"]),
+        ]
+        mock_probe.return_value = {
+            "ok": True,
+            "executable": r"C:\project\.venv\Scripts\python.exe",
+            "versions": {
+                "onnxruntime_providers": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            },
+        }
+        mock_smoke.return_value = {
+            "ok": True,
+            "provider": "CUDAExecutionProvider",
+            "ips": 46.5,
+        }
+
+        health = audit_inference_for_preflight({"cpu_or_gpu": "cuda"})
+        self.assertFalse(health["inference_health"]["missing_gpu_provider"])
+        self.assertEqual(health["provider_summary"], "CUDA")
+        self.assertIn("46.5", health["preflight_detail"])
+
     @patch("inference_health.detect_graphics_cards", return_value=[("nvidia", "NVIDIA GeForce RTX 3060")])
     @patch("inference_health.primary_vendor", return_value="nvidia")
     @patch("inference_health.resolve_inference_device", return_value="cuda")

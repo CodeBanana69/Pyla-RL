@@ -290,17 +290,16 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
     gpu_detail = "GPU inference not checked"
     gpu_fix = None
     try:
-        from inference_health import audit_main_detector
+        from inference_health import audit_inference_for_preflight
 
-        health = audit_main_detector(general)
+        health = audit_inference_for_preflight(general)
         inference = health.get("inference_health") or {}
         if inference.get("using_cpu_despite_gpu") or inference.get("missing_gpu_provider"):
             gpu_ok = False
-            gpu_detail = inference.get("fix_hint") or "ONNX is not using the GPU."
+            gpu_detail = health.get("preflight_detail") or inference.get("fix_hint") or "ONNX is not using the GPU."
             gpu_fix = {"action": "fix_gpu_runtime", "label": "Repair GPU Runtime"}
         else:
-            provider = health.get("provider_summary") or "unknown"
-            gpu_detail = f"Inference provider: {provider}"
+            gpu_detail = health.get("preflight_detail") or f"Inference provider: {health.get('provider_summary') or 'unknown'}"
     except Exception as exc:
         gpu_detail = f"GPU inference check skipped: {exc}"
 

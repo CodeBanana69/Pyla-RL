@@ -38,13 +38,27 @@ def run_preflight_fix(action: str, *, emulator: str | None = None, port: int | N
     return False, f"Unknown fix action '{action}'."
 
 
+def _runtime_python_command() -> list[str]:
+    from tools.launcher_bat import candidate_python_commands
+    from tools.python_runtime import probe_runtime_imports
+
+    for label, command in candidate_python_commands():
+        if label not in ("pinned", "venv"):
+            continue
+        probe = probe_runtime_imports(command)
+        if probe.get("ok"):
+            return command
+    return [sys.executable]
+
+
 def _fix_gpu_runtime() -> tuple[bool, str]:
     from gpu_support import primary_vendor, recommended_setup_onnx_variant
 
     variant = recommended_setup_onnx_variant(primary_vendor())
     script = str(Path(__file__).resolve().parents[1] / "tools" / "fix_gpu_runtime.py")
+    python_command = _runtime_python_command()
     completed = subprocess.run(
-        [sys.executable, script, variant],
+        python_command + [script, variant],
         capture_output=True,
         text=True,
         timeout=600,

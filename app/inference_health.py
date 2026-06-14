@@ -311,6 +311,140 @@ def record_provider_fallback(model_tag: str, from_provider: str, to_provider: st
         return None
 
 
+def _provider_summary_from_actual(actual: str) -> str:
+    if actual == "DmlExecutionProvider":
+        return "DirectML"
+    if actual == "CUDAExecutionProvider":
+        return "CUDA"
+    if actual == "OpenVINOExecutionProvider":
+        return "OpenVINO"
+    if actual == "CPUExecutionProvider":
+        return "CPU"
+    return actual.replace("ExecutionProvider", "") if actual else "unknown"
+
+
+def audit_inference_for_preflight(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check GPU inference using the project's pinned/venv Python, not only the Hub process."""
+    from gpu_runtime_install import _variant_verified, smoke_test_variant
+    from tools.launcher_bat import candidate_python_commands
+    from tools.python_runtime import probe_runtime_imports
+
+    config = config if config is not None else load_toml_as_dict("cfg/general_config.toml")
+    cards = detect_graphics_cards()
+    vendor = primary_vendor(cards)
+    configured = str(config.get("cpu_or_gpu", "auto") or "auto")
+    configured_normalized = normalize_preferred_device(configured)
+    configured_for_cpu = configured_normalized == "cpu"
+    resolved = resolve_inference_device(configured, cards)
+    expected_provider = _EXPECTED_PROVIDER.get(resolved, "")
+
+    base = {
+        "primary_gpu": primary_gpu_name(cards),
+        "cpu_or_gpu_configured": configured,
+        "cpu_or_gpu_resolved": resolved,
+    }
+
+    if configured_for_cpu:
+        return {
+            **base,
+            "provider_summary": "CPU",
+            "preflight_detail": "CPU inference configured",
+            "inference_health": {
+                "configured_for_cpu": True,
+                "missing_gpu_provider": False,
+                "using_cpu_despite_gpu": False,
+            },
+        }
+
+    if not _has_physical_gpu(cards):
+        return {
+            **base,
+            "provider_summary": "CPU",
+            "preflight_detail": "No dedicated GPU detected",
+            "inference_health": {
+                "configured_for_cpu": False,
+                "missing_gpu_provider": False,
+                "using_cpu_despite_gpu": False,
+            },
+        }
+
+    best = None
+    for label, command in candidate_python_commands():
+        probe = probe_runtime_imports(command)
+        if not probe.get("ok"):
+            continue
+        providers = (probe.get("versions") or {}).get("onnxruntime_providers") or []
+        if expected_provider and expected_provider not in providers:
+            continue
+        if not (_gpu_provider_names() & set(providers)):
+            continue
+
+        variant = resolved if resolved in _EXPECTED_PROVIDER else "cuda"
+        python_exe = command[0] if len(command) == 1 else None
+        if python_exe:
+            result = smoke_test_variant(variant, python=python_exe, runs=1, timeout=120)
+            if not _variant_verified(variant, result):
+                continue
+            provider = str(result.get("provider") or expected_provider)
+            ips = float(result.get("ips") or 0.0)
+        else:
+            provider = expected_provider or next(iter(_gpu_provider_names() & set(providers)))
+            ips = 0.0
+
+        best = {
+            "label": label,
+            "executable": str(probe.get("executable") or python_exe or ""),
+            "provider": provider,
+            "ips": ips,
+        }
+        break
+
+    current_executable = os.path.normcase(str(sys.executable))
+    runtime_mismatch = False
+    if best:
+        runtime_mismatch = current_executable != os.path.normcase(best["executable"])
+        summary = _provider_summary_from_actual(best["provider"])
+        detail = f"Inference provider: {summary}"
+        if best["ips"] > 0:
+            detail += f" ({best['ips']:.1f} IPS probe)"
+        detail += f" via {best['label']} Python"
+        if runtime_mismatch:
+            detail += (
+                ". GPU runtime is installed in the project venv; restart via pyla-rl.bat "
+                "so START uses the same interpreter."
+            )
+        return {
+            **base,
+            "provider_summary": summary,
+            "preflight_detail": detail,
+            "runtime_python": best["executable"],
+            "inference_health": {
+                "configured_for_cpu": False,
+                "missing_gpu_provider": False,
+                "using_cpu_despite_gpu": False,
+                "runtime_python_mismatch": runtime_mismatch,
+            },
+        }
+
+    fix_hint = _build_fix_hint(
+        configured_for_cpu=False,
+        missing_gpu_provider=True,
+        using_cpu_despite_gpu=False,
+        vendor=vendor,
+    )
+    return {
+        **base,
+        "provider_summary": "CPU(!)",
+        "preflight_detail": fix_hint,
+        "inference_health": {
+            "configured_for_cpu": False,
+            "missing_gpu_provider": True,
+            "using_cpu_despite_gpu": False,
+            "fix_hint": fix_hint,
+        },
+    }
+
+
 def audit_main_detector(config: dict[str, Any] | None = None) -> dict[str, Any]:
     from detect import Detect
     from utils import resolve_project_path
