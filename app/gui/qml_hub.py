@@ -713,10 +713,27 @@ class QmlHub:
                     from utils import (
                         brawl_stars_api_config_status,
                         fetch_brawl_stars_player,
-                        load_brawl_stars_api_config,
+                        get_config_player_tag,
+                        refresh_brawl_stars_api_token_if_enabled,
                     )
+                    from gui.hub_state import save_dict_as_toml
 
-                    config = load_brawl_stars_api_config(force_refresh=True)
+                    save_dict_as_toml(
+                        self._store.brawl_stars_api_config,
+                        self._store.brawl_stars_api_config_path,
+                    )
+                    config = dict(self._store.brawl_stars_api_config)
+                    config["player_tag"] = get_config_player_tag(config)
+                    config = refresh_brawl_stars_api_token_if_enabled(
+                        config,
+                        "cfg/brawl_stars_api.toml",
+                        force=True,
+                    )
+                    self._store.brawl_stars_api_config.update(config)
+                    save_dict_as_toml(
+                        self._store.brawl_stars_api_config,
+                        self._store.brawl_stars_api_config_path,
+                    )
                     player = fetch_brawl_stars_player(
                         config.get("api_token", ""),
                         config.get("player_tag", ""),

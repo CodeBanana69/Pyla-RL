@@ -923,6 +923,7 @@ ApplicationWindow {
         property bool secret: false
         property bool revealed: false
         property bool live: false
+        property bool _programmaticText: false
         signal saved(string value)
 
         implicitHeight: 34
@@ -948,7 +949,14 @@ ApplicationWindow {
             echoMode: inputBox.secret && !inputBox.revealed ? TextInput.Password : TextInput.Normal
             selectByMouse: true
             clip: true
-            onTextChanged: if (inputBox.live) inputBox.saved(text)
+            onTextChanged: {
+                if (inputBox._programmaticText || !inputBox.live) {
+                    return
+                }
+                if (text !== inputBox.value) {
+                    inputBox.saved(text)
+                }
+            }
             onEditingFinished: if (!inputBox.live) inputBox.saved(text)
         }
 
@@ -956,7 +964,9 @@ ApplicationWindow {
 
         onValueChanged: {
             if (field.text !== inputBox.value) {
+                inputBox._programmaticText = true
                 field.text = inputBox.value
+                inputBox._programmaticText = false
             }
         }
 
@@ -3666,6 +3676,7 @@ ApplicationWindow {
                 TabPage {
                     visible: root.activeTab === "API"
                     FormPanel {
+                        id: apiConfigPanel
                         title: "BRAWL STARS API"
                         tutorialId: "api"
                         FieldRow { label: "Player Tag"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "player_tag")); onSaved: function(value) { root.saveValue("api", "player_tag", value) } } }
@@ -3680,7 +3691,13 @@ ApplicationWindow {
                         FieldRow { label: "Sync Trophies After Match"; CenterRow { ToggleSwitch { checked: root.boolValue("api", "sync_trophies_after_match"); onToggled: function(value) { root.saveValue("api", "sync_trophies_after_match", value) } } } }
                     }
                     ActionRow {
-                        HubButton { label: "Test API Config"; onClicked: root.runAction("api-test") }
+                        HubButton {
+                            label: "Test API Config"
+                            onClicked: {
+                                apiConfigPanel.forceActiveFocus()
+                                Qt.callLater(function() { root.runAction("api-test") })
+                            }
+                        }
                         HubButton { label: "Developer Portal"; secondary: true; onClicked: root.runAction("brawl-stars-developer") }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
