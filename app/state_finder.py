@@ -125,12 +125,23 @@ def get_state_detection_scores(image):
     lobby_template = states_path + "lobby_menu.png"
     lobby_region = region_data["lobby_menu"]
     height, width = image.shape[:2]
+    play_button = is_lobby_play_button_visible(image)
+    currency_bar = is_lobby_currency_bar_visible(image)
+    quests_button = is_lobby_quests_button_visible(image)
+    menu_button = is_lobby_menu_button_visible(image)
     return {
         "frame_w": width,
         "frame_h": height,
         "lobby_score": round(template_match_score_in_region(image, lobby_template, lobby_region), 4),
         "lobby_threshold": 0.7,
         "lobby_match": is_in_lobby(image),
+        "lobby_hud_visible": is_lobby_hud_visible(image),
+        "lobby_anchors": {
+            "play_button": play_button,
+            "currency_bar": currency_bar,
+            "quests_button": quests_button,
+            "menu_button": menu_button,
+        },
         "match_making": is_in_match_making(image),
         "brawler_selection": is_in_brawler_selection(image),
         "shop": is_in_shop(image),
@@ -182,7 +193,83 @@ def is_in_offer_popup(image) -> bool:
 
 
 def is_in_lobby(image) -> bool:
-    return is_template_in_region(image, states_path + 'lobby_menu.png', region_data["lobby_menu"])
+    return is_lobby_hud_visible(image)
+
+
+def is_lobby_hud_visible(image, required_anchors=3) -> bool:
+    anchors = [
+        is_lobby_play_button_visible(image),
+        is_lobby_currency_bar_visible(image),
+        is_lobby_quests_button_visible(image),
+        is_lobby_menu_button_visible(image),
+    ]
+    return sum(1 for value in anchors if value) >= required_anchors
+
+
+def is_lobby_play_button_visible(image) -> bool:
+    current_height, current_width = image.shape[:2]
+    width_ratio = current_width / orig_screen_width
+    height_ratio = current_height / orig_screen_height
+
+    region = [1260, 820, 610, 225]
+    x = int(region[0] * width_ratio)
+    y = int(region[1] * height_ratio)
+    w = int(region[2] * width_ratio)
+    h = int(region[3] * height_ratio)
+    crop = image[y:y + h, x:x + w]
+    if crop.size == 0:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    yellow_mask = cv2.inRange(
+        hsv,
+        np.array((15, 90, 120), dtype=np.uint8),
+        np.array((42, 255, 255), dtype=np.uint8),
+    )
+    yellow_pixels = cv2.countNonZero(yellow_mask)
+    yellow_ratio = yellow_pixels / max(1, crop.shape[0] * crop.shape[1])
+    if yellow_ratio < 0.28:
+        return False
+
+    contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return False
+    largest = max(contours, key=cv2.contourArea)
+    bx, by, bw, bh = cv2.boundingRect(largest)
+    return bw > w * 0.45 and bh > h * 0.35
+
+
+def is_lobby_currency_bar_visible(image) -> bool:
+    crop = crop_scaled_region(image, [1120, 0, 620, 95])
+    if crop.size == 0:
+        return False
+    yellow_ratio = mask_ratio(crop, (16, 80, 120), (42, 255, 255))
+    green_ratio = mask_ratio(crop, (45, 80, 110), (88, 255, 255))
+    white_ratio = mask_ratio(crop, (0, 0, 170), (179, 95, 255))
+    dark_ratio = mask_ratio(crop, (0, 0, 0), (179, 255, 80))
+    return yellow_ratio > 0.018 and green_ratio > 0.010 and white_ratio > 0.035 and dark_ratio > 0.15
+
+
+def is_lobby_quests_button_visible(image) -> bool:
+    crop = crop_scaled_region(image, [240, 850, 340, 220])
+    if crop.size == 0:
+        return False
+    cyan_ratio = mask_ratio(crop, (82, 50, 110), (112, 255, 255))
+    white_ratio = mask_ratio(crop, (0, 0, 160), (179, 90, 255))
+    orange_ratio = mask_ratio(crop, (8, 80, 100), (32, 255, 255))
+    dark_ratio = mask_ratio(crop, (0, 0, 0), (179, 255, 90))
+    return cyan_ratio > 0.025 and white_ratio > 0.055 and orange_ratio > 0.015 and dark_ratio > 0.20
+
+
+def is_lobby_menu_button_visible(image) -> bool:
+    if is_template_in_region(image, states_path + 'lobby_menu.png', region_data["lobby_menu"], threshold=0.65):
+        return True
+    crop = crop_scaled_region(image, [1760, 0, 160, 100])
+    if crop.size == 0:
+        return False
+    white_ratio = mask_ratio(crop, (0, 0, 175), (179, 80, 255))
+    dark_ratio = mask_ratio(crop, (0, 0, 0), (179, 255, 90))
+    return white_ratio > 0.05 and dark_ratio > 0.18
 
 
 def is_in_end_of_a_match(image):
