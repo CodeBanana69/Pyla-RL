@@ -152,6 +152,18 @@ def _use_fp16_models() -> bool:
     return str(general.get("onnx_fp16", "yes")).strip().lower() in ("yes", "true", "1", "on")
 
 
+def _fp16_allowed_for_provider(provider_name: str) -> bool:
+    # DirectML is unstable with converted FP16 graphs on many Windows GPUs.
+    return provider_name == "CUDAExecutionProvider" and _use_fp16_models()
+
+
+def _session_input_numpy_dtype(session) -> np.dtype:
+    type_str = str(session.get_inputs()[0].type or "tensor(float)")
+    if "float16" in type_str:
+        return np.float16
+    return np.float32
+
+
 def _ensure_fp16_model(model_path: str) -> str | None:
     if not _use_fp16_models():
         return None
@@ -178,6 +190,31 @@ def _ensure_fp16_model(model_path: str) -> str | None:
     except Exception as exc:
         print(f"FP16 conversion failed for {model_path}: {exc}")
         return None
+
+
+def _make_inference_probe(model, device, classes, ignore_classes, input_size, model_path):
+    probe = Detect.__new__(Detect)
+    probe.model_path = model_path
+    probe.model = model
+    probe.device = device
+    probe.input_name = model.get_inputs()[0].name
+    probe.output_names = [output.name for output in model.get_outputs()]
+    probe.classes = classes
+    probe.ignore_classes = ignore_classes
+    probe.input_size = input_size
+    probe._input_dtype = _session_input_numpy_dtype(model)
+    probe._padded_img_buffer = np.full(
+        (1, 3, input_size[0], input_size[1]),
+        128.0 / 255.0,
+        dtype=probe._input_dtype,
+    )
+    probe._last_resized_w = 0
+    probe._last_resized_h = 0
+    probe._use_io_binding = False
+    probe._io_binding = None
+    probe._input_ortvalue = None
+    probe._allow_runtime_fallback = False
+    return probe
 
 
 def _detection_signature(results: dict) -> tuple:
@@ -357,7 +394,7 @@ class Detect:
         self._io_binding = None
         self._input_ortvalue = None
         self._device_id = 0
-        self._input_dtype = np.float32
+        self._allow_runtime_fallback = True
 
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Model file not found: {self.model_path}")
@@ -365,6 +402,11 @@ class Detect:
         self.model, self.device = self.load_model()
         self.input_name = self.model.get_inputs()[0].name
         self.output_names = [output.name for output in self.model.get_outputs()]
+        self._sync_input_dtype_from_model()
+        self._setup_inference_backend()
+
+    def _sync_input_dtype_from_model(self):
+        self._input_dtype = _session_input_numpy_dtype(self.model)
         self._padded_img_buffer = np.full(
             (1, 3, self.input_size[0], self.input_size[1]),
             128.0 / 255.0,
@@ -372,7 +414,6 @@ class Detect:
         )
         self._last_resized_w = 0
         self._last_resized_h = 0
-        self._setup_inference_backend()
 
     def load_model(self):
         providers = _build_providers(self.preferred_device)
@@ -405,52 +446,33 @@ class Detect:
             )
             _provider_fallback_warning_printed = True
 
-        if actual_provider in _GPU_PROVIDERS and model_path == self.model_path:
+        if (
+                actual_provider in _GPU_PROVIDERS
+                and model_path == self.model_path
+                and _fp16_allowed_for_provider(actual_provider)
+        ):
             fp16_path = _ensure_fp16_model(model_path)
             if fp16_path and os.path.exists(fp16_path):
                 fp32_model = model
                 fp32_device = actual_provider
                 try:
                     fp16_model, fp16_device = self._load_model_with_providers(providers, fp16_path)
-                    probe = Detect.__new__(Detect)
-                    probe.model = fp32_model
-                    probe.device = fp32_device
-                    probe.input_name = fp32_model.get_inputs()[0].name
-                    probe.output_names = [output.name for output in fp32_model.get_outputs()]
-                    probe.classes = self.classes
-                    probe.ignore_classes = self.ignore_classes
-                    probe.input_size = self.input_size
-                    probe._input_dtype = np.float32
-                    probe._padded_img_buffer = np.full(
-                        (1, 3, self.input_size[0], self.input_size[1]),
-                        128.0 / 255.0,
-                        dtype=np.float32,
+                    probe = _make_inference_probe(
+                        fp32_model,
+                        fp32_device,
+                        self.classes,
+                        self.ignore_classes,
+                        self.input_size,
+                        model_path,
                     )
-                    probe._last_resized_w = 0
-                    probe._last_resized_h = 0
-                    probe._use_io_binding = False
-                    probe._io_binding = None
-                    probe._input_ortvalue = None
-
-                    fp16_probe = Detect.__new__(Detect)
-                    fp16_probe.model = fp16_model
-                    fp16_probe.device = fp16_device
-                    fp16_probe.input_name = fp16_model.get_inputs()[0].name
-                    fp16_probe.output_names = [output.name for output in fp16_model.get_outputs()]
-                    fp16_probe.classes = self.classes
-                    fp16_probe.ignore_classes = self.ignore_classes
-                    fp16_probe.input_size = self.input_size
-                    fp16_probe._input_dtype = np.float16
-                    fp16_probe._padded_img_buffer = np.full(
-                        (1, 3, self.input_size[0], self.input_size[1]),
-                        128.0 / 255.0,
-                        dtype=np.float16,
+                    fp16_probe = _make_inference_probe(
+                        fp16_model,
+                        fp16_device,
+                        self.classes,
+                        self.ignore_classes,
+                        self.input_size,
+                        fp16_path,
                     )
-                    fp16_probe._last_resized_w = 0
-                    fp16_probe._last_resized_h = 0
-                    fp16_probe._use_io_binding = False
-                    fp16_probe._io_binding = None
-                    fp16_probe._input_ortvalue = None
 
                     if _validate_fp16_against_fp32(probe, fp16_probe):
                         print(f"Using FP16 model: {os.path.basename(fp16_path)}")
@@ -466,6 +488,8 @@ class Detect:
         self._io_binding = None
         self._input_ortvalue = None
         if self.device not in _GPU_PROVIDERS:
+            return
+        if self.device == "DmlExecutionProvider":
             return
         try:
             self._io_binding = self.model.io_binding()
@@ -507,6 +531,8 @@ class Detect:
 
     def _fallback_after_runtime_failure(self, error):
         global _runtime_provider_fallback_warning_printed
+        if not getattr(self, "_allow_runtime_fallback", True):
+            return False
         if self.device == "CPUExecutionProvider":
             return False
 
@@ -522,13 +548,25 @@ class Detect:
                     "CUDA/cuDNN runtime failed. NVIDIA users can repair it with: "
                     "py -3.11-64 tools\\fix_gpu_runtime.py cuda"
                 )
+            elif self.device == "DmlExecutionProvider":
+                print(
+                    "DirectML failed. Keep onnx_fp16 = \"no\" on Windows GPU, update drivers, "
+                    "or repair with: py -3.11-64 tools\\fix_gpu_runtime.py directml"
+                )
             _runtime_provider_fallback_warning_printed = True
 
         self.model, self.device = self._load_model_with_providers(providers, self.model_path)
         self.input_name = self.model.get_inputs()[0].name
         self.output_names = [output.name for output in self.model.get_outputs()]
+        self._sync_input_dtype_from_model()
         self._setup_inference_backend()
         return True
+
+    def _coerce_model_input(self, preprocessed_img):
+        expected = _session_input_numpy_dtype(self.model)
+        if preprocessed_img.dtype != expected:
+            return preprocessed_img.astype(expected, copy=False)
+        return preprocessed_img
 
     def preprocess_image(self, img):
         h, w = img.shape[:2]
@@ -553,14 +591,12 @@ class Detect:
         return _scale_detections(detections, orig_img_shape, resized_shape)
 
     def _run_model(self, preprocessed_img):
+        model_input = self._coerce_model_input(preprocessed_img)
         if self._use_io_binding and self._io_binding is not None and self._input_ortvalue is not None:
-            if self._input_dtype == np.float16:
-                self._input_ortvalue.update_inplace(preprocessed_img.astype(np.float16, copy=False))
-            else:
-                self._input_ortvalue.update_inplace(preprocessed_img)
+            self._input_ortvalue.update_inplace(model_input)
             self.model.run_with_iobinding(self._io_binding)
             return self._io_binding.copy_outputs_to_cpu()
-        return self.model.run(self.output_names, {self.input_name: preprocessed_img})
+        return self.model.run(self.output_names, {self.input_name: model_input})
 
     def _infer_outputs(self, img):
         preprocessed_img, _, _ = self.preprocess_image(img)
