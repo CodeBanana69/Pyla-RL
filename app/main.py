@@ -380,6 +380,12 @@ def pyla_main(data):
             self.duplicate_frame_replay_max_ips = parse_max_ips(
                 general_config.get("duplicate_frame_replay_max_ips", 25)
             ) or 15
+            self.duplicate_frame_replay_play_avg_limit = float(
+                general_config.get("duplicate_frame_replay_play_avg_limit", 0.22) or 0.22
+            )
+            self._duplicate_replay_count = 0
+            self._duplicate_replay_window_start = time.time()
+            self._play_main_duration_ema = None
 
             self.window_controller = window_controller.WindowController()
             queue = normalize_queue(data)
@@ -437,6 +443,7 @@ def pyla_main(data):
             self.active_match_brawler = ""
             self.pending_lobby_brawler_pick = False
             time_thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
+            self.state_check_interval = float(time_thresholds.get("state_check", 1.5))
             self.check_if_brawl_stars_crashed_timer = float(
                 time_thresholds.get("check_if_brawl_stars_crashed", 60)
             )
@@ -600,12 +607,18 @@ def pyla_main(data):
 
         def state_checker_loop(self):
             last_checked_frame_time = 0.0
+            last_state_check_at = 0.0
             while not self.state_checker_stop_event.is_set():
                 frame, frame_time = self.window_controller.get_latest_frame()
                 if frame is None or frame_time <= last_checked_frame_time:
                     self.state_checker_stop_event.wait(0.01)
                     continue
+                now = time.time()
+                if now - last_state_check_at < self.state_check_interval:
+                    self.state_checker_stop_event.wait(0.01)
+                    continue
                 last_checked_frame_time = frame_time
+                last_state_check_at = now
                 try:
                     self.set_latest_state(get_state(frame))
                 except Exception as exc:
@@ -1108,7 +1121,34 @@ def pyla_main(data):
                 return False
             if not frame_time:
                 return False
-            return time.time() - frame_time <= 0.35
+            if time.time() - frame_time > 0.35:
+                return False
+            if (
+                self._play_main_duration_ema is not None
+                and self._play_main_duration_ema > self.duplicate_frame_replay_play_avg_limit
+            ):
+                return False
+            if self.duplicate_frame_replay_max_ips:
+                now = time.time()
+                if now - self._duplicate_replay_window_start >= 1.0:
+                    self._duplicate_replay_count = 0
+                    self._duplicate_replay_window_start = now
+                if self._duplicate_replay_count >= self.duplicate_frame_replay_max_ips:
+                    return False
+            return True
+
+        def _record_play_main_duration(self, duration):
+            if duration <= 0:
+                return
+            if self._play_main_duration_ema is None:
+                self._play_main_duration_ema = duration
+            else:
+                self._play_main_duration_ema = (self._play_main_duration_ema * 0.75) + (duration * 0.25)
+
+        def _run_play_main(self, frame, brawler, *, replay=False):
+            play_start = time.perf_counter()
+            self.Play.main(frame, brawler, self, replay=replay)
+            self._record_play_main_duration(time.perf_counter() - play_start)
 
         def _maybe_send_daily_digest(self):
             from daily_digest import build_daily_digest, format_daily_digest_text, should_send_digest
@@ -1230,16 +1270,18 @@ def pyla_main(data):
                     if self.should_replay_duplicate_frame(last_ft):
                         brawler = self._get_play_brawler_name()
                         self.Play.current_brawler = brawler
-                        self.Play.main(frame, brawler, self)
+                        self._run_play_main(frame, brawler, replay=True)
+                        if self.duplicate_frame_replay_max_ips:
+                            self._duplicate_replay_count += 1
                         c += 1
-                    time.sleep(0.005)
+                    time.sleep(0.001)
                     continue
                 self.last_processed_frame_id = frame_id
 
                 self.manage_time_tasks(frame)
                 brawler = self._get_play_brawler_name()
                 self.Play.current_brawler = brawler
-                self.Play.main(frame, brawler, self)
+                self._run_play_main(frame, brawler)
                 c += 1
 
                 if self.max_ips and frame_start is not None:

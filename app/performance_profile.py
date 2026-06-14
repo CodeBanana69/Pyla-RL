@@ -92,7 +92,7 @@ PERFORMANCE_PROFILES = {
         },
     },
     "high_ips": {
-        "description": "Maximum throughput: debug overlays off, fewer vision passes, tuned duplicate-frame replay.",
+        "description": "Maximum throughput without compromising vision quality: debug overlays off, close-tile walls, tuned duplicate-frame replay.",
         "general_config": {
             "cpu_or_gpu": "auto",
             "max_ips": 0,
@@ -103,17 +103,20 @@ PERFORMANCE_PROFILES = {
             "used_threads": 4,
             "visual_debug": "no",
             "advanced_visuals": "no",
-            "duplicate_frame_replay_max_ips": 25,
+            "duplicate_frame_replay_enabled": "yes",
+            "duplicate_frame_replay_max_ips": 60,
             "duplicate_frame_replay_play_avg_limit": 0.22,
         },
         "bot_config": {
             "entity_detection_confidence": 0.55,
             "entity_detection_retry_confidence": 0.35,
-            "fog_check_every_n_frames": 4,
+            "entity_retry_grace_seconds": 0.4,
+            "fog_check_every_n_frames": 3,
+            "close_tile_detector_enabled": "yes",
         },
         "time_tresholds": {
             "wall_detection": 0.2,
-            "wall_detection_interval_seconds": 1.0,
+            "wall_detection_interval_seconds": 0.2,
         },
     },
 }
