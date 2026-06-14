@@ -1,5 +1,6 @@
-﻿import os
+import os
 import platform
+import threading
 import warnings
 from pathlib import Path
 
@@ -29,6 +30,7 @@ warnings.filterwarnings(
 debug = load_toml_as_dict("cfg/general_config.toml")["super_debug"] == "yes"
 
 _GPU_PROVIDERS = frozenset({"CUDAExecutionProvider", "DmlExecutionProvider"})
+_dml_inference_lock = threading.Lock()
 
 
 def get_optimal_threads(max_limit=4):
@@ -137,6 +139,9 @@ def _configure_session_options_for_provider(session_options, provider_name):
     if provider_name == "DmlExecutionProvider":
         session_options.enable_mem_pattern = False
         session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        # DmlFusedNode crashes on some Windows GPU/driver combos; run unfused kernels instead.
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
+        session_options.add_session_config_entry("ep.dml.disable_graph_fusion", "1")
     elif provider_name == "CUDAExecutionProvider":
         session_options.add_session_config_entry("gpu_mem_limit", "2147483648")
         session_options.add_session_config_entry("arena_extend_strategy", "kSameAsRequested")
@@ -592,11 +597,18 @@ class Detect:
 
     def _run_model(self, preprocessed_img):
         model_input = self._coerce_model_input(preprocessed_img)
-        if self._use_io_binding and self._io_binding is not None and self._input_ortvalue is not None:
-            self._input_ortvalue.update_inplace(model_input)
-            self.model.run_with_iobinding(self._io_binding)
-            return self._io_binding.copy_outputs_to_cpu()
-        return self.model.run(self.output_names, {self.input_name: model_input})
+
+        def _execute():
+            if self._use_io_binding and self._io_binding is not None and self._input_ortvalue is not None:
+                self._input_ortvalue.update_inplace(model_input)
+                self.model.run_with_iobinding(self._io_binding)
+                return self._io_binding.copy_outputs_to_cpu()
+            return self.model.run(self.output_names, {self.input_name: model_input})
+
+        if self.device == "DmlExecutionProvider":
+            with _dml_inference_lock:
+                return _execute()
+        return _execute()
 
     def _infer_outputs(self, img):
         preprocessed_img, _, _ = self.preprocess_image(img)

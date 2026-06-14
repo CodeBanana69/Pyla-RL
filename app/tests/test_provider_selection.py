@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from detect import Detect, _build_providers, _fallback_providers_after_runtime_failure, _provider_name
+from detect import Detect, _build_providers, _configure_session_options_for_provider, _fallback_providers_after_runtime_failure, _provider_name
 from utils import DefaultEasyOCR
 
 
@@ -89,6 +89,16 @@ class ProviderSelectionTests(unittest.TestCase):
     def test_cuda_runtime_failure_falls_back_to_cpu_without_directml(self, *_):
         providers = _fallback_providers_after_runtime_failure("CUDAExecutionProvider")
         self.assertEqual(providers, ["CPUExecutionProvider"])
+
+    def test_directml_session_disables_graph_fusion(self):
+        import onnxruntime as ort
+
+        so = ort.SessionOptions()
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        _configure_session_options_for_provider(so, "DmlExecutionProvider")
+        self.assertEqual(so.graph_optimization_level, ort.GraphOptimizationLevel.ORT_ENABLE_BASIC)
+        self.assertFalse(so.enable_mem_pattern)
+        self.assertEqual(so.execution_mode, ort.ExecutionMode.ORT_SEQUENTIAL)
 
     def test_detect_objects_retries_after_runtime_provider_failure(self):
         detector = Detect.__new__(Detect)

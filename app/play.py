@@ -1,4 +1,4 @@
-﻿import math
+import math
 import os
 import random
 import threading
@@ -2735,6 +2735,8 @@ class Play:
     def perceive_concurrent(self, frame, current_time=None):
         """Run entity and wall detection concurrently when wall tick is due."""
         current_time = current_time or time.time()
+        if getattr(self.Detect_main_info, "device", "") == "DmlExecutionProvider":
+            return self.perceive(frame, current_time=current_time)
         if current_time - self.time_since_walls_checked <= self.walls_treshold:
             return self.perceive(frame, current_time=current_time)
 

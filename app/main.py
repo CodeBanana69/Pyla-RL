@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import gc
 import os
 import platform
@@ -386,6 +386,7 @@ def pyla_main(data):
             )
             self.pipeline_perception = config_bool(general_config.get("pipeline_perception"), True)
             self.perception_worker = None
+            self._perception_worker_started = False
             self.perf_infer_ms = 0.0
             self.perf_decide_ms = 0.0
             self.perf_idle_ms = 0.0
@@ -418,7 +419,6 @@ def pyla_main(data):
                     self.window_controller,
                     use_concurrent_wall=True,
                 )
-                self.perception_worker.start()
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
 
@@ -1259,6 +1259,9 @@ def pyla_main(data):
             s_time = time.time()
             c = 0
             self.runtime_control.mark_running()
+            if self.perception_worker is not None and not self._perception_worker_started:
+                self.perception_worker.start()
+                self._perception_worker_started = True
             while True:
                 if is_stop_requested(self.control_window.state_path) or self.stop_event.is_set():
                     self.stop_gracefully()
