@@ -104,6 +104,7 @@ from utils import (
     api_base_url,
     async_notify_user,
     check_version,
+    config_bool,
     current_wall_model_is_latest,
     get_brawler_list,
     get_latest_version,
@@ -383,9 +384,15 @@ def pyla_main(data):
             self.duplicate_frame_replay_play_avg_limit = float(
                 general_config.get("duplicate_frame_replay_play_avg_limit", 0.22) or 0.22
             )
+            self.pipeline_perception = config_bool(general_config.get("pipeline_perception"), True)
+            self.perception_worker = None
+            self.perf_infer_ms = 0.0
+            self.perf_decide_ms = 0.0
+            self.perf_idle_ms = 0.0
             self._duplicate_replay_count = 0
             self._duplicate_replay_window_start = time.time()
             self._play_main_duration_ema = None
+            self.match_entered_at = None
 
             self.window_controller = window_controller.WindowController()
             queue = normalize_queue(data)
@@ -403,6 +410,15 @@ def pyla_main(data):
             )
             self.playstyle_info, pyla_code = load_pyla_script(current_playstyle)
             self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
+            if self.pipeline_perception:
+                from perception import PerceptionWorker
+
+                self.perception_worker = PerceptionWorker(
+                    self.Play,
+                    self.window_controller,
+                    use_concurrent_wall=True,
+                )
+                self.perception_worker.start()
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
 
@@ -543,6 +559,37 @@ def pyla_main(data):
             self.Stage_manager.Trophy_observer.current_trophies = current.get("trophies", 0)
             wins = current.get("wins", 0)
             self.Stage_manager.Trophy_observer.current_wins = int(wins) if wins not in ("", None) else 0
+            self.Stage_manager.Trophy_observer.begin_brawler_push(
+                current.get("brawler", ""),
+                current.get("trophies", 0),
+            )
+
+        def _maybe_run_match_warmup(self, frame):
+            if self.get_latest_state() != "match":
+                return
+            warmup_after = float(getattr(self.Play, "match_warmup_seconds", 0.0) or 0.0)
+            if warmup_after <= 0:
+                return
+            if getattr(self.Play, "_match_warmup_done", False):
+                return
+            entered_at = getattr(self, "match_entered_at", None)
+            if entered_at is None:
+                return
+            elapsed = time.time() - entered_at
+            if elapsed < warmup_after:
+                return
+            self.Play.warmup_match_inference(frame)
+
+        def _maybe_check_idle(self, frame):
+            if not self.Time_management.idle_check():
+                return
+            action = self.lobby_automator.check_for_idle(frame)
+            if action == "restart":
+                self.lobby_automator.reset_idle_recovery()
+                self.restart_brawl_stars()
+            elif action == "clicked":
+                import runtime_log
+                runtime_log.log_info("recovery", "Idle disconnect detected; pressed Reload.")
 
         def should_stop(self):
             return (
@@ -768,9 +815,11 @@ def pyla_main(data):
                     allow_panel_escape=allow_panel_escape,
                 )
                 if previous_state == "match" and state != "match":
+                    self.match_entered_at = None
                     if hasattr(self.Play, "reset_match_control_state"):
                         self.Play.reset_match_control_state()
                 elif previous_state != "match" and state == "match":
+                    self.match_entered_at = time.time()
                     if hasattr(self.Play, "reset_match_control_state"):
                         self.Play.reset_match_control_state()
                     if previous_state in {"lobby", "match_making"}:
@@ -795,8 +844,6 @@ def pyla_main(data):
                 for key, value in self.Play.time_since_detections.items():
                     if now - value > self.no_detections_action_threshold:
                         self.restart_brawl_stars()
-            if self.Time_management.idle_check():
-                self.lobby_automator.check_for_idle(frame)
             now = time.time()
             if self.webhook_ping_every_minutes and now - self.time_since_last_webhook_ping >= self.webhook_ping_every_minutes * 60:
                 notify_user("regular_minutes_ping", self.window_controller.screenshot(), self.Stage_manager)
@@ -846,6 +893,9 @@ def pyla_main(data):
 
         def stop_gracefully(self):
             runtime_log.log_info("startup", "Pyla-RL is shutting down.")
+            if getattr(self, "perception_worker", None) is not None:
+                self.perception_worker.stop()
+                self.perception_worker = None
             self.stop_state_checker()
             self.window_controller.release_movement()
             if self.discord_control is not None:
@@ -1147,8 +1197,45 @@ def pyla_main(data):
 
         def _run_play_main(self, frame, brawler, *, replay=False):
             play_start = time.perf_counter()
-            self.Play.main(frame, brawler, self, replay=replay)
+            self.Play.main(
+                frame,
+                brawler,
+                self,
+                replay=replay,
+                snapshot_on_success=self.duplicate_frame_replay_enabled,
+            )
             self._record_play_main_duration(time.perf_counter() - play_start)
+            self._update_perf_breakdown(play_start)
+
+        def _run_play_decide(self, frame, data, brawler, *, replay=False):
+            play_start = time.perf_counter()
+            if replay and self.Play._cached_play_snapshot is not None:
+                data = self.Play._restore_play_data(self.Play._cached_play_snapshot)
+                self.Play.last_perceive_ms = 0.0
+            self.Play.decide(
+                frame,
+                data,
+                brawler,
+                self,
+                replay=replay,
+                snapshot_on_success=self.duplicate_frame_replay_enabled and not replay,
+            )
+            self._record_play_main_duration(time.perf_counter() - play_start)
+            self._update_perf_breakdown(play_start)
+
+        def _update_perf_breakdown(self, loop_start):
+            self.perf_infer_ms = float(getattr(self.Play, "last_perceive_ms", 0.0) or 0.0)
+            self.perf_decide_ms = float(getattr(self.Play, "last_decide_ms", 0.0) or 0.0)
+            elapsed_ms = max(0.0, (time.perf_counter() - loop_start) * 1000.0)
+            accounted = self.perf_infer_ms + self.perf_decide_ms
+            self.perf_idle_ms = max(0.0, elapsed_ms - accounted)
+
+        def _perf_payload(self):
+            return {
+                "infer_ms": self.perf_infer_ms,
+                "decide_ms": self.perf_decide_ms,
+                "idle_ms": self.perf_idle_ms,
+            }
 
         def _maybe_send_daily_digest(self):
             from daily_digest import build_daily_digest, format_daily_digest_text, should_send_digest
@@ -1230,10 +1317,16 @@ def pyla_main(data):
                                 self.perf_feed_fps,
                                 self.ips_history,
                                 session=self.build_runtime_snapshot(),
+                                perf=self._perf_payload(),
                             )
                         intent = getattr(self.Play, "match_intent_summary", "") or ""
                         runtime_label = self.runtime_control_label()
                         perf_text = f"{current_ips:.2f} IPS | feed {self.perf_feed_fps:.1f} FPS"
+                        perf_text += (
+                            f" | inf {self.perf_infer_ms:.0f}ms"
+                            f" dec {self.perf_decide_ms:.0f}ms"
+                            f" idle {self.perf_idle_ms:.0f}ms"
+                        )
                         if runtime_label != "running":
                             perf_text = f"{runtime_label.upper()} | {perf_text}"
                         if intent:
@@ -1265,8 +1358,41 @@ def pyla_main(data):
                     continue
 
                 self.record_feed_fps()
+                self._maybe_check_idle(frame)
+                self._maybe_run_match_warmup(frame)
                 frame_id = self.window_controller.get_latest_frame_id()
-                if frame_id == self.last_processed_frame_id:
+                if (
+                    self.pipeline_perception
+                    and self.perception_worker is not None
+                    and self.get_latest_state() == "match"
+                ):
+                    latest = self.perception_worker.get_latest()
+                    if latest is None:
+                        self.Play.sustain_movement()
+                        time.sleep(0.001)
+                        continue
+                    perception_frame = latest.frame
+                    perception_data = latest.data
+                    perception_frame_id = latest.frame_id
+                    if perception_frame_id <= self.last_processed_frame_id:
+                        if self.should_replay_duplicate_frame(last_ft):
+                            brawler = self._get_play_brawler_name()
+                            self.Play.current_brawler = brawler
+                            self._run_play_decide(perception_frame, perception_data, brawler, replay=True)
+                            if self.duplicate_frame_replay_max_ips:
+                                self._duplicate_replay_count += 1
+                            c += 1
+                        else:
+                            self.Play.sustain_movement()
+                        time.sleep(0.001)
+                        continue
+                    self.last_processed_frame_id = perception_frame_id
+                    self.manage_time_tasks(perception_frame)
+                    brawler = self._get_play_brawler_name()
+                    self.Play.current_brawler = brawler
+                    self._run_play_decide(perception_frame, perception_data, brawler)
+                    c += 1
+                elif frame_id == self.last_processed_frame_id:
                     if self.should_replay_duplicate_frame(last_ft):
                         brawler = self._get_play_brawler_name()
                         self.Play.current_brawler = brawler
@@ -1274,15 +1400,17 @@ def pyla_main(data):
                         if self.duplicate_frame_replay_max_ips:
                             self._duplicate_replay_count += 1
                         c += 1
+                    elif self.get_latest_state() == "match":
+                        self.Play.sustain_movement()
                     time.sleep(0.001)
                     continue
-                self.last_processed_frame_id = frame_id
-
-                self.manage_time_tasks(frame)
-                brawler = self._get_play_brawler_name()
-                self.Play.current_brawler = brawler
-                self._run_play_main(frame, brawler)
-                c += 1
+                else:
+                    self.last_processed_frame_id = frame_id
+                    self.manage_time_tasks(frame)
+                    brawler = self._get_play_brawler_name()
+                    self.Play.current_brawler = brawler
+                    self._run_play_main(frame, brawler)
+                    c += 1
 
                 if self.max_ips and frame_start is not None:
                     target_period = 1 / self.max_ips

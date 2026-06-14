@@ -1,0 +1,423 @@
+{
+  "app": {
+    "title": {
+      "hub": "Pyla-RL Хаб",
+      "settings": "Pyla-RL Настройки"
+    }
+  },
+  "nav": {
+    "overview": "Обзор",
+    "instances": "Экземпляры",
+    "farmPlan": "План фарма",
+    "settings": "Настройки",
+    "discord": "Discord",
+    "telegram": "Telegram",
+    "api": "API",
+    "timers": "Таймеры",
+    "matchHistory": "История матчей",
+    "help": "Справка",
+    "farmPlanCount": "План фарма ({count})"
+  },
+  "brand": {
+    "productName": "Pyla-RL",
+    "freeNotice": "Pyla-RL бесплатен, с открытым исходным кодом; его нельзя продавать.",
+    "footerNotice": "Pyla бесплатен, публичен и с открытым исходным кодом.",
+    "licenseName": "CC BY-NC 4.0",
+    "downloadNotice": "Скачивайте только с GitHub или Discord Pyla.",
+    "licenseLine": "{product} бесплатен и с открытым исходным кодом под {license}. Можно использовать и изменять, но нельзя продавать или перепродавать.",
+    "licenseShort": "{product} бесплатен. Лицензия: {license}."
+  },
+  "wizard": {
+    "language": {
+      "title": "Choose language / Выберите язык",
+      "subtitle": "Hub, pause menu, and bot messages will use this language. / Хаб, меню паузы и сообщения бота будут на этом языке.",
+      "english": "English",
+      "russian": "Русский"
+    },
+    "step1": {
+      "title": "Шаг 1: Лицензия бесплатного использования"
+    },
+    "step2": {
+      "title": "Шаг 2: Окружение",
+      "body": "Запустите эмулятор, откройте Brawl Stars, затем выполните проверки на вкладке Обзор. Полные руководства — во вкладке Справка."
+    },
+    "step3": {
+      "title": "Шаг 3: Дополнительно",
+      "body": "По желанию настройте Discord, Telegram или API для уведомлений и удалённого управления. Инструкции — во вкладке Справка."
+    },
+    "step4": {
+      "title": "Шаг 4: План фарма",
+      "body": "Соберите план фарма на вкладке План фарма или используйте классический выбор бойца после START, если очередь пуста."
+    },
+    "licenseText": "Я понимаю, что Pyla-RL бесплатен, и не буду его продавать.",
+    "licenseHint": "Отметьте соглашение выше, чтобы включить Далее.",
+    "back": "Назад",
+    "runChecks": "Запустить проверки",
+    "openHelp": "Открыть справку",
+    "next": "Далее",
+    "finish": "Готово"
+  },
+  "settings": {
+    "language": {
+      "title": "ЯЗЫК",
+      "hint": "Меню паузы и удалённые ответы используют этот язык после перезапуска или повторного открытия меню паузы.",
+      "english": "English",
+      "russian": "Русский"
+    },
+    "about": {
+      "title": "О ПРОГРАММЕ",
+      "accept": "Принять"
+    },
+    "behavior": {
+      "afterRound": "После раунда",
+      "returnToLobby": "В лобби",
+      "playAgain": "Играть снова"
+    }
+  },
+  "chrome": {
+    "brand": "Pyla",
+    "subtitle": {
+      "hub": "Pyla-RL Хаб",
+      "settingsRunning": "Pyla-RL Настройки (бот запущен)"
+    },
+    "startBar": {
+      "ready": "Готов к запуску",
+      "runChecks": "Выполните проверки на вкладке Обзор",
+      "start": "СТАРТ",
+      "close": "ЗАКРЫТЬ",
+      "checks": "Проверки"
+    }
+  },
+  "footer": {
+    "joinDiscord": "Discord",
+    "supportPatreon": "Patreon"
+  },
+  "status": {
+    "saved": "Сохранено",
+    "working": "Работа...",
+    "waitForAction": "Дождитесь завершения текущего действия.",
+    "checkingPreflight": "Проверка перед запуском...",
+    "invalidTrophyTarget": "Введите корректную цель по кубкам.",
+    "farmPlanEmpty": "План фарма пуст.",
+    "restartForDebugScreen": "Перезапустите бота, чтобы применить экран отладки."
+  },
+  "overview": {
+    "preflight": {
+      "title": "ПРОВЕРКИ ПЕРЕД ЗАПУСКОМ",
+      "description": "Проверьте эмулятор и ADB перед СТАРТ. Используйте 1920x1080 и масштаб Windows 100%.",
+      "runChecks": "Запустить проверки",
+      "testConnection": "Тест соединения",
+      "recoveryLog": "Журнал восстановления",
+      "fix": "Исправить"
+    },
+    "performance": {
+      "title": "ПРОФИЛЬ ПРОИЗВОДИТЕЛЬНОСТИ",
+      "balanced": "сбалансированный",
+      "lowEnd": "слабый ПК",
+      "quality": "качество",
+      "highIps": "макс. IPS"
+    },
+    "gameMode": {
+      "title": "РЕЖИМ ИГРЫ",
+      "brawlBall": "Brawl Ball",
+      "showdownTrio": "Showdown Trio"
+    },
+    "emulator": {
+      "title": "ЭМУЛЯТОР",
+      "ldplayer": "LDPlayer",
+      "mumu": "MuMu"
+    },
+    "unofficialCopy": {
+      "title": "НЕОФИЦИАЛЬНАЯ КОПИЯ",
+      "officialGithub": "Официальный GitHub",
+      "pylaDiscord": "Discord Pyla"
+    }
+  },
+  "instances": {
+    "readiness": {
+      "unknown": "Неизвестно",
+      "ready": "Готов",
+      "needsFarmPlan": "Нужен план фарма",
+      "portConflict": "Конфликт порта",
+      "noEmulator": "Нет эмулятора"
+    },
+    "multiInstance": {
+      "title": "РЕЖИМ НЕСКОЛЬКИХ ЭКЗЕМПЛЯРОВ",
+      "enable": "Включить мульти-экземпляр",
+      "scanEmulators": "Сканировать эмуляторы",
+      "startAllReady": "Запустить готовые",
+      "stopAll": "Остановить все"
+    },
+    "add": {
+      "saveInstance": "Сохранить экземпляр"
+    },
+    "configured": {
+      "start": "Старт",
+      "stop": "Стоп",
+      "delete": "Удалить"
+    }
+  },
+  "farmPlan": {
+    "sort": {
+      "cupsHighToLow": "Кубки: высокие → низкие",
+      "cupsLowToHigh": "Кубки: низкие → высокие",
+      "closestToTarget": "Ближе к цели",
+      "furthestFromTarget": "Дальше от цели",
+      "targetHighToLow": "Цель: высокая → низкая",
+      "targetLowToHigh": "Цель: низкая → высокая",
+      "nameAToZ": "Имя А → Я",
+      "nameZToA": "Имя Я → А",
+      "bestTrophiesPerHour": "Лучший кубков/час"
+    },
+    "pushAll": {
+      "buildQueue": "Создать очередь"
+    },
+    "queue": {
+      "add": "Добавить",
+      "emptyTitle": "В плане фарма пока нет бойцов"
+    }
+  },
+  "hub": {
+    "action": {
+      "anotherRunning": "Другое действие хаба ещё выполняется.",
+      "actionFailed": "Действие не удалось.",
+      "actionTimeout": "Время действия истекло. Попробуйте снова. Если проверки не завершаются, перезапустите хаб и убедитесь, что эмулятор запущен.",
+      "preflightRunning": "Выполняются проверки перед запуском...",
+      "testEmulatorRunning": "Проверка соединения с эмулятором...",
+      "buildQueueRunning": "Создание плана фарма...",
+      "startingPyla": "Проверка перед запуском...",
+      "licenseAccepted": "Лицензия принята. Pyla-RL бесплатен; его нельзя продавать.",
+      "preflightReady": "Готов к запуску.",
+      "preflightFixRequired": "Исправьте обязательные проверки перед СТАРТ.",
+      "preflightFailedStart": "Проверки не пройдены. Исправьте ошибки на вкладке Обзор.",
+      "startingMessage": "Запуск Pyla-RL...",
+      "emulatorOk": "Соединение с эмулятором OK: {detail}",
+      "emulatorFailed": "Соединение с эмулятором не удалось: {detail}",
+      "farmPlanImported": "Импортировано бойцов: {count} из {name}.",
+      "farmPlanExported": "Экспортировано бойцов: {count} в {name}.",
+      "queueCleared": "План фарма очищен.",
+      "queueBuilt": "Создан план Push All: {count} бойцов до {target} кубков.",
+      "instanceSaved": "Экземпляр «{id}» сохранён.",
+      "settingsSaved": "Настройки экземпляра сохранены.",
+      "farmPlanCopied": "План фарма скопирован.",
+      "wizardComplete": "Мастер настройки завершён.",
+      "wizardReopened": "Мастер настройки открыт снова.",
+      "wizardReset": "Мастер настройки появится при следующем запуске. Открываем сейчас.",
+      "apiTestRunning": "Проверка API Brawl Stars...",
+      "sortQueueRunning": "Сортировка плана фарма...",
+      "importQueueRunning": "Импорт плана фарма...",
+      "calibrateRunning": "Калибровка профиля производительности...",
+      "checkUpdatesRunning": "Проверка обновлений...",
+      "exportHistoryRunning": "Экспорт истории матчей...",
+      "refreshHistoryRunning": "Обновление истории матчей...",
+      "multiInstanceNotRunning": "Служба мульти-экземпляра не запущена.",
+      "webhookTestSent": "Тест webhook отправлен.",
+      "settingsDisabledWhileRunning": "СТАРТ отключён, пока бот запущен. Закройте окно после редактирования настроек.",
+      "multiInstanceUseInstances": "Включён мульти-экземпляр. Запускайте ботов с вкладки Экземпляры.",
+      "licenseRequiredBeforeStart": "Примите лицензию в мастере или Настройки → О программе перед СТАРТ.",
+      "openedFile": "Открыто: {name}"
+    }
+  },
+  "pause": {
+    "title": "Pyla  ·  Управление",
+    "status": "СТАТУС",
+    "running": "Работает",
+    "paused": "Пауза",
+    "pauseBot": "Пауза бота",
+    "resumeBot": "Продолжить",
+    "pause": "Пауза",
+    "resume": "Продолжить",
+    "settings": "Настройки",
+    "quit": "Выход",
+    "ipsFeed": "IPS {ips} · Поток {feed}",
+    "ipsEmpty": "IPS -- · Поток --",
+    "sessionWins": "П{wins} ПР{losses} · IPS {ips} · {feed}",
+    "stopBot": "Остановить бота",
+    "openHub": "Открыть хаб",
+    "copied": "Скопировано!",
+    "hub": "Хаб"
+  },
+  "login": {
+    "title": "Вход по API-ключу",
+    "prompt": "Введите API-ключ:",
+    "placeholder": "API-ключ",
+    "button": "Войти",
+    "success": "Вход выполнен!",
+    "invalid": "Неверный API-ключ"
+  },
+  "select": {
+    "title": "Pyla-RL",
+    "search": "Поиск бойца",
+    "pushAll": "Push All",
+    "startPyla": "Запустить Pyla",
+    "pushOrder": "Порядок push",
+    "selectBrawler": "Выберите файл конфигурации бойца",
+    "priority": "Приоритет",
+    "selectedCount": "Выбрано: {count}",
+    "brawlers": "Бойцы",
+    "noPriority": "Порядок приоритета не выбран"
+  },
+  "remote": {
+    "result": {
+      "1st": "1 место",
+      "2nd": "2 место",
+      "3rd": "3 место (ничья)",
+      "4th": "4 место",
+      "victory": "Победа",
+      "defeat": "Поражение",
+      "draw": "Ничья"
+    },
+    "status": {
+      "runtime": "Время работы",
+      "state": "Состояние",
+      "ips": "IPS",
+      "feed_fps": "FPS потока",
+      "emulator": "Эмулятор",
+      "adb_device": "ADB устройство",
+      "brawler": "Боец",
+      "target": "Цель",
+      "last_match": "Последний матч",
+      "queue_preview": "Очередь",
+      "last_recovery": "Последнее восстановление"
+    },
+    "state": {
+      "running": "Работает",
+      "paused": "Пауза",
+      "stopping": "Остановка"
+    },
+    "queueEmpty": "План фарма пуст.",
+    "queueMore": "  … и ещё {count}",
+    "targetReached": "**{brawler}** достиг цели **{target}**.",
+    "targetReachedGeneric": "Настроенная цель достигнута.",
+    "recoveryDefault": "Pyla-RL выполнил действие восстановления.",
+    "help": {
+      "statusTitle": "Статус Pyla-RL",
+      "discordTitle": "Удалённые команды Pyla-RL",
+      "discordDescription": "Используйте эти slash-команды для управления локальным ботом.",
+      "sectionControl": "Управление",
+      "sectionFarmPlan": "План фарма",
+      "sectionRecovery": "Восстановление",
+      "sectionOther": "Прочее",
+      "discordControlCommands": "/start, /pause, /stop_all, /status, /stats",
+      "discordFarmCommands": "/push, /skip, /remove, /target, /queue",
+      "discordRecoveryCommands": "/restart_game, /restart_scrcpy, /restart_emulator",
+      "discordOtherCommands": "/screenshot, /press, /back, /pause_menu",
+      "telegram": "<b>Команды Telegram Pyla-RL</b>\n<b>Управление</b>\n/status, /stats, /pause, /resume, /quit, /pause_menu\n<b>План фарма</b>\n/push, /skip, /remove, /target, /queue\n<b>Восстановление</b>\n/restart_game, /restart_scrcpy, /restart_emulator\n<b>Прочее</b>\n/screenshot, /back, /press\n\nОтправьте /setup для списка. Сохраните chat ID на вкладке Telegram.",
+      "unknownCommand": "Неизвестная команда. Отправьте /help.",
+      "unknownBrawler": "Неизвестный боец «{name}»."
+    }
+  },
+  "profile": {
+    "balanced": "Хороший вариант по умолчанию: без лимита IPS и 60 FPS эмулятора.",
+    "low_end": "Меньше нагрузка для слабых ноутбуков.",
+    "quality": "Чётче захват для мощных ПК; 60 FPS эмулятора.",
+    "quality_fullres": "Полное разрешение эмулятора (1920) для мощных ПК.",
+    "high_ips": "Максимальная скорость: без оверлеев отладки, меньше проходов зрения."
+  },
+  "preflight": {
+    "adbLabel": "ADB устройство {serial}",
+    "emulatorProcess": "Процесс {emulator}",
+    "resolution": "Разрешение",
+    "brawlStars": "Brawl Stars установлен",
+    "zoom": "Масштаб Windows",
+    "checksTitle": "Проверки перед запуском",
+    "adbFailed": "Проверка ADB не удалась",
+    "gameForeground": "Brawl Stars на переднем плане",
+    "gameInForeground": "На переднем плане",
+    "gameOpenBeforeStart": "Откройте Brawl Stars в эмуляторе перед СТАРТ",
+    "resolutionHint": "Для лучшей точности используйте разрешение 1920x1080",
+    "resolutionLabel": "Рекомендуется 1080p",
+    "zoomOk": "Масштаб дисплея 100%",
+    "zoomFix": "Установите масштаб Windows 100%, чтобы избежать промахов",
+    "fix": {
+      "reconnectAdb": "Переподключить ADB",
+      "startEmulator": "Запустить эмулятор",
+      "launchGame": "Запустить игру",
+      "resolutionHelp": "Справка по разрешению"
+    }
+  },
+  "tutorial": {
+    "fallbackTitle": "Руководство",
+    "openFullGuide": "Открыть полное руководство",
+    "close": "Закрыть",
+    "gettingStarted": {
+      "title": "Начало работы",
+      "tab": "Справка",
+      "summary": "1. Запустите setup.exe в папке проекта.\n2. Запустите pyla-rl.bat (или python app/main.py).\n3. Установите разрешение эмулятора 1920x1080.\n4. Откройте Brawl Stars в эмуляторе перед СТАРТ."
+    },
+    "overview": {
+      "title": "Обзор и СТАРТ",
+      "tab": "Обзор",
+      "summary": "1. Выберите LDPlayer или MuMu, затем Запустить проверки.\n2. Исправьте обязательные ошибки ADB перед СТАРТ.\n3. Выберите режим Showdown Trio и профиль производительности.\n4. Нажмите СТАРТ (один экземпляр) или вкладку Экземпляры (мульти)."
+    },
+    "farmPlan": {
+      "title": "План фарма",
+      "tab": "План фарма",
+      "summary": "1. Добавьте бойцов или Build Queue (Push All).\n2. Перетаскивайте строки; первый боец активен.\n3. Импорт/экспорт JSON для резервной копии.\n4. Оставьте пустым для классического выбора после СТАРТ."
+    },
+    "multiInstance": {
+      "title": "Несколько экземпляров",
+      "tab": "Экземпляры",
+      "summary": "1. Включите мульти-экземпляр на вкладке Экземпляры.\n2. Сканируйте эмуляторы и быстро добавьте экземпляры.\n3. Настройте план фарма для каждого экземпляра.\n4. Запустите готовые, затем Выровнять окна. СТАРТ на Обзоре только в одиночном режиме."
+    },
+    "settings": {
+      "title": "Настройки и производительность",
+      "tab": "Настройки",
+      "summary": "1. Примите лицензию в разделе О программе.\n2. Настройте профиль и отладку.\n3. Фиолетовый круг Spacing Aggression — целевая дистанция в Debug Screen.\n4. После раунда: лобби или Играть снова при победах."
+    },
+    "discord": {
+      "title": "Уведомления Discord",
+      "tab": "Discord",
+      "summary": "1. Webhook URL + Send Match Summary — отчёт после каждой игры.\n2. Ping Every X Matches — упоминание в сводках (опционально).\n3. Heartbeat Every X Minutes — опционально; 0 отключает спам.\n4. Удалённые команды требуют токен бота (отдельно от webhook)."
+    },
+    "telegram": {
+      "title": "Управление Telegram",
+      "tab": "Telegram",
+      "summary": "1. Создайте бота через @BotFather и вставьте токен.\n2. Отправьте /setup боту один раз.\n3. Используйте /status, /pause, /push и другие команды.\n4. Не публикуйте chat ID уведомлений."
+    },
+    "api": {
+      "title": "API Brawl Stars",
+      "tab": "API",
+      "summary": "1. Создайте аккаунт на developer.brawlstars.com.\n2. Заполните тег и данные на вкладке API.\n3. Автозаполнение кубков и Push All.\n4. Не коммитьте токены API в GitHub."
+    },
+    "timers": {
+      "title": "Таймеры и восстановление",
+      "tab": "Таймеры",
+      "summary": "1. Низкий IPS перезапускает scrcpy, игру или эмулятор.\n2. Настройте пороги при частых срабатываниях.\n3. Кулдаун перезапуска эмулятора предотвращает циклы.\n4. Журнал восстановления на вкладке Обзор."
+    },
+    "matchHistory": {
+      "title": "История матчей",
+      "tab": "История матчей",
+      "summary": "1. Просмотр последних матчей и сводки сессии.\n2. Сортировка по играм и другим столбцам.\n3. Сброс истории с вкладки при необходимости.\n4. Discord /stats отражает статистику сессии."
+    },
+    "remoteControl": {
+      "title": "Удалённые команды",
+      "tab": "Справка",
+      "summary": "Discord: /pause, /start, /status, /queue, /push, /skip, /remove, /target, /screenshot.\nTelegram: /pause, /resume, /status, /queue, /push, /skip, /remove, /target, /screenshot.\nМульти-экземпляр: instance:ld-2 (Discord) или третий аргумент (Telegram)."
+    },
+    "troubleshooting": {
+      "title": "Устранение неполадок",
+      "tab": "Справка",
+      "summary": "1. Запустите проверки на Обзоре при проблемах ADB/эмулятора.\n2. python tools/performance_check.py для IPS/GPU.\n3. Два ADB: переподключите отладку эмулятора.\n4. См. logs/recovery_events.jsonl для авто-восстановления."
+    }
+  },
+  "discord": {
+    "sendTest": "Тест Discord"
+  },
+  "telegram": {
+    "sendTest": "Тест Telegram"
+  },
+  "api": {
+    "testConfig": "Тест API"
+  },
+  "matchHistory": {
+    "title": "ИСТОРИЯ МАТЧЕЙ",
+    "exportCsv": "Экспорт CSV"
+  },
+  "help": {
+    "featureGuides": {
+      "title": "РУКОВОДСТВА"
+    },
+    "openGuide": "Открыть руководство"
+  }
+}

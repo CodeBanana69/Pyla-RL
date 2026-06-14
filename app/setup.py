@@ -95,6 +95,7 @@ def setup_pyla():
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
         "opencv-python==4.8.0.76", "requests>=2.34.0", "pandas>=2.0.0", "ultralytics", "aiohttp",
         "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0",
+        "onnxconverter-common>=1.14.0",
     ]
     force_install(base_reqs)
     force_install(["easyocr"], no_deps=True)

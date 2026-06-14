@@ -97,6 +97,9 @@ class ProviderSelectionTests(unittest.TestCase):
         detector.input_name = "input"
         detector.classes = ["player"]
         detector.ignore_classes = set()
+        detector._use_io_binding = False
+        detector._io_binding = None
+        detector._input_ortvalue = None
         detector.preprocess_image = Mock(return_value=(np.zeros((1, 3, 10, 10), dtype=np.float32), 10, 10))
         detector.postprocess = Mock(return_value=[])
         detector._fallback_after_runtime_failure = Mock(return_value=True)

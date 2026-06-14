@@ -81,7 +81,21 @@ class RuntimeMetricsTests(unittest.TestCase):
             self.assertEqual(data["session"]["session_wins"], 3)
             self.assertEqual(data["session"]["session_losses"], 1)
 
-    def test_read_metrics_without_session_still_works(self):
+    def test_write_read_perf_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metrics.json"
+            write_metrics(
+                path,
+                20.0,
+                30.0,
+                [19.0, 20.0],
+                perf={"infer_ms": 12.5, "decide_ms": 4.0, "idle_ms": 1.5},
+            )
+            data = read_metrics(path)
+            self.assertAlmostEqual(data["infer_ms"], 12.5)
+            self.assertAlmostEqual(data["decide_ms"], 4.0)
+            self.assertAlmostEqual(data["idle_ms"], 1.5)
+
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "metrics.json"
             path.write_text('{"ips": 9.5, "feed_fps": 30.0, "history": [9.5]}', encoding="utf-8")

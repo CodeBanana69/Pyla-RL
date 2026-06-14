@@ -58,6 +58,18 @@ class TrophyObserverTests(unittest.TestCase):
             "session_draws": 1,
         })
 
+    def test_started_trophies_uses_push_session_not_pre_match_value(self):
+        observer = TrophyObserver()
+        observer.current_trophies = 500
+        observer.begin_brawler_push("shelly", 420)
+        playstyle = {"name": "test", "gamemodes": [], "brawlers": []}
+
+        with patch.object(observer, "save_history"), patch.object(observer, "send_results_to_api"):
+            observer.add_trophies("victory", "shelly", playstyle)
+
+        self.assertEqual(observer.last_match_record["started_trophies"], 420)
+        self.assertEqual(observer.last_match_record["trophies"], 500 + observer.last_match_record["trophy_delta"])
+
 
 if __name__ == "__main__":
     unittest.main()

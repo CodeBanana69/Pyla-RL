@@ -26,14 +26,18 @@ class PerformanceThrottleTests(unittest.TestCase):
         play.wall_detection_retry_min_objects = 3
         play.last_wall_primary_count = 8
         play.Detect_tile_detector = MagicMock()
-        play.Detect_tile_detector.detect_objects.side_effect = [
+        play.Detect_tile_detector.detect_objects_dual.return_value = (
             {"wall": [[0, 0, 10, 10]]},
             {"wall": [[0, 0, 10, 10], [20, 20, 30, 30], [40, 40, 50, 50], [60, 60, 70, 70]]},
-        ]
+        )
+        play.Detect_tile_detector.count_objects.side_effect = lambda data: sum(
+            len(boxes or []) for boxes in (data or {}).values()
+        )
 
         play.get_tile_data(object())
 
-        self.assertEqual(play.Detect_tile_detector.detect_objects.call_count, 1)
+        self.assertEqual(play.Detect_tile_detector.detect_objects_dual.call_count, 1)
+        self.assertEqual(play.Detect_tile_detector.detect_objects.call_count, 0)
 
     def test_entity_retry_skips_when_player_recently_seen(self):
         play = object.__new__(Play)
@@ -43,11 +47,18 @@ class PerformanceThrottleTests(unittest.TestCase):
         play.time_since_player_last_found = time.time()
         play.stabilize_entity_roles = lambda _frame, data: data
         play.Detect_main_info = MagicMock()
-        play.Detect_main_info.detect_objects.return_value = {"player": [], "enemy": []}
+        play.Detect_main_info.detect_objects_dual.return_value = (
+            {"player": [], "enemy": []},
+            {"player": [[1, 1, 2, 2]], "enemy": []},
+        )
+        play.Detect_main_info.count_objects.side_effect = lambda data: sum(
+            len(boxes or []) for boxes in (data or {}).values()
+        )
 
         play.get_main_data(object())
 
-        self.assertEqual(play.Detect_main_info.detect_objects.call_count, 1)
+        self.assertEqual(play.Detect_main_info.detect_objects_dual.call_count, 1)
+        self.assertEqual(play.Detect_main_info.detect_objects.call_count, 0)
 
     def test_entity_retry_runs_when_player_missing_for_a_while(self):
         play = object.__new__(Play)
@@ -57,14 +68,17 @@ class PerformanceThrottleTests(unittest.TestCase):
         play.time_since_player_last_found = time.time() - 2.0
         play.stabilize_entity_roles = lambda _frame, data: data
         play.Detect_main_info = MagicMock()
-        play.Detect_main_info.detect_objects.side_effect = [
+        play.Detect_main_info.detect_objects_dual.return_value = (
             {"player": [], "enemy": []},
             {"player": [[1, 1, 2, 2]], "enemy": []},
-        ]
+        )
+        play.Detect_main_info.count_objects.side_effect = lambda data: sum(
+            len(boxes or []) for boxes in (data or {}).values()
+        )
 
         data = play.get_main_data(object())
 
-        self.assertEqual(play.Detect_main_info.detect_objects.call_count, 2)
+        self.assertEqual(play.Detect_main_info.detect_objects_dual.call_count, 1)
         self.assertTrue(data.get("player"))
 
     def test_replay_main_reuses_cached_snapshot_without_onnx(self):

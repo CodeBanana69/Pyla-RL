@@ -18,6 +18,8 @@ class TrophyObserver:
         self.win_streak = 0
         self.match_counter = 0  # New counter for the number of matches
         self.last_match_record = None
+        self.push_session_brawler = ""
+        self.push_session_started_trophies = None
         self.trophy_lose_ranges = [(49, 0), (299, 1), (599, 2), (799, 3), (999, 4), (1099, 5), (1199, 6), (1299, 7),
                                    (1499, 8), (1799, 9), (3999, 10), (float("inf"), 15)]
         self.trophy_win_ranges = [(1999, 10), (2499, 8), (2799, 6), (2999, 4), (3099, 2), (float("inf"), 1)]
@@ -118,10 +120,13 @@ class TrophyObserver:
             trophy_delta = 0
         self._record_session_result(game_result)
         self.current_trophies += trophy_delta
+        started_trophies = self.push_started_trophies_for(current_brawler)
+        if started_trophies is None:
+            started_trophies = old
         self.last_match_record = {
             "brawler": current_brawler,
             "result": display_result,
-            "started_trophies": old,
+            "started_trophies": started_trophies,
             "trophy_delta": trophy_delta,
             "trophies": self.current_trophies,
             "win_streak": self.win_streak,
@@ -159,6 +164,27 @@ class TrophyObserver:
     def change_trophies(self, new):
         print(f"Trophies changed from {self.current_trophies} to {new}")
         self.current_trophies = new
+
+    def begin_brawler_push(self, brawler_name, started_trophies=None):
+        from utils import normalize_brawler_name
+
+        self.push_session_brawler = normalize_brawler_name(brawler_name)
+        if started_trophies is None:
+            started_trophies = self.current_trophies
+        try:
+            self.push_session_started_trophies = int(started_trophies)
+        except (TypeError, ValueError):
+            self.push_session_started_trophies = int(self.current_trophies or 0)
+
+    def push_started_trophies_for(self, brawler_name):
+        from utils import normalize_brawler_name
+
+        if (
+            self.push_session_started_trophies is not None
+            and normalize_brawler_name(brawler_name) == self.push_session_brawler
+        ):
+            return self.push_session_started_trophies
+        return None
 
     def send_results_to_api(self):
         new_matches = self.match_history.iloc[self.last_sent_index:]

@@ -114,6 +114,15 @@ class StageManager:
         self.last_recorded_result_time = 0.0
         self.stop_after_post_match_rewards = False
         self._stuck_nudge_sent: set[str] = set()
+        if self.brawlers_pick_data:
+            front = self.brawlers_pick_data[0]
+            self.Trophy_observer.begin_brawler_push(
+                front.get("brawler", ""),
+                self._number_or_default(front.get("trophies"), 0),
+            )
+            self.Trophy_observer.current_trophies = self._number_or_default(front.get("trophies"), 0)
+            self.Trophy_observer.current_wins = self._number_or_default(front.get("wins"), 0)
+            self.Trophy_observer.win_streak = self._number_or_default(front.get("win_streak"), 0)
 
     def _should_stop(self):
         return bool(self.runtime_control and self.runtime_control.should_stop())
@@ -434,6 +443,10 @@ class StageManager:
         self.brawlers_pick_data.pop(0)
         next_data = self.brawlers_pick_data[0]
         self.Trophy_observer.change_trophies(next_data.get("trophies", 0))
+        self.Trophy_observer.begin_brawler_push(
+            next_data.get("brawler", ""),
+            self._number_or_default(next_data.get("trophies"), 0),
+        )
         self.Trophy_observer.current_wins = next_data.get("wins", 0) if next_data.get("wins", "") != "" else 0
         self.Trophy_observer.win_streak = next_data.get("win_streak", 0)
         save_brawler_data(self.brawlers_pick_data)
@@ -651,10 +664,18 @@ class StageManager:
                 if not selected:
                     return
                 self.Trophy_observer.change_trophies(self.brawlers_pick_data[0]['trophies'])
+                self.Trophy_observer.begin_brawler_push(
+                    self.brawlers_pick_data[0].get("brawler", ""),
+                    self._number_or_default(self.brawlers_pick_data[0].get("trophies"), 0),
+                )
                 self.Trophy_observer.current_wins = self.brawlers_pick_data[0]['wins'] if self.brawlers_pick_data[0]['wins'] != "" else 0
                 self.Trophy_observer.win_streak = self.brawlers_pick_data[0]['win_streak']
             else:
                 self.Trophy_observer.change_trophies(self.brawlers_pick_data[0]['trophies'])
+                self.Trophy_observer.begin_brawler_push(
+                    self.brawlers_pick_data[0].get("brawler", ""),
+                    self._number_or_default(self.brawlers_pick_data[0].get("trophies"), 0),
+                )
                 self.Trophy_observer.current_wins = self.brawlers_pick_data[0]['wins'] if self.brawlers_pick_data[0]['wins'] != "" else 0
                 self.Trophy_observer.win_streak = self.brawlers_pick_data[0]['win_streak']
                 print("Next brawler is in manual mode, waiting 10 seconds to let user switch.")
@@ -1062,6 +1083,10 @@ class StageManager:
         self._queue_file_mtime = None
         if new_front and old_front and new_front != old_front:
             self.pending_brawler_reselection = True
+            self.Trophy_observer.begin_brawler_push(
+                normalized[0].get("brawler", ""),
+                self._number_or_default(normalized[0].get("trophies"), 0),
+            )
         return True
 
     def do_state(self, state, data=None):

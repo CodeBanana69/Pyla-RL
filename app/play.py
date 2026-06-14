@@ -111,6 +111,8 @@ class Play:
                 self.centered_wall_detection = False
         self.Detect_centered_tile_detector = self.Detect_close_tile_detector
         self.last_tile_detection_debug = None
+        self.match_warmup_seconds = float(bot_config.get("match_warmup_seconds", 10.0) or 0.0)
+        self._match_warmup_done = False
 
         self.time_since_walls_checked = 0
         self.time_since_player_last_found = time.time()
@@ -123,8 +125,9 @@ class Play:
         }
         self.time_since_last_proceeding = time.time()
 
-        self.last_movement = ''
+        self.last_movement = None
         self.last_movement_change_time = time.time()
+        self._last_commanded_movement = None
         self.minimum_movement_delay = bot_config["minimum_movement_delay"]
         self.no_detection_proceed_delay = time_config["no_detection_proceed"]
         self.gadget_pixels_minimum = bot_config["gadget_pixels_minimum"]
@@ -157,6 +160,8 @@ class Play:
         wall_interval = float(time_config.get("wall_detection_interval_seconds", 0) or 0)
         self.walls_treshold = max(float(time_config["wall_detection"]), wall_interval)
         self._cached_play_snapshot = None
+        self.last_perceive_ms = 0.0
+        self.last_decide_ms = 0.0
         self.seconds_to_hold_attack_after_reaching_max = load_toml_as_dict("cfg/bot_config.toml")["seconds_to_hold_attack_after_reaching_max"]
         self.persistent_data = {"time_since_holding_attack": None}
         self.pyla_code = pyla_code
@@ -1058,21 +1063,27 @@ class Play:
         return data
 
     def get_main_data(self, frame):
-        data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
-        data = self.stabilize_entity_roles(frame, data)
+        primary_conf = self.entity_detection_confidence
+        retry_conf = self.entity_detection_retry_confidence
+        if retry_conf >= primary_conf:
+            data = self.Detect_main_info.detect_objects(frame, conf_tresh=primary_conf)
+            return self.stabilize_entity_roles(frame, data)
+
+        primary_data, retry_data = self.Detect_main_info.detect_objects_dual(
+            frame,
+            primary_conf,
+            retry_conf,
+        )
+        data = self.stabilize_entity_roles(frame, primary_data)
         if data.get("player"):
             return data
         recently_seen = (time.time() - self.time_since_player_last_found) <= self.entity_retry_grace_seconds
-        if recently_seen or self.entity_detection_retry_confidence >= self.entity_detection_confidence:
+        if recently_seen:
             return data
-        retry_data = self.Detect_main_info.detect_objects(
-            frame,
-            conf_tresh=self.entity_detection_retry_confidence,
-        )
         retry_data = self.stabilize_entity_roles(frame, retry_data)
         if retry_data.get("player"):
             return retry_data
-        if sum(len(boxes or []) for boxes in retry_data.values()) > sum(len(boxes or []) for boxes in data.values()):
+        if self.Detect_main_info.count_objects(retry_data) > self.Detect_main_info.count_objects(data):
             return retry_data
         return data
 
@@ -1219,9 +1230,50 @@ class Play:
     def do_movement(self, movement):
         movement_vector = self.movement_to_vector(movement)
         if movement_vector is None:
+            self._last_commanded_movement = None
             self.window_controller.release_movement()
             return
+        self._last_commanded_movement = movement_vector
         self.window_controller.move(*movement_vector)
+
+    def sustain_movement(self):
+        vector = self._last_commanded_movement
+        if vector is None:
+            return
+        self.window_controller.move(*vector)
+
+    def reset_match_control_state(self):
+        self._match_warmup_done = False
+
+    def warmup_match_inference(self, frame):
+        if self._match_warmup_done or self.match_warmup_seconds <= 0:
+            return False
+
+        import runtime_log
+        from pathlib import Path
+
+        detectors = [
+            ("main", self.Detect_main_info),
+            ("wall", self.Detect_tile_detector),
+        ]
+        if self.Detect_close_tile_detector is not None:
+            detectors.append(("close_wall", self.Detect_close_tile_detector))
+
+        runtime_log.log_info(
+            "perf",
+            f"Starting inference warmup {self.match_warmup_seconds:.0f}s into match "
+            f"({len(detectors)} model{'s' if len(detectors) != 1 else ''})...",
+        )
+        total_ms = 0.0
+        for name, detector in detectors:
+            model_name = Path(detector.model_path).name
+            elapsed = detector.warmup_frame(frame, label=f"{name}:{model_name}")
+            if elapsed is not None:
+                total_ms += elapsed
+
+        self._match_warmup_done = True
+        runtime_log.log_info("perf", f"Match inference warmup complete ({total_ms:.1f}ms total).")
+        return True
 
     def get_brawler_range(self, brawler):
         if self.brawler_ranges is None:
@@ -1897,17 +1949,18 @@ class Play:
 
         if self.movement_to_vector(movement) is None:
             self.window_controller.release_movement()
-            self.last_movement = ''
+            self.last_movement = None
             return None
         movement = self.clamp_movement(movement)
         current_time = time.time()
         if not escape_override:
             if movement != self.last_movement:
-                if current_time - self.last_movement_change_time >= self.minimum_movement_delay:
+                prior = self.movement_to_vector(self.last_movement)
+                if prior is None or current_time - self.last_movement_change_time >= self.minimum_movement_delay:
                     self.last_movement = movement
                     self.last_movement_change_time = current_time
                 else:
-                    movement = self.last_movement
+                    movement = prior
             else:
                 self.last_movement_change_time = current_time
             movement = self.unstuck_movement_if_needed(movement, current_time)
@@ -2041,22 +2094,24 @@ class Play:
     offset_tile_boxes = offset_tile_data
 
     def _detect_tile_data(self, detector, frame, conf_tresh):
-        tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
-        primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
+        retry_conf = self.wall_detection_retry_confidence
+        if retry_conf >= conf_tresh:
+            tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
+            primary_count = detector.count_objects(tile_data)
+        else:
+            tile_data, retry_data = detector.detect_objects_dual(frame, conf_tresh, retry_conf)
+            primary_count = detector.count_objects(tile_data)
+            previous_primary_count = self.last_wall_primary_count
+            if (
+                primary_count < self.wall_detection_retry_min_objects
+                and previous_primary_count < self.wall_detection_retry_min_objects
+            ):
+                retry_count = detector.count_objects(retry_data)
+                if retry_count > primary_count:
+                    tile_data = retry_data
+                    primary_count = retry_count
         previous_primary_count = self.last_wall_primary_count
         self.last_wall_primary_count = primary_count
-        if (
-            primary_count < self.wall_detection_retry_min_objects
-            and previous_primary_count < self.wall_detection_retry_min_objects
-            and self.wall_detection_retry_confidence < conf_tresh
-        ):
-            retry_data = detector.detect_objects(
-                frame,
-                conf_tresh=self.wall_detection_retry_confidence,
-            )
-            retry_count = sum(len(boxes or []) for boxes in (retry_data or {}).values())
-            if retry_count > primary_count:
-                tile_data = retry_data
         return tile_data
 
     def get_tile_data(self, frame, player_data=None):
@@ -2643,41 +2698,97 @@ class Play:
 
         debug_view.publish(frame, debug_data)
 
-    def main(self, frame, brawler, main, replay=False):
+    def perceive(self, frame, current_time=None):
+        perceive_start = time.perf_counter()
+        current_time = current_time or time.time()
+        data = self.get_main_data(frame)
+        if current_time - self.time_since_walls_checked > self.walls_treshold:
+            tile_data = self.get_tile_data(frame, data.get("player"))
+            walls, map_objects = self.process_tile_data(tile_data, frame)
+            line_of_sight_walls = self.map_object_boxes_for_classes(
+                map_objects,
+                self.line_of_sight_map_object_classes(),
+            )
+            bushes = self.map_object_boxes_for_classes(
+                map_objects,
+                {"bush", "close_bush"},
+            )
+            self.time_since_walls_checked = current_time
+            self.last_walls_data = walls
+            self.last_map_object_data = map_objects
+            self.last_bushes_data = bushes
+            data['wall'] = walls
+            data['line_of_sight_wall'] = line_of_sight_walls
+            data['map_objects'] = map_objects
+            data['bushes'] = bushes
+        else:
+            data['wall'] = self.last_walls_data
+            data['bushes'] = self.last_bushes_data
+            data['map_objects'] = self.last_map_object_data
+            data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
+                self.last_map_object_data,
+                self.line_of_sight_map_object_classes(),
+            )
+        self.last_perceive_ms = (time.perf_counter() - perceive_start) * 1000.0
+        return data
+
+    def perceive_concurrent(self, frame, current_time=None):
+        """Run entity and wall detection concurrently when wall tick is due."""
+        current_time = current_time or time.time()
+        if current_time - self.time_since_walls_checked <= self.walls_treshold:
+            return self.perceive(frame, current_time=current_time)
+
+        needs_player_crop = (
+            self.close_tile_detector_enabled
+            and self.Detect_close_tile_detector is not None
+        )
+        if needs_player_crop:
+            return self.perceive(frame, current_time=current_time)
+
+        perceive_start = time.perf_counter()
+        entity_result = {}
+        wall_result = {}
+
+        def run_entity():
+            entity_result["data"] = self.get_main_data(frame)
+
+        def run_wall():
+            tile_data = self.get_tile_data(frame, None)
+            walls, map_objects = self.process_tile_data(tile_data, frame)
+            wall_result["walls"] = walls
+            wall_result["map_objects"] = map_objects
+            wall_result["line_of_sight_walls"] = self.map_object_boxes_for_classes(
+                map_objects,
+                self.line_of_sight_map_object_classes(),
+            )
+            wall_result["bushes"] = self.map_object_boxes_for_classes(
+                map_objects,
+                {"bush", "close_bush"},
+            )
+
+        entity_thread = threading.Thread(target=run_entity, daemon=True)
+        wall_thread = threading.Thread(target=run_wall, daemon=True)
+        entity_thread.start()
+        wall_thread.start()
+        entity_thread.join()
+        wall_thread.join()
+
+        data = entity_result.get("data") or {}
+        self.time_since_walls_checked = current_time
+        self.last_walls_data = wall_result.get("walls", [])
+        self.last_map_object_data = wall_result.get("map_objects", {})
+        self.last_bushes_data = wall_result.get("bushes", [])
+        data['wall'] = self.last_walls_data
+        data['line_of_sight_wall'] = wall_result.get("line_of_sight_walls", [])
+        data['map_objects'] = self.last_map_object_data
+        data['bushes'] = self.last_bushes_data
+        self.last_perceive_ms = (time.perf_counter() - perceive_start) * 1000.0
+        return data
+
+    def decide(self, frame, data, brawler, main, *, replay=False, snapshot_on_success=True):
+        decide_start = time.perf_counter()
         current_time = time.time()
         state = main.get_latest_state()
-        if replay and self._cached_play_snapshot is not None:
-            data = self._restore_play_data(self._cached_play_snapshot)
-        else:
-            data = self.get_main_data(frame)
-            if current_time - self.time_since_walls_checked > self.walls_treshold:
-                tile_data = self.get_tile_data(frame, data.get("player"))
-                walls, map_objects = self.process_tile_data(tile_data, frame)
-                line_of_sight_walls = self.map_object_boxes_for_classes(
-                    map_objects,
-                    self.line_of_sight_map_object_classes(),
-                )
-                bushes = self.map_object_boxes_for_classes(
-                    map_objects,
-                    {"bush", "close_bush"},
-                )
-                self.time_since_walls_checked = current_time
-                self.last_walls_data = walls
-                self.last_map_object_data = map_objects
-                self.last_bushes_data = bushes
-                data['wall'] = walls
-                data['line_of_sight_wall'] = line_of_sight_walls
-                data['map_objects'] = map_objects
-                data['bushes'] = bushes
-            else:
-                data['wall'] = self.last_walls_data
-                data['bushes'] = self.last_bushes_data
-                data['map_objects'] = self.last_map_object_data
-                data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
-                    self.last_map_object_data,
-                    self.line_of_sight_map_object_classes(),
-                )
-
         data = self.validate_game_data(data)
         self.track_no_detections(data)
         if data:
@@ -2703,16 +2814,36 @@ class Play:
                     self.window_controller.press("proceed")
                     self.time_since_last_proceeding = time.time()
             self.publish_debug_view(frame, data, state)
-            return
+            self.last_decide_ms = (time.perf_counter() - decide_start) * 1000.0
+            return None
+
         self.time_since_last_proceeding = time.time()
         self.refresh_ready_abilities(frame, current_time)
         self.frame = frame
         movement = self.loop(brawler, data, current_time)
         self.publish_debug_view(frame, data, state, movement)
-        if not replay:
+        if snapshot_on_success and not replay:
             self._cached_play_snapshot = self._snapshot_play_data(data)
-        if movement is not None:
+        if self.movement_to_vector(movement) is not None:
             self.do_movement(movement)
+        self.last_decide_ms = (time.perf_counter() - decide_start) * 1000.0
+        return movement
+
+    def main(self, frame, brawler, main, replay=False, snapshot_on_success=True):
+        current_time = time.time()
+        if replay and self._cached_play_snapshot is not None:
+            data = self._restore_play_data(self._cached_play_snapshot)
+            self.last_perceive_ms = 0.0
+        else:
+            data = self.perceive(frame, current_time=current_time)
+        return self.decide(
+            frame,
+            data,
+            brawler,
+            main,
+            replay=replay,
+            snapshot_on_success=snapshot_on_success,
+        )
 
 
 Movement = Play

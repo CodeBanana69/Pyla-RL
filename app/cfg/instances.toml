@@ -3,3 +3,7 @@ enabled = false
 default_instance = ""
 
 [instances]
+
+# Kept from your previous config
+setup_wizard_dismissed = false
+auto_restart_crashed = false

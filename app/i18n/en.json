@@ -1,0 +1,423 @@
+{
+  "app": {
+    "title": {
+      "hub": "Pyla-RL Hub",
+      "settings": "Pyla-RL Settings"
+    }
+  },
+  "nav": {
+    "overview": "Overview",
+    "instances": "Instances",
+    "farmPlan": "Farm Plan",
+    "settings": "Settings",
+    "discord": "Discord",
+    "telegram": "Telegram",
+    "api": "API",
+    "timers": "Timers",
+    "matchHistory": "Match History",
+    "help": "Help",
+    "farmPlanCount": "Farm Plan ({count})"
+  },
+  "brand": {
+    "productName": "Pyla-RL",
+    "freeNotice": "Pyla-RL is free, open source, and must not be sold.",
+    "footerNotice": "Pyla is free, public, and open-source.",
+    "licenseName": "CC BY-NC 4.0",
+    "downloadNotice": "Download only from GitHub or Pyla Discord.",
+    "licenseLine": "{product} is free and open source under {license}. You may use and modify it, but you must not sell or resell it.",
+    "licenseShort": "{product} is free. Licensed under {license}."
+  },
+  "wizard": {
+    "language": {
+      "title": "Choose language / Выберите язык",
+      "subtitle": "Hub, pause menu, and bot messages will use this language. / Хаб, меню паузы и сообщения бота будут на этом языке.",
+      "english": "English",
+      "russian": "Русский"
+    },
+    "step1": {
+      "title": "Step 1: Free Use License"
+    },
+    "step2": {
+      "title": "Step 2: Environment",
+      "body": "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview. Full guides for every feature are in the Help tab."
+    },
+    "step3": {
+      "title": "Step 3: Optional Setup",
+      "body": "Optional: configure Discord, Telegram, or API tabs for notifications and remote control. See the Help tab for setup tutorials."
+    },
+    "step4": {
+      "title": "Step 4: Farm Plan",
+      "body": "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty. Open Help anytime for full guides."
+    },
+    "licenseText": "I understand Pyla-RL is free and I will not sell it.",
+    "licenseHint": "Select the agreement above to enable Next.",
+    "back": "Back",
+    "runChecks": "Run Checks",
+    "openHelp": "Open Help",
+    "next": "Next",
+    "finish": "Finish"
+  },
+  "settings": {
+    "language": {
+      "title": "LANGUAGE",
+      "hint": "Pause menu and remote replies use this language after restart or reopening the pause menu.",
+      "english": "English",
+      "russian": "Русский"
+    },
+    "about": {
+      "title": "ABOUT",
+      "accept": "Accept"
+    },
+    "behavior": {
+      "afterRound": "After Round",
+      "returnToLobby": "Return to lobby",
+      "playAgain": "Play again"
+    }
+  },
+  "chrome": {
+    "brand": "Pyla",
+    "subtitle": {
+      "hub": "Pyla-RL Hub",
+      "settingsRunning": "Pyla-RL Settings (bot running)"
+    },
+    "startBar": {
+      "ready": "Ready to start",
+      "runChecks": "Run pre-flight checks on Overview",
+      "start": "START",
+      "close": "CLOSE",
+      "checks": "Checks"
+    }
+  },
+  "footer": {
+    "joinDiscord": "Join Discord",
+    "supportPatreon": "Support on Patreon"
+  },
+  "status": {
+    "saved": "Saved",
+    "working": "Working...",
+    "waitForAction": "Please wait for the current hub action to finish.",
+    "checkingPreflight": "Checking pre-flight...",
+    "invalidTrophyTarget": "Enter a valid trophy target.",
+    "farmPlanEmpty": "Farm plan is empty.",
+    "restartForDebugScreen": "Restart bot to apply Debug Screen changes."
+  },
+  "overview": {
+    "preflight": {
+      "title": "PRE-FLIGHT CHECKS",
+      "description": "Verify emulator and ADB before START. Use 1920x1080 and 100% Windows scaling.",
+      "runChecks": "Run Checks",
+      "testConnection": "Test Connection",
+      "recoveryLog": "Recovery Log",
+      "fix": "Fix"
+    },
+    "performance": {
+      "title": "PERFORMANCE PROFILE",
+      "balanced": "balanced",
+      "lowEnd": "low-end",
+      "quality": "quality",
+      "highIps": "high-ips"
+    },
+    "gameMode": {
+      "title": "GAME MODE",
+      "brawlBall": "Brawl Ball",
+      "showdownTrio": "Showdown Trio"
+    },
+    "emulator": {
+      "title": "EMULATOR",
+      "ldplayer": "LDPlayer",
+      "mumu": "MuMu"
+    },
+    "unofficialCopy": {
+      "title": "UNOFFICIAL COPY",
+      "officialGithub": "Official GitHub",
+      "pylaDiscord": "Pyla Discord"
+    }
+  },
+  "instances": {
+    "readiness": {
+      "unknown": "Unknown",
+      "ready": "Ready",
+      "needsFarmPlan": "Needs farm plan",
+      "portConflict": "Port conflict",
+      "noEmulator": "No emulator"
+    },
+    "multiInstance": {
+      "title": "MULTI-INSTANCE MODE",
+      "enable": "Enable Multi-Instance",
+      "scanEmulators": "Scan Emulators",
+      "startAllReady": "Start All Ready",
+      "stopAll": "Stop All"
+    },
+    "add": {
+      "saveInstance": "Save Instance"
+    },
+    "configured": {
+      "start": "Start",
+      "stop": "Stop",
+      "delete": "Delete"
+    }
+  },
+  "farmPlan": {
+    "sort": {
+      "cupsHighToLow": "Cups high → low",
+      "cupsLowToHigh": "Cups low → high",
+      "closestToTarget": "Closest to target",
+      "furthestFromTarget": "Furthest from target",
+      "targetHighToLow": "Target high → low",
+      "targetLowToHigh": "Target low → high",
+      "nameAToZ": "Name A → Z",
+      "nameZToA": "Name Z → A",
+      "bestTrophiesPerHour": "Best trophies/hour"
+    },
+    "pushAll": {
+      "buildQueue": "Build Queue"
+    },
+    "queue": {
+      "add": "Add",
+      "emptyTitle": "No brawlers in the farm plan yet"
+    }
+  },
+  "hub": {
+    "action": {
+      "anotherRunning": "Another hub action is still running.",
+      "actionFailed": "Hub action failed.",
+      "actionTimeout": "Hub action timed out. You can try again. If checks never finish, restart the Hub and confirm the emulator is running.",
+      "preflightRunning": "Running pre-flight checks...",
+      "testEmulatorRunning": "Testing emulator connection...",
+      "buildQueueRunning": "Building farm plan...",
+      "startingPyla": "Checking pre-flight...",
+      "licenseAccepted": "License accepted. Pyla-RL is free and must not be sold.",
+      "preflightReady": "Ready to start.",
+      "preflightFixRequired": "Fix required checks before START.",
+      "preflightFailedStart": "Pre-flight checks failed. Run checks on Overview and fix required items.",
+      "startingMessage": "Starting Pyla-RL...",
+      "emulatorOk": "Emulator connection OK: {detail}",
+      "emulatorFailed": "Emulator connection failed: {detail}",
+      "farmPlanImported": "Imported {count} brawler(s) from {name}.",
+      "farmPlanExported": "Exported {count} brawler(s) to {name}.",
+      "queueCleared": "Farm plan cleared.",
+      "queueBuilt": "Built Push All queue with {count} brawler(s) to {target} trophies.",
+      "instanceSaved": "Saved instance '{id}'.",
+      "settingsSaved": "Instance settings saved.",
+      "farmPlanCopied": "Farm plan copied.",
+      "wizardComplete": "Setup wizard completed.",
+      "wizardReopened": "Setup wizard reopened.",
+      "wizardReset": "Setup wizard will show again on next launch. Opening it now.",
+      "apiTestRunning": "Testing Brawl Stars API...",
+      "sortQueueRunning": "Sorting farm plan...",
+      "importQueueRunning": "Importing farm plan...",
+      "calibrateRunning": "Calibrating performance profile...",
+      "checkUpdatesRunning": "Checking for updates...",
+      "exportHistoryRunning": "Exporting match history...",
+      "refreshHistoryRunning": "Refreshing match history...",
+      "multiInstanceNotRunning": "Multi-instance service is not running.",
+      "webhookTestSent": "Webhook test sent.",
+      "settingsDisabledWhileRunning": "START is disabled while the bot is running. Close this window when finished editing settings.",
+      "multiInstanceUseInstances": "Multi-instance mode is enabled. Start bots from the Instances tab.",
+      "licenseRequiredBeforeStart": "Accept the free-use license in the hub wizard or Settings → About before START.",
+      "openedFile": "Opened {name}"
+    }
+  },
+  "pause": {
+    "title": "Pyla  ·  Control",
+    "status": "STATUS",
+    "running": "Running",
+    "paused": "Paused",
+    "pauseBot": "Pause Bot",
+    "resumeBot": "Resume Bot",
+    "pause": "Pause",
+    "resume": "Resume",
+    "settings": "Settings",
+    "quit": "Quit",
+    "ipsFeed": "IPS {ips} · Feed {feed}",
+    "ipsEmpty": "IPS -- · Feed --",
+    "sessionWins": "W{wins} L{losses} · IPS {ips} · {feed}",
+    "stopBot": "Stop Bot",
+    "openHub": "Open Hub",
+    "copied": "Copied!",
+    "hub": "Hub"
+  },
+  "login": {
+    "title": "API Key Login",
+    "prompt": "Enter API Key:",
+    "placeholder": "API Key",
+    "button": "Login",
+    "success": "Login Successful!",
+    "invalid": "Invalid API Key"
+  },
+  "select": {
+    "title": "Pyla-RL",
+    "search": "Search brawler",
+    "pushAll": "Push All",
+    "startPyla": "Start Pyla",
+    "pushOrder": "Push Order",
+    "selectBrawler": "Select Brawler Config File",
+    "priority": "Priority",
+    "selectedCount": "{count} selected",
+    "brawlers": "Brawlers",
+    "noPriority": "No priority order selected"
+  },
+  "remote": {
+    "result": {
+      "1st": "1st Place",
+      "2nd": "2nd Place",
+      "3rd": "3rd Place (Tie)",
+      "4th": "4th Place",
+      "victory": "Victory",
+      "defeat": "Defeat",
+      "draw": "Draw"
+    },
+    "status": {
+      "runtime": "Runtime",
+      "state": "State",
+      "ips": "IPS",
+      "feed_fps": "Feed FPS",
+      "emulator": "Emulator",
+      "adb_device": "ADB Device",
+      "brawler": "Brawler",
+      "target": "Target",
+      "last_match": "Last Match",
+      "queue_preview": "Queue",
+      "last_recovery": "Last Recovery"
+    },
+    "state": {
+      "running": "Running",
+      "paused": "Paused",
+      "stopping": "Stopping"
+    },
+    "queueEmpty": "Farm plan is empty.",
+    "queueMore": "  … and {count} more",
+    "targetReached": "**{brawler}** reached the target at **{target}**.",
+    "targetReachedGeneric": "Configured target reached.",
+    "recoveryDefault": "Pyla-RL triggered a recovery action.",
+    "help": {
+      "statusTitle": "Pyla-RL status",
+      "discordTitle": "Pyla-RL Remote Commands",
+      "discordDescription": "Use these slash commands to control your local bot instance.",
+      "sectionControl": "Control",
+      "sectionFarmPlan": "Farm Plan",
+      "sectionRecovery": "Recovery",
+      "sectionOther": "Other",
+      "discordControlCommands": "/start, /pause, /stop_all, /status, /stats",
+      "discordFarmCommands": "/push, /skip, /remove, /target, /queue",
+      "discordRecoveryCommands": "/restart_game, /restart_scrcpy, /restart_emulator",
+      "discordOtherCommands": "/screenshot, /press, /back, /pause_menu",
+      "telegram": "<b>Pyla-RL Telegram commands</b>\n<b>Control</b>\n/status, /stats, /pause, /resume, /quit, /pause_menu\n<b>Farm Plan</b>\n/push, /skip, /remove, /target, /queue\n<b>Recovery</b>\n/restart_game, /restart_scrcpy, /restart_emulator\n<b>Other</b>\n/screenshot, /back, /press\n\nUse /setup to show this list. Save this chat ID in the Telegram tab before control commands work.",
+      "unknownCommand": "Unknown command. Send /help.",
+      "unknownBrawler": "Unknown brawler '{name}'."
+    }
+  },
+  "profile": {
+    "balanced": "Good default for most PCs: uncapped bot loop with a 60 FPS emulator feed.",
+    "low_end": "Lower heat/CPU profile for older laptops or thermal throttling.",
+    "quality": "Sharper capture for strong PCs; uncapped bot loop with a 60 FPS emulator feed.",
+    "quality_fullres": "Full-resolution emulator capture for strong PCs (1920 native width).",
+    "high_ips": "Maximum throughput: debug overlays off, fewer vision passes, tuned duplicate-frame replay."
+  },
+  "preflight": {
+    "adbLabel": "ADB device {serial}",
+    "emulatorProcess": "{emulator} process",
+    "resolution": "Resolution",
+    "brawlStars": "Brawl Stars installed",
+    "zoom": "Windows display scaling",
+    "checksTitle": "Pre-flight checks",
+    "adbFailed": "ADB check failed",
+    "gameForeground": "Brawl Stars foreground",
+    "gameInForeground": "In foreground",
+    "gameOpenBeforeStart": "Open Brawl Stars on the emulator before START",
+    "resolutionHint": "Use 1920x1080 emulator resolution for best accuracy",
+    "resolutionLabel": "1080p recommended",
+    "zoomOk": "Display scaling is 100%",
+    "zoomFix": "Set Windows display scaling to 100% to avoid misclicks",
+    "fix": {
+      "reconnectAdb": "Reconnect ADB",
+      "startEmulator": "Start Emulator",
+      "launchGame": "Launch Game",
+      "resolutionHelp": "Resolution Help"
+    }
+  },
+  "tutorial": {
+    "fallbackTitle": "Guide",
+    "openFullGuide": "Open full guide",
+    "close": "Close",
+    "gettingStarted": {
+      "title": "Getting Started",
+      "tab": "Help",
+      "summary": "1. Run setup.exe in the project folder.\n2. Launch pyla-rl.bat (or python app/main.py).\n3. Set emulator resolution to 1920x1080.\n4. Open Brawl Stars in the emulator before START."
+    },
+    "overview": {
+      "title": "Overview and START",
+      "tab": "Overview",
+      "summary": "1. Pick LDPlayer or MuMu, then Run Checks.\n2. Fix required ADB failures before START.\n3. Choose Showdown Trio mode and a performance profile.\n4. Press START (single-instance) or use Instances tab (multi-instance)."
+    },
+    "farmPlan": {
+      "title": "Farm Plan",
+      "tab": "Farm Plan",
+      "summary": "1. Add brawlers or use Build Queue (Push All).\n2. Drag rows to reorder; first brawler is active.\n3. Import/Export JSON for backup.\n4. Leave empty to use the legacy picker after START."
+    },
+    "multiInstance": {
+      "title": "Multi-Instance",
+      "tab": "Instances",
+      "summary": "1. Enable Multi-Instance on the Instances tab and follow the quick setup panel.\n2. Scan emulators and Quick add unassigned instances (or use Manual Add).\n3. Set each instance farm plan from the Farm Plan tab instance selector.\n4. Start all ready, then Align windows. Use Overview START only in single-instance mode."
+    },
+    "settings": {
+      "title": "Settings and Performance",
+      "tab": "Settings",
+      "summary": "1. Accept the free-use license in About.\n2. Tune performance profile and debug options.\n3. Spacing Aggression purple circle = target hug distance in Debug Screen.\n4. After Round controls lobby return vs Play Again on wins."
+    },
+    "discord": {
+      "title": "Discord Notifications",
+      "tab": "Discord",
+      "summary": "1. Webhook URL + Send Match Summary posts a report after each game.\n2. Ping Every X Matches mentions you on match summaries (optional).\n3. Heartbeat Every X Minutes is optional; leave at 0 to avoid status spam.\n4. Remote slash commands need a bot token (separate from webhooks)."
+    },
+    "telegram": {
+      "title": "Telegram Control",
+      "tab": "Telegram",
+      "summary": "1. Create a bot with @BotFather and paste the token.\n2. Send /setup to the bot once to register your chat.\n3. Use /status, /pause, /push, and other commands remotely.\n4. Keep notification chat IDs private."
+    },
+    "api": {
+      "title": "Brawl Stars API",
+      "tab": "API",
+      "summary": "1. Create a developer account at developer.brawlstars.com.\n2. Fill player tag and credentials in the API tab.\n3. Enables trophy autofill and Push All queue building.\n4. Never commit filled API tokens to GitHub."
+    },
+    "timers": {
+      "title": "Timers and Recovery",
+      "tab": "Timers",
+      "summary": "1. Low IPS recovery restarts scrcpy, game, or emulator.\n2. Adjust thresholds if recovery triggers too often.\n3. Emulator restart cooldown prevents rapid loops.\n4. Check Recovery Log on Overview for recent events."
+    },
+    "matchHistory": {
+      "title": "Match History",
+      "tab": "Match History",
+      "summary": "1. Review recent matches and session summary.\n2. Sort by games or other columns.\n3. Reset history from the tab if needed.\n4. Discord /stats mirrors live session stats."
+    },
+    "remoteControl": {
+      "title": "Remote Commands",
+      "tab": "Help",
+      "summary": "Discord: /pause, /start, /status, /queue, /push, /skip, /remove, /target, /screenshot.\nTelegram: /pause, /resume, /status, /queue, /push, /skip, /remove, /target, /screenshot.\nMulti-instance: add instance:ld-2 (Discord) or a third argument (Telegram)."
+    },
+    "troubleshooting": {
+      "title": "Troubleshooting",
+      "tab": "Help",
+      "summary": "1. Run Checks on Overview for ADB/emulator issues.\n2. Run python tools/performance_check.py for IPS/GPU.\n3. Dual ADB devices: reconnect emulator ADB debugging.\n4. Read logs/recovery_events.jsonl for auto-recovery details."
+    }
+  },
+  "discord": {
+    "sendTest": "Send Discord Test"
+  },
+  "telegram": {
+    "sendTest": "Send Telegram Test"
+  },
+  "api": {
+    "testConfig": "Test API Config"
+  },
+  "matchHistory": {
+    "title": "MATCH HISTORY",
+    "exportCsv": "Export CSV"
+  },
+  "help": {
+    "featureGuides": {
+      "title": "FEATURE GUIDES"
+    },
+    "openGuide": "Open guide"
+  }
+}

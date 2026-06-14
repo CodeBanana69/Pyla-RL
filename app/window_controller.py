@@ -1631,6 +1631,9 @@ class WindowController:
         target_x = self.joystick_x + x
         target_y = self.joystick_y + y
         re_apply = getattr(self, "re_apply_movement", True)
+        joystick_needs_refresh = time.time() - self.last_joystick_down_time > 2.0
+        if self.are_we_moving and joystick_needs_refresh:
+            self.stop_joystick()
         if not self.are_we_moving:
             if not self.touch_down(self.joystick_x, self.joystick_y, pointer_id=self.PID_JOYSTICK):
                 return

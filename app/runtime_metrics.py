@@ -118,7 +118,7 @@ def feed_fps_warning(metrics):
     return feed_fps + 1.5 < ips
 
 
-def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None):
+def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None, perf=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     samples = list(history)
@@ -129,6 +129,12 @@ def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None):
         "feed_fps": float(feed_fps),
         "history": [float(v) for v in samples],
     }
+    if isinstance(perf, dict):
+        for key in ("infer_ms", "decide_ms", "idle_ms"):
+            try:
+                payload[key] = max(0.0, float(perf.get(key, 0.0)))
+            except (TypeError, ValueError):
+                payload[key] = 0.0
     normalized_session = _normalize_session(session)
     if normalized_session is not None:
         payload["session"] = normalized_session
@@ -164,6 +170,11 @@ def read_metrics(path):
     except (TypeError, ValueError):
         return None
     result = {"ips": ips, "feed_fps": feed_fps, "history": history}
+    for key in ("infer_ms", "decide_ms", "idle_ms"):
+        try:
+            result[key] = float(data.get(key, 0.0))
+        except (TypeError, ValueError):
+            result[key] = 0.0
     session = _normalize_session(data.get("session"))
     if session is not None:
         result["session"] = session

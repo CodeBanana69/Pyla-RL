@@ -27,6 +27,24 @@ from utils import (
 debug = load_toml_as_dict("cfg/general_config.toml")['super_debug'] == "yes"
 gray_pixels_treshold = load_toml_as_dict("./cfg/bot_config.toml")['idle_pixels_minimum']
 GRID_OCR_MIN_CONFIDENCE = 0.2
+IDLE_RELOAD_REF_X = 960
+IDLE_RELOAD_REF_Y = 620
+IDLE_RESTART_STRIKES = 3
+IDLE_ACTION_COOLDOWN_SECONDS = 2.0
+
+
+def looks_like_idle_disconnect_dialog(frame):
+    if frame is None or getattr(frame, "size", 0) == 0:
+        return False
+    h, w = frame.shape[:2]
+    dialog_crop = frame[int(h * 0.32):int(h * 0.62), int(w * 0.24):int(w * 0.76)]
+    if dialog_crop.size == 0:
+        return False
+    dialog_mean = float(dialog_crop.mean())
+    dialog_std = float(dialog_crop.std())
+    dialog_hsv = cv2.cvtColor(dialog_crop, cv2.COLOR_RGB2HSV)
+    dialog_saturation = float(dialog_hsv[:, :, 1].mean())
+    return dialog_mean <= 90 and dialog_std <= 75 and dialog_saturation <= 85
 
 
 class LobbyAutomation:
@@ -36,6 +54,12 @@ class LobbyAutomation:
         self.window_controller = window_controller
         self.known_brawler_names = self._load_known_brawler_names()
         self.selecting_brawler = False
+        self._idle_strikes = 0
+        self._last_idle_action_at = 0.0
+
+    def reset_idle_recovery(self):
+        self._idle_strikes = 0
+        self._last_idle_action_at = 0.0
 
     def _timing(self, key, default):
         section = self.coords_cfg.get("lobby_timing") or {}
@@ -317,18 +341,40 @@ class LobbyAutomation:
         general_config = load_toml_as_dict("cfg/general_config.toml")
         bot_config = load_toml_as_dict("./cfg/bot_config.toml")
         debug_enabled = str(general_config.get("super_debug", "no")).lower() in ("yes", "true", "1")
-        gray_pixels_threshold = bot_config.get("idle_pixels_minimum", gray_pixels_treshold)
-        wr = self.window_controller.width_ratio
-        hr = self.window_controller.height_ratio
-        # Tight ROI centered on the Idle Disconnect dialog body, so we don't
-        # pick up dark gameplay pixels outside the box. V range is wide enough
-        # to cover both LDPlayer (bright overlay, V~82) and MuMu (dark overlay, V~28).
+        gray_pixels_threshold = float(bot_config.get("idle_pixels_minimum", gray_pixels_treshold) or gray_pixels_treshold)
+        wr = self.window_controller.width_ratio or 1.0
+        hr = self.window_controller.height_ratio or 1.0
         x_start, x_end = int(700 * wr), int(1220 * wr)
         y_start, y_end = int(470 * hr), int(620 * hr)
         gray_pixels = count_hsv_pixels(frame[y_start:y_end, x_start:x_end], (0, 0, 18), (10, 20, 100))
-        if debug_enabled: print(f"gray pixels (if > {gray_pixels_threshold} then bot will try to unidle) :", gray_pixels)
-        if gray_pixels > gray_pixels_threshold:
-            self.window_controller.click(int(535 * wr), int(615 * hr))
+        dialog_shape_match = looks_like_idle_disconnect_dialog(frame)
+        dialog_detected = dialog_shape_match or gray_pixels > gray_pixels_threshold
+        if debug_enabled:
+            print(
+                f"idle check: gray_pixels={gray_pixels} threshold={gray_pixels_threshold} "
+                f"dialog={dialog_shape_match}"
+            )
+        if not dialog_detected:
+            self._idle_strikes = 0
+            return None
+
+        now = time.time()
+        if now - self._last_idle_action_at < IDLE_ACTION_COOLDOWN_SECONDS:
+            return None
+
+        self._idle_strikes += 1
+        self._last_idle_action_at = now
+        if self._idle_strikes >= IDLE_RESTART_STRIKES:
+            print(
+                f"Idle disconnect still present after {self._idle_strikes} attempts; "
+                "restarting Brawl Stars."
+            )
+            return "restart"
+
+        print("Idle disconnect detected; pressing Reload.")
+        self.window_controller.keys_up(list("wasd"))
+        self.window_controller.click(int(IDLE_RELOAD_REF_X * wr), int(IDLE_RELOAD_REF_Y * hr))
+        return "clicked"
 
     @staticmethod
     def _select_button_words():
