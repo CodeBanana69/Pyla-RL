@@ -537,6 +537,9 @@ class QmlHubStateTests(unittest.TestCase):
         # Glass backdrop + animated tokens
         self.assertIn("id: backdropCanvas", qml)
         self.assertIn("createRadialGradient", qml)
+        self.assertIn("id: paletteCycle", qml)
+        self.assertIn("id: backdropFrameTimer", qml)
+        self.assertIn("function restartBackdropMotion()", qml)
         self.assertIn("property color glassHighlight", qml)
         self.assertIn("property color scrim", qml)
         self.assertIn("Behavior on bg { ColorAnimation { duration: root.durSlow } }", qml)

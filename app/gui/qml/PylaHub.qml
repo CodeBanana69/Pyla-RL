@@ -157,9 +157,19 @@ ApplicationWindow {
         if (hubBridge.applyWindowTheme) {
             hubBridge.applyWindowTheme(root.resolvedTheme !== "light")
         }
-        if (typeof backdropCanvas !== "undefined" && backdropCanvas) {
-            backdropCanvas.requestPaint()
+        root.restartBackdropMotion()
+    }
+
+    function restartBackdropMotion() {
+        if (typeof backdropCanvas === "undefined" || !backdropCanvas) {
+            return
+        }
+        backdropCanvas.requestPaint()
+        if (root.animationsEnabled) {
             backdropFade.restart()
+            paletteCycle.restart()
+        } else {
+            backdropCanvas.opacity = 1
         }
     }
 
@@ -586,6 +596,9 @@ ApplicationWindow {
         Behavior on warnSoft { ColorAnimation { duration: root.durSlow } }
         Behavior on disabled { ColorAnimation { duration: root.durSlow } }
         Behavior on link { ColorAnimation { duration: root.durSlow } }
+        Behavior on glowA { ColorAnimation { duration: root.durSlow } }
+        Behavior on glowB { ColorAnimation { duration: root.durSlow } }
+        Behavior on glowC { ColorAnimation { duration: root.durSlow } }
     }
 
     component Glyph: Item {
@@ -2282,12 +2295,48 @@ ApplicationWindow {
             id: backdropCanvas
             anchors.fill: parent
             antialiasing: true
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
+            opacity: 0
 
-            function paintGlow(ctx, x, y, radius, glowColor) {
+            property real driftA: 0
+            property real driftB: 0
+            property real driftC: 0
+            property real colorBlend: 0
+            property int paletteIndex: 0
+
+            readonly property var paletteSets: [
+                [theme.glowA, theme.glowB, theme.glowC, theme.accent],
+                [theme.accent, theme.glowC, theme.glowB, theme.link],
+                [theme.glowB, theme.link, theme.glowA, theme.glowC],
+                [theme.glowC, theme.glowA, theme.link, theme.accent]
+            ]
+
+            function mixColor(from, to, amount) {
+                const t = Math.max(0, Math.min(1, amount))
+                return Qt.rgba(
+                    from.r + (to.r - from.r) * t,
+                    from.g + (to.g - from.g) * t,
+                    from.b + (to.b - from.b) * t,
+                    from.a + (to.a - from.a) * t
+                )
+            }
+
+            function paletteColor(slot, fallback) {
+                const sets = paletteSets
+                if (!sets.length) {
+                    return fallback
+                }
+                const current = sets[paletteIndex % sets.length]
+                const next = sets[(paletteIndex + 1) % sets.length]
+                const from = current[slot % current.length]
+                const to = next[slot % next.length]
+                return mixColor(from, to, colorBlend)
+            }
+
+            function paintGlow(ctx, x, y, radius, glowColor, alphaScale) {
                 const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius)
-                gradient.addColorStop(0, String(glowColor))
+                const core = Qt.rgba(glowColor.r, glowColor.g, glowColor.b, alphaScale)
+                gradient.addColorStop(0, String(core))
+                gradient.addColorStop(0.42, String(Qt.rgba(glowColor.r, glowColor.g, glowColor.b, alphaScale * 0.35)))
                 gradient.addColorStop(1, String(Qt.rgba(glowColor.r, glowColor.g, glowColor.b, 0)))
                 ctx.fillStyle = gradient
                 ctx.beginPath()
@@ -2295,15 +2344,96 @@ ApplicationWindow {
                 ctx.fill()
             }
 
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            onDriftAChanged: if (root.animationsEnabled) requestPaint()
+            onDriftBChanged: if (root.animationsEnabled) requestPaint()
+            onDriftCChanged: if (root.animationsEnabled) requestPaint()
+            onColorBlendChanged: requestPaint()
+            onPaletteIndexChanged: requestPaint()
+
             onPaint: {
                 const ctx = getContext("2d")
                 ctx.clearRect(0, 0, width, height)
                 const span = Math.max(width, height)
-                ctx.globalAlpha = root.resolvedTheme === "light" ? 0.22 : 0.15
-                paintGlow(ctx, width * 0.14, height * 0.08, span * 0.55, theme.glowA)
-                paintGlow(ctx, width * 0.94, height * 0.92, span * 0.6, theme.glowB)
-                paintGlow(ctx, width * 0.78, height * 0.16, span * 0.38, theme.glowC)
-                ctx.globalAlpha = 1
+                const baseAlpha = root.resolvedTheme === "light" ? 0.24 : 0.17
+
+                const x1 = width * (0.12 + 0.14 * Math.sin(driftA))
+                const y1 = height * (0.10 + 0.12 * Math.cos(driftA * 0.85))
+                const x2 = width * (0.88 + 0.10 * Math.cos(driftB * 1.1))
+                const y2 = height * (0.86 + 0.11 * Math.sin(driftB))
+                const x3 = width * (0.72 + 0.16 * Math.sin(driftC * 0.7))
+                const y3 = height * (0.18 + 0.13 * Math.cos(driftC))
+                const x4 = width * (0.38 + 0.12 * Math.cos(driftA * 0.6 + driftB * 0.4))
+                const y4 = height * (0.62 + 0.10 * Math.sin(driftC * 1.15))
+
+                paintGlow(ctx, x1, y1, span * 0.58, paletteColor(0, theme.glowA), baseAlpha)
+                paintGlow(ctx, x2, y2, span * 0.62, paletteColor(1, theme.glowB), baseAlpha * 0.95)
+                paintGlow(ctx, x3, y3, span * 0.42, paletteColor(2, theme.glowC), baseAlpha * 0.88)
+                paintGlow(ctx, x4, y4, span * 0.36, paletteColor(3, theme.accent), baseAlpha * 0.72)
+            }
+
+            NumberAnimation {
+                id: driftAnimA
+                target: backdropCanvas
+                property: "driftA"
+                from: 0
+                to: Math.PI * 2
+                duration: 24000
+                loops: Animation.Infinite
+                running: root.animationsEnabled
+            }
+
+            NumberAnimation {
+                id: driftAnimB
+                target: backdropCanvas
+                property: "driftB"
+                from: 0
+                to: Math.PI * 2
+                duration: 31000
+                loops: Animation.Infinite
+                running: root.animationsEnabled
+            }
+
+            NumberAnimation {
+                id: driftAnimC
+                target: backdropCanvas
+                property: "driftC"
+                from: 0
+                to: Math.PI * 2
+                duration: 27000
+                loops: Animation.Infinite
+                running: root.animationsEnabled
+            }
+
+            SequentialAnimation {
+                id: paletteCycle
+                running: root.animationsEnabled
+                loops: Animation.Infinite
+
+                NumberAnimation {
+                    target: backdropCanvas
+                    property: "colorBlend"
+                    from: 0
+                    to: 1
+                    duration: 7000
+                    easing.type: Easing.InOutSine
+                }
+                ScriptAction {
+                    script: {
+                        backdropCanvas.paletteIndex = (backdropCanvas.paletteIndex + 1) % 4
+                        backdropCanvas.colorBlend = 0
+                    }
+                }
+                PauseAnimation { duration: 1200 }
+            }
+
+            Timer {
+                id: backdropFrameTimer
+                interval: 32
+                running: root.animationsEnabled
+                repeat: true
+                onTriggered: backdropCanvas.requestPaint()
             }
 
             NumberAnimation {
@@ -2314,6 +2444,13 @@ ApplicationWindow {
                 to: 1
                 duration: root.durSlow
                 easing.type: Easing.OutCubic
+            }
+
+            Component.onCompleted: {
+                requestPaint()
+                if (!root.animationsEnabled) {
+                    opacity = 1
+                }
             }
         }
 

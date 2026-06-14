@@ -84,9 +84,9 @@ class PerfProfiler:
     def __init__(self, config: dict[str, Any] | None = None):
         config = config if config is not None else load_toml_as_dict("cfg/debug_settings.toml")
         self._config = config
-        self.enabled = _truthy(config.get("perf_instrumentation", "no"))
-        self.trace_jsonl = _truthy(config.get("perf_trace_jsonl", "no"))
-        self.console_breakdown = _truthy(config.get("perf_console_breakdown", "no"))
+        self.enabled = _truthy(config.get("perf_instrumentation", "yes"))
+        self.trace_jsonl = _truthy(config.get("perf_trace_jsonl", "yes"))
+        self.console_breakdown = _truthy(config.get("perf_console_breakdown", "yes"))
         try:
             self.auto_ips_threshold = float(config.get("perf_auto_when_ips_below", 0) or 0)
         except (TypeError, ValueError):
@@ -363,7 +363,7 @@ class PerfProfiler:
 def configure_profiler(config: dict[str, Any] | None = None) -> PerfProfiler | _NoOpProfiler:
     global _profiler
     config = config if config is not None else load_toml_as_dict("cfg/debug_settings.toml")
-    if not _truthy(config.get("perf_instrumentation", "no")):
+    if not _truthy(config.get("perf_instrumentation", "yes")):
         threshold = 0.0
         try:
             threshold = float(config.get("perf_auto_when_ips_below", 0) or 0)
