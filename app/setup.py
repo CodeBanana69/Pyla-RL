@@ -37,6 +37,7 @@ from gpu_runtime_install import (
     auto_install_gpu_runtime,
     install_variant as install_gpu_runtime_variant,
     repair_cuda_torch,
+    repair_numpy,
     variant_status_labels,
     verify_cuda_dlls,
 )
@@ -49,9 +50,7 @@ def force_install(reqs, no_deps=False):
 def save_gpu_runtime_config(variant, cards):
     import toml
 
-    from utils import resolve_project_path
-
-    config_path = Path(resolve_project_path("cfg/general_config.toml"))
+    config_path = Path(__file__).resolve().parent / "cfg" / "general_config.toml"
     config = toml.load(config_path) if config_path.exists() else {}
     apply_gpu_config(config, variant, cards)
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,7 +78,7 @@ def setup_pyla():
 
     # Repair NumPy before installing/importing packages that load cv2.
     # OpenCV 4.8 wheels crash with NumPy 2.x (_ARRAY_API / multiarray errors).
-    force_install(["numpy<2.0.0"], no_deps=True)
+    repair_numpy(verbose=True)
     
     # installing must have Pytorch CPU
     force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
@@ -93,7 +92,7 @@ def setup_pyla():
     base_reqs = [
         "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
-        "opencv-python==4.8.0.76", "requests>=2.34.0", "pandas>=2.0.0", "ultralytics", "aiohttp",
+        "opencv-python==4.8.0.76", "requests>=2.34.0", "pandas>=2.0.0", "ultralytics", "aiohttp>=3.9.0,<3.14",
         "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0",
     ]
     force_install(base_reqs)
@@ -143,6 +142,8 @@ def setup_pyla():
         )
         onnx_installed = True
 
+    repair_numpy(verbose=False)
+
     # NVIDIA BRANCH (Series 10-50)
     elif target == "nvidia":
         print(f"\n NVIDIA: {name} detected.")
@@ -180,7 +181,7 @@ def setup_pyla():
 
     # some conflict fixes
     print("\n Finalizing and Repairing Conflicts...")
-    force_install(["numpy<2.0.0"], no_deps=True)
+    repair_numpy(verbose=False)
     force_install(["adbutils==2.12.0", "av==12.3.0"])
     force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)

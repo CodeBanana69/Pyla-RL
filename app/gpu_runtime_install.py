@@ -20,12 +20,54 @@ ONNX_VARIANT_PACKAGES = {
     "cpu": "onnxruntime",
 }
 ONNX_VARIANTS = tuple(ONNX_VARIANT_PACKAGES.values())
+NUMPY_PIN = "numpy<2.0.0"
+OPENCV_PIN = "opencv-python==4.8.0.76"
 CUDA_TORCH_INDEX_DEFAULT = "https://download.pytorch.org/whl/cu124"
 BENCHMARK_MARKER = "PYLA_RUNTIME_BENCHMARK="
 
 
 def project_root() -> Path:
     return Path(__file__).resolve().parent
+
+
+def _numpy_major_version(python=None) -> int | None:
+    python = python or sys.executable
+    completed = subprocess.run(
+        [python, "-c", "import numpy; print(numpy.__version__)"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    version = (completed.stdout or "").strip()
+    try:
+        return int(version.split(".", 1)[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def repair_numpy(python=None, *, verbose=True, reinstall_opencv=True) -> bool:
+    """Pin NumPy 1.x and rebuild OpenCV 4.8 wheels that break on NumPy 2.x."""
+    python = python or sys.executable
+    major = _numpy_major_version(python)
+    if major is not None and major < 2:
+        return False
+    if verbose:
+        label = "missing" if major is None else f"{major}.x"
+        print(f"Repairing NumPy ({label} -> 1.x) for OpenCV 4.8 compatibility...")
+    subprocess.check_call(
+        [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", NUMPY_PIN],
+    )
+    if reinstall_opencv:
+        subprocess.run(
+            [python, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
+            check=False,
+        )
+        subprocess.check_call(
+            [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", OPENCV_PIN],
+        )
+    return True
 
 
 def pip_run(args, python=None, upgrade=False, force_reinstall=False):
@@ -125,6 +167,7 @@ def install_variant(variant, compute_cap=0.0, python=None):
         _uninstall_torch(python)
         _pip_install_torch_cuda(compute_cap, python=python, force_reinstall=True)
     pip_run([package], python=python, upgrade=True)
+    repair_numpy(python=python, verbose=False)
 
 
 def verify_cuda_dlls(verbose=False):
@@ -150,6 +193,7 @@ def repair_cuda_torch(compute_cap=0.0, python=None, verbose=False):
 
 def smoke_test_variant(variant, python=None, runs=2, timeout=180):
     python = python or sys.executable
+    repair_numpy(python=python, verbose=False)
     root = project_root()
     code = f"""
 import json

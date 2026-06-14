@@ -11,6 +11,8 @@ from gpu_runtime_install import (
     auto_install_gpu_runtime,
     install_and_verify_variant,
     install_variant,
+    OPENCV_PIN,
+    repair_numpy,
     verify_cuda_dlls,
 )
 from gpu_support import (
@@ -48,11 +50,12 @@ def run(command):
 
 def install_base_requirements():
     print("Installing/repairing PylaAi core Python packages...")
+    repair_numpy(verbose=True)
     run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "wheel"])
     run([sys.executable, "-m", "pip", "install", "setuptools>=70,<82"])
     run([sys.executable, "-m", "pip", "install", "--upgrade", *BASE_REQUIREMENTS])
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    run([sys.executable, "-m", "pip", "install", "--force-reinstall", "opencv-python==4.8.0.76"])
+    run([sys.executable, "-m", "pip", "install", "--force-reinstall", OPENCV_PIN])
     run([
         sys.executable,
         "-m",

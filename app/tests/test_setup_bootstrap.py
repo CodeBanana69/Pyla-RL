@@ -47,11 +47,11 @@ class SetupBootstrapTests(unittest.TestCase):
     def test_setup_repairs_numpy_before_importing_utils(self):
         source = Path("app/setup.py").read_text(encoding="utf-8")
 
-        numpy_repair_index = source.index('force_install(["numpy<2.0.0"], no_deps=True)')
+        numpy_repair_index = source.index("repair_numpy(verbose=True)")
         utils_import_index = source.find("from utils import")
         self.assertEqual(utils_import_index, -1)
         self.assertLess(numpy_repair_index, source.index("force_install(base_reqs)"))
-        self.assertIn('"numpy<2.0.0"', source)
+        self.assertIn("repair_numpy", source)
 
     def test_direct_setup_does_not_create_run_bat(self):
         source = Path("app/setup.py").read_text(encoding="utf-8")

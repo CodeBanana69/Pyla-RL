@@ -314,7 +314,11 @@ def main():
     install_vc_redist()
     if progress_window:
         progress_window.update("Upgrading pip and setuptools...")
-    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip", "wheel"])
+    run(venv_command + ["-m", "pip", "install", "setuptools>=70,<82"])
+    run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"])
+    subprocess.run(venv_command + ["-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
+    run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-python==4.8.0.76"])
 
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"

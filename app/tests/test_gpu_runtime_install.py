@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from gpu_runtime_install import setup_candidate_variants, torch_cuda_install_args
 
@@ -24,6 +25,22 @@ class GpuRuntimeInstallTests(unittest.TestCase):
     def test_torch_cuda_install_args_for_ada(self):
         args = torch_cuda_install_args(8.9)
         self.assertEqual(args[-1], "https://download.pytorch.org/whl/cu124")
+
+    @patch("gpu_runtime_install.subprocess.run")
+    @patch("gpu_runtime_install.subprocess.check_call")
+    def test_repair_numpy_reinstalls_when_major_version_is_two(self, mock_check_call, mock_run):
+        from gpu_runtime_install import repair_numpy
+
+        version_result = mock_run.return_value
+        version_result.returncode = 0
+        version_result.stdout = "2.4.4\n"
+
+        repaired = repair_numpy(python="python", verbose=False)
+
+        self.assertTrue(repaired)
+        mock_check_call.assert_any_call(
+            ["python", "-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"],
+        )
 
 
 if __name__ == "__main__":
