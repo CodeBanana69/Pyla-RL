@@ -62,6 +62,7 @@ repair_numpy_before_cv2_import()
 from opencv_runtime import ensure_opencv_runtime
 
 ensure_opencv_runtime()
+import cv2
 
 from gui.win_dpi import bootstrap_windows_dpi
 
