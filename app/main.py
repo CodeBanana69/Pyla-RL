@@ -1020,6 +1020,8 @@ def pyla_main(data):
                             "queue_len": len(self.Stage_manager.brawlers_pick_data or []),
                         },
                     )
+                    if front:
+                        self.active_lobby_brawler = front
             finally:
                 self.lobby_automator.selecting_brawler = False
             self.picked_first_brawler = True

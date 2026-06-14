@@ -31,6 +31,7 @@ class PublishDebugViewTests(unittest.TestCase):
         self.play.last_tile_detection_debug = None
         self.play.match_intent_summary = "Shooting"
         self.play.window_controller.debug_view = MagicMock(enabled=True, advanced_visuals=False)
+        self.play.window_controller.debug_view.is_publish_due.return_value = True
 
     def test_publish_debug_view_forwards_payload(self):
         frame = np.zeros((4, 4, 3), dtype=np.uint8)
@@ -85,6 +86,18 @@ class PublishDebugViewTests(unittest.TestCase):
     def test_publish_debug_view_noops_when_disabled(self):
         self.play.window_controller.debug_view.enabled = False
         play_module.Play.publish_debug_view(self.play, np.zeros((2, 2, 3), dtype=np.uint8), {}, "lobby")
+        self.play.window_controller.debug_view.publish.assert_not_called()
+
+    def test_publish_debug_view_skips_before_throttle(self):
+        self.play.window_controller.debug_view.is_publish_due.return_value = False
+        with patch.object(play_module.Play, "_build_debug_overlay_hints") as mock_hints:
+            play_module.Play.publish_debug_view(
+                self.play,
+                np.zeros((2, 2, 3), dtype=np.uint8),
+                {"player": [[1, 1, 3, 3]]},
+                "match",
+            )
+        mock_hints.assert_not_called()
         self.play.window_controller.debug_view.publish.assert_not_called()
 
 

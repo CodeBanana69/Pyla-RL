@@ -109,12 +109,19 @@ class DebugViewPublisher:
             record_clips=record_clips,
         )
 
+    def is_publish_due(self, now=None):
+        if not self.enabled:
+            return False
+        if now is None:
+            now = time.perf_counter()
+        return now - self.last_publish >= self.publish_delay
+
     def publish(self, frame, debug_data=None):
         if not self.enabled or frame is None:
             return
 
         now = time.perf_counter()
-        if now - self.last_publish < self.publish_delay:
+        if not self.is_publish_due(now):
             return
 
         try:

@@ -2522,6 +2522,8 @@ class Play:
         debug_view = getattr(self.window_controller, "debug_view", None)
         if debug_view is None or not debug_view.enabled:
             return
+        if not debug_view.is_publish_due():
+            return
 
         self.frame = frame
         advanced_visuals = bool(getattr(debug_view, "advanced_visuals", self.advanced_visuals))
