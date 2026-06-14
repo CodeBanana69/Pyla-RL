@@ -67,6 +67,39 @@ class PerformanceThrottleTests(unittest.TestCase):
         self.assertEqual(play.Detect_main_info.detect_objects.call_count, 2)
         self.assertTrue(data.get("player"))
 
+    def test_replay_main_reuses_cached_snapshot_without_onnx(self):
+        play = object.__new__(Play)
+        play._cached_play_snapshot = {
+            "player": [[10, 10, 30, 30]],
+            "enemy": [],
+            "teammate": [],
+            "wall": [[0, 0, 20, 20]],
+            "bushes": [],
+            "map_objects": {"wall": [[0, 0, 20, 20]]},
+            "line_of_sight_wall": [[0, 0, 20, 20]],
+        }
+        play.validate_game_data = Play.validate_game_data
+        play.track_no_detections = MagicMock()
+        play.time_since_player_last_found = time.time()
+        play.no_detection_proceed_delay = 8.5
+        play.time_since_last_proceeding = time.time()
+        play.refresh_ready_abilities = MagicMock()
+        play.loop = MagicMock(return_value=(100.0, 0.0))
+        play.publish_debug_view = MagicMock()
+        play.do_movement = MagicMock()
+        play.get_main_data = MagicMock()
+        play.get_tile_data = MagicMock()
+        play.window_controller = MagicMock()
+        main = MagicMock()
+        main.get_latest_state.return_value = "match"
+
+        play.main(object(), "shelly", main, replay=True)
+
+        play.get_main_data.assert_not_called()
+        play.get_tile_data.assert_not_called()
+        play.loop.assert_called_once()
+        play.do_movement.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

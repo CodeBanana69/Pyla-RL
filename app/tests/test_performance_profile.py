@@ -68,8 +68,9 @@ class PerformanceProfileTest(unittest.TestCase):
             time_cfg = toml.load(time_path)
             self.assertEqual(general["visual_debug"], "no")
             self.assertEqual(general["advanced_visuals"], "no")
-            self.assertEqual(bot["fog_check_every_n_frames"], 4)
-            self.assertEqual(time_cfg["wall_detection_interval_seconds"], 1.0)
+            self.assertEqual(bot["fog_check_every_n_frames"], 3)
+            self.assertEqual(bot["close_tile_detector_enabled"], "yes")
+            self.assertEqual(time_cfg["wall_detection_interval_seconds"], 0.2)
 
     def test_unknown_profile_is_rejected(self):
         with self.assertRaises(ValueError):

@@ -46,6 +46,7 @@ def migrate_bot_config(bot_config: dict | None = None) -> dict:
         bot_config["wall_path_probe_tiles"] = 1.5
     if "entity_detection_retry_confidence" not in bot_config:
         bot_config["entity_detection_retry_confidence"] = 0.35
+    bot_config.setdefault("entity_retry_grace_seconds", 0.4)
     bot_config.setdefault("enemy_spacing_enabled", "yes")
     bot_config.setdefault("enemy_spacing_blend", 0.35)
     bot_config.setdefault("enemy_spacing_tolerance", 40)

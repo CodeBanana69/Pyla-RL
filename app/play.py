@@ -51,7 +51,6 @@ class Play:
         self.super_treshold = time_config["super"]
         self.gadget_treshold = time_config["gadget"]
         self.hypercharge_treshold = time_config["hypercharge"]
-        self.walls_treshold = time_config["wall_detection"]
         self.last_walls_data = []
         self.last_bushes_data = []
         self.keys_hold = []
@@ -149,6 +148,15 @@ class Play:
         self.map_object_min_area = float(bot_config.get("map_object_min_area", 900))
         self.last_map_object_data = {}
         self.entity_detection_confidence = bot_config["entity_detection_confidence"]
+        self.entity_detection_retry_confidence = float(
+            bot_config.get("entity_detection_retry_confidence", max(0.2, self.entity_detection_confidence - 0.2))
+        )
+        self.entity_retry_grace_seconds = float(bot_config.get("entity_retry_grace_seconds", 0.4))
+        self.wall_path_padding = float(bot_config.get("wall_path_padding", 0) or 0)
+        self.wall_path_probe_tiles = float(bot_config.get("wall_path_probe_tiles", 1.0) or 1.0)
+        wall_interval = float(time_config.get("wall_detection_interval_seconds", 0) or 0)
+        self.walls_treshold = max(float(time_config["wall_detection"]), wall_interval)
+        self._cached_play_snapshot = None
         self.seconds_to_hold_attack_after_reaching_max = load_toml_as_dict("cfg/bot_config.toml")["seconds_to_hold_attack_after_reaching_max"]
         self.persistent_data = {"time_since_holding_attack": None}
         self.pyla_code = pyla_code
@@ -1046,8 +1054,59 @@ class Play:
 
         return result
 
+    def stabilize_entity_roles(self, frame, data):
+        return data
+
     def get_main_data(self, frame):
         data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
+        data = self.stabilize_entity_roles(frame, data)
+        if data.get("player"):
+            return data
+        recently_seen = (time.time() - self.time_since_player_last_found) <= self.entity_retry_grace_seconds
+        if recently_seen or self.entity_detection_retry_confidence >= self.entity_detection_confidence:
+            return data
+        retry_data = self.Detect_main_info.detect_objects(
+            frame,
+            conf_tresh=self.entity_detection_retry_confidence,
+        )
+        retry_data = self.stabilize_entity_roles(frame, retry_data)
+        if retry_data.get("player"):
+            return retry_data
+        if sum(len(boxes or []) for boxes in retry_data.values()) > sum(len(boxes or []) for boxes in data.values()):
+            return retry_data
+        return data
+
+    @staticmethod
+    def _snapshot_play_data(data):
+        if not data:
+            return None
+        snapshot = {}
+        for key, value in data.items():
+            if isinstance(value, list):
+                snapshot[key] = [list(box) for box in value]
+            elif isinstance(value, dict):
+                snapshot[key] = {
+                    inner_key: [list(box) for box in inner_boxes]
+                    for inner_key, inner_boxes in value.items()
+                }
+            else:
+                snapshot[key] = value
+        return snapshot
+
+    def _restore_play_data(self, snapshot):
+        if not snapshot:
+            return None
+        data = {}
+        for key, value in snapshot.items():
+            if isinstance(value, list):
+                data[key] = [list(box) for box in value]
+            elif isinstance(value, dict):
+                data[key] = {
+                    inner_key: [list(box) for box in inner_boxes]
+                    for inner_key, inner_boxes in value.items()
+                }
+            else:
+                data[key] = value
         return data
 
     def is_path_blocked(self, player_box, move_direction, walls, distance=None):
@@ -1065,9 +1124,9 @@ class Play:
         dy = movement[1] / magnitude * distance
         foot_x, foot_y, foot_radius = self.get_player_foot_circle(player_box)
         foot_center = (foot_x, foot_y)
-        padding = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_padding", 0) or 0)
+        padding = self.wall_path_padding
         radius = foot_radius + padding
-        probe_tiles = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_probe_tiles", 1.0) or 1.0)
+        probe_tiles = self.wall_path_probe_tiles
         probes = (distance * 0.5, distance, distance * max(1.0, probe_tiles))
         for probe_distance in probes:
             scale = probe_distance / max(distance, 1e-6)
@@ -1111,12 +1170,12 @@ class Play:
         foot_x, foot_y = float(player_arg[0]), float(player_arg[1])
         foot_radius = 4.0
         foot_center = (foot_x, foot_y)
-        padding = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_padding", 0) or 0)
+        padding = self.wall_path_padding
         radius = foot_radius + padding
         angle_rad = math.radians(angle_degrees)
         cos_a = math.cos(angle_rad)
         sin_a = math.sin(angle_rad)
-        probe_tiles = float(load_toml_as_dict("cfg/bot_config.toml").get("wall_path_probe_tiles", 1.0) or 1.0)
+        probe_tiles = self.wall_path_probe_tiles
         probes = (distance * 0.5, distance, distance * max(1.0, probe_tiles))
         for probe_distance in probes:
             probe_pos = (
@@ -2582,37 +2641,40 @@ class Play:
 
         debug_view.publish(frame, debug_data)
 
-    def main(self, frame, brawler, main):
+    def main(self, frame, brawler, main, replay=False):
         current_time = time.time()
         state = main.get_latest_state()
-        data = self.get_main_data(frame)
-        if current_time - self.time_since_walls_checked > self.walls_treshold:
-            tile_data = self.get_tile_data(frame, data.get("player"))
-            walls, map_objects = self.process_tile_data(tile_data, frame)
-            line_of_sight_walls = self.map_object_boxes_for_classes(
-                map_objects,
-                self.line_of_sight_map_object_classes(),
-            )
-            bushes = self.map_object_boxes_for_classes(
-                map_objects,
-                {"bush", "close_bush"},
-            )
-            self.time_since_walls_checked = current_time
-            self.last_walls_data = walls
-            self.last_map_object_data = map_objects
-            self.last_bushes_data = bushes
-            data['wall'] = walls
-            data['line_of_sight_wall'] = line_of_sight_walls
-            data['map_objects'] = map_objects
-            data['bushes'] = bushes
+        if replay and self._cached_play_snapshot is not None:
+            data = self._restore_play_data(self._cached_play_snapshot)
         else:
-            data['wall'] = self.last_walls_data
-            data['bushes'] = self.last_bushes_data
-            data['map_objects'] = self.last_map_object_data
-            data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
-                self.last_map_object_data,
-                self.line_of_sight_map_object_classes(),
-            )
+            data = self.get_main_data(frame)
+            if current_time - self.time_since_walls_checked > self.walls_treshold:
+                tile_data = self.get_tile_data(frame, data.get("player"))
+                walls, map_objects = self.process_tile_data(tile_data, frame)
+                line_of_sight_walls = self.map_object_boxes_for_classes(
+                    map_objects,
+                    self.line_of_sight_map_object_classes(),
+                )
+                bushes = self.map_object_boxes_for_classes(
+                    map_objects,
+                    {"bush", "close_bush"},
+                )
+                self.time_since_walls_checked = current_time
+                self.last_walls_data = walls
+                self.last_map_object_data = map_objects
+                self.last_bushes_data = bushes
+                data['wall'] = walls
+                data['line_of_sight_wall'] = line_of_sight_walls
+                data['map_objects'] = map_objects
+                data['bushes'] = bushes
+            else:
+                data['wall'] = self.last_walls_data
+                data['bushes'] = self.last_bushes_data
+                data['map_objects'] = self.last_map_object_data
+                data['line_of_sight_wall'] = self.map_object_boxes_for_classes(
+                    self.last_map_object_data,
+                    self.line_of_sight_map_object_classes(),
+                )
 
         data = self.validate_game_data(data)
         self.track_no_detections(data)
@@ -2645,6 +2707,8 @@ class Play:
         self.frame = frame
         movement = self.loop(brawler, data, current_time)
         self.publish_debug_view(frame, data, state, movement)
+        if not replay:
+            self._cached_play_snapshot = self._snapshot_play_data(data)
         if movement is not None:
             self.do_movement(movement)
 
