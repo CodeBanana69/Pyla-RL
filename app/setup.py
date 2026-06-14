@@ -50,6 +50,16 @@ def force_install(reqs, no_deps=False):
 def save_gpu_runtime_config(variant, cards):
     import toml
 
+    from gpu_support import primary_vendor
+
+    vendor = primary_vendor(cards)
+    if variant == "cpu" and vendor not in ("cpu", None):
+        print(
+            "WARNING: GPU acceleration did not verify; keeping cpu_or_gpu on auto "
+            "instead of forcing CPU. Run: py -3.11-64 tools\\fix_gpu_runtime.py auto"
+        )
+        variant = "auto"
+
     config_path = Path(__file__).resolve().parent / "cfg" / "general_config.toml"
     config = toml.load(config_path) if config_path.exists() else {}
     apply_gpu_config(config, variant, cards)
@@ -79,9 +89,6 @@ def setup_pyla():
     # Repair NumPy before installing/importing packages that load cv2.
     # OpenCV 4.8 wheels crash with NumPy 2.x (_ARRAY_API / multiarray errors).
     repair_numpy(verbose=True)
-    
-    # installing must have Pytorch CPU
-    force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
 
     # installing some must have dependencies
     print("Installing Core Dependencies...")
@@ -89,6 +96,8 @@ def setup_pyla():
         [sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
         check=False,
     )
+    if not auto_setup:
+        force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
     base_reqs = [
         "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
@@ -141,10 +150,8 @@ def setup_pyla():
             verify=True,
         )
         onnx_installed = True
+        repair_numpy(verbose=False)
 
-    repair_numpy(verbose=False)
-
-    # NVIDIA BRANCH (Series 10-50)
     elif target == "nvidia":
         print(f"\n NVIDIA: {name} detected.")
         if ask_user("Install NVIDIA CUDA acceleration? (recommended for NVIDIA GPUs)"):

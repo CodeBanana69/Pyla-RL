@@ -383,8 +383,15 @@ def auto_install_gpu_runtime(
         chosen = "cpu"
         if not any(result.get("variant") == "cpu" and result.get("ok") for result in results):
             install_variant("cpu", python=python)
+            repair_numpy(python=python, verbose=False)
             results.append(
                 {"variant": "cpu", "provider": "CPUExecutionProvider", "ips": 1.0, "ok": True}
+            )
+        vendor = primary_vendor(cards)
+        if vendor not in ("cpu", None):
+            print(
+                "WARNING: No GPU ONNX runtime verified; using CPU packages for now. "
+                "Fix GPU inference before farming: py -3.11-64 tools\\fix_gpu_runtime.py auto"
             )
 
     status_pytorch, status_accel = variant_status_labels(chosen)
