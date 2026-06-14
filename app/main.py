@@ -74,6 +74,7 @@ from gui.qml_hub import QmlHub
 from gui.login import login
 from gui.main import App
 from gui.select_brawler import SelectBrawler
+from frame_uniformity import VisualFreezeMonitor
 from lobby_automation import LobbyAutomation
 from play import Play
 from runtime_control import (
@@ -471,6 +472,7 @@ def pyla_main(data):
             self.lobby_after_match_confirm_seconds = float(
                 time_thresholds.get("lobby_after_match_confirm_seconds", 3.0)
             )
+            self.visual_freeze_monitor = VisualFreezeMonitor(time_thresholds)
             self.post_match_reward_until = 0.0
             self.reward_chain_seen = False
             self.lobby_seen_since_match = False
@@ -590,6 +592,24 @@ def pyla_main(data):
             elif action == "clicked":
                 import runtime_log
                 runtime_log.log_info("recovery", "Idle disconnect detected; pressed Reload.")
+
+        def _maybe_check_visual_freeze(self, frame):
+            action = self.visual_freeze_monitor.observe(
+                frame,
+                restart_scrcpy=self.window_controller.restart_scrcpy_client,
+                restart_game=self.restart_brawl_stars,
+                restart_emulator=self.window_controller.restart_emulator_profile,
+                emit_event=emit_recovery_event,
+            )
+            if not action:
+                return False
+            import runtime_log
+
+            self.window_controller.release_movement()
+            runtime_log.log_warn("recovery", f"Uniform capture frame detected; triggered {action}.")
+            if self.sleep_interruptible(1) == "stop":
+                self.stop_gracefully()
+            return True
 
         def should_stop(self):
             return (
@@ -1361,6 +1381,10 @@ def pyla_main(data):
                     continue
 
                 self.record_feed_fps()
+                if self._maybe_check_visual_freeze(frame):
+                    if self.should_stop():
+                        break
+                    continue
                 self._maybe_check_idle(frame)
                 self._maybe_run_match_warmup(frame)
                 frame_id = self.window_controller.get_latest_frame_id()
