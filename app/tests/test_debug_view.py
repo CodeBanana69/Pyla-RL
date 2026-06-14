@@ -59,6 +59,21 @@ class DebugViewTests(unittest.TestCase):
         )
         self.assertTrue(np.any(image))
 
+    def test_is_publish_due_respects_fps_limit(self):
+        publisher = dv.DebugViewPublisher(enabled=True, max_fps=10)
+        publisher.last_publish = 0.0
+        self.assertTrue(publisher.is_publish_due(0.2))
+        publisher.last_publish = 0.19
+        self.assertFalse(publisher.is_publish_due(0.2))
+        self.assertTrue(publisher.is_publish_due(0.3))
+
+    def test_publish_skips_when_not_due(self):
+        publisher = dv.DebugViewPublisher(enabled=True, max_fps=1)
+        publisher.last_publish = 0.9
+        frame = np.zeros((4, 4, 3), dtype=np.uint8)
+        publisher.publish(frame, {"state": "match"})
+        self.assertIsNone(publisher.frame_array)
+
 
 if __name__ == "__main__":
     unittest.main()
