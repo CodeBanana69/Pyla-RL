@@ -4,10 +4,12 @@ import sys
 import customtkinter as ctk  # Import the customtkinter library
 from gui.license_client import check_if_exists
 from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
+from i18n import configure_from_general_config, translate
 from utils import api_base_url, load_toml_as_dict, save_dict_as_toml
 
 
 def login(logged_in_setter):
+    configure_from_general_config()
 
     if api_base_url == "localhost":
         logged_in_setter(True)
@@ -21,13 +23,13 @@ def login(logged_in_setter):
     def on_login_button_click():
         api_key = api_key_entry.get()
         if validate_api_key(api_key):
-            result_label.configure(text="Login Successful!", text_color=pal["success"])
+            result_label.configure(text=translate("login.success"), text_color=pal["success"])
             logged_in_setter(True)
             app.destroy()
             save_dict_as_toml({"key": api_key}, "./cfg/login.toml")
             return
         else:
-            result_label.configure(text="Invalid API Key", text_color=pal["danger"])
+            result_label.configure(text=translate("login.invalid"), text_color=pal["danger"])
 
     login_data = load_toml_as_dict('./cfg/login.toml')
     auth_key = login_data['key']
@@ -39,16 +41,16 @@ def login(logged_in_setter):
     ctk.set_appearance_mode(resolve_theme_mode(load_ui_theme_mode()))
 
     app = ctk.CTk()
-    app.title('API Key Login')
+    app.title(translate("login.title"))
     app.geometry('500x210')
     app.configure(fg_color=pal["bg"])
 
-    label = ctk.CTkLabel(app, text="Enter API Key:", font=("Segoe UI", 18, "bold"), text_color=pal["text"])
+    label = ctk.CTkLabel(app, text=translate("login.prompt"), font=("Segoe UI", 18, "bold"), text_color=pal["text"])
     label.pack(pady=(20, 5))
 
     api_key_entry = ctk.CTkEntry(
         app,
-        placeholder_text="API Key",
+        placeholder_text=translate("login.placeholder"),
         font=("Segoe UI", 16),
         width=400,
         height=38,
@@ -62,7 +64,7 @@ def login(logged_in_setter):
 
     login_button = ctk.CTkButton(
         app,
-        text="Login",
+        text=translate("login.button"),
         command=on_login_button_click,
         font=("Segoe UI", 16, "bold"),
         height=38,

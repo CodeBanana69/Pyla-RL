@@ -11,9 +11,12 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 480
     visible: true
-    title: settingsOnly ? "Pyla-RL Settings" : "Pyla-RL Hub"
+    title: settingsOnly ? root.tr("app.title.settings") : root.tr("app.title.hub")
     color: theme.bg
     flags: Qt.FramelessWindowHint | Qt.Window
+
+    property var hubI18n: ({})
+    property string hubLanguage: "en"
 
     property string mode: hubBridge ? hubBridge.mode() : "showdown-trio"
     property string emulator: hubBridge ? hubBridge.emulator() : "ldplayer"
@@ -46,17 +49,55 @@ ApplicationWindow {
     readonly property int durMed: animationsEnabled ? 210 : 0
     readonly property int durSlow: animationsEnabled ? 320 : 0
     readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
-    readonly property var queueSortOptions: [
-        { id: "cups_desc", label: "Cups high \u2192 low" },
-        { id: "cups_asc", label: "Cups low \u2192 high" },
-        { id: "gap_asc", label: "Closest to target" },
-        { id: "gap_desc", label: "Furthest from target" },
-        { id: "target_desc", label: "Target high \u2192 low" },
-        { id: "target_asc", label: "Target low \u2192 high" },
-        { id: "name_asc", label: "Name A \u2192 Z" },
-        { id: "name_desc", label: "Name Z \u2192 A" },
-        { id: "efficiency", label: "Best trophies/hour" }
-    ]
+    readonly property var navTabIds: (hubState.meta && hubState.meta.navTabIds)
+        ? hubState.meta.navTabIds
+        : ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]
+    readonly property var queueSortOptions: (hubState.meta && hubState.meta.queueSortOptions)
+        ? hubState.meta.queueSortOptions
+        : [
+            { id: "cups_desc", label: "Cups high \u2192 low" },
+            { id: "cups_asc", label: "Cups low \u2192 high" },
+            { id: "gap_asc", label: "Closest to target" },
+            { id: "gap_desc", label: "Furthest from target" },
+            { id: "target_desc", label: "Target high \u2192 low" },
+            { id: "target_asc", label: "Target low \u2192 high" },
+            { id: "name_asc", label: "Name A \u2192 Z" },
+            { id: "name_desc", label: "Name Z \u2192 A" },
+            { id: "efficiency", label: "Best trophies/hour" }
+        ]
+
+    function tr(key, params) {
+        if (!params) {
+            params = {}
+        }
+        if (hubBridge && hubBridge.tr) {
+            var translated = hubBridge.tr(key, JSON.stringify(params))
+            if (translated && translated !== key) {
+                return translated
+            }
+        }
+        var catalog = hubI18n
+        if ((!catalog || Object.keys(catalog).length === 0) && hubState.meta && hubState.meta.i18n) {
+            catalog = hubState.meta.i18n
+        }
+        var text = (catalog && catalog[key]) ? catalog[key] : key
+        for (var p in params) {
+            text = String(text).replace("{" + p + "}", String(params[p]))
+        }
+        return text
+    }
+
+    function reloadTranslations() {
+        reloadState()
+        if (hubState.meta) {
+            if (hubState.meta.i18n) {
+                hubI18n = hubState.meta.i18n
+            }
+            if (hubState.meta.uiLanguage) {
+                hubLanguage = hubState.meta.uiLanguage
+            }
+        }
+    }
 
     function healthColor(status) {
         if (status === "good") return theme.ok
@@ -83,7 +124,7 @@ ApplicationWindow {
         }
         return hubState.preflight.emulator_status[emulatorId] || null
     }
-    readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]
+    readonly property var navItems: navTabIds
     readonly property var filteredPickerOptions: {
         const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions.slice() : []
         const needle = pickerFilter.trim().toLowerCase()
@@ -186,11 +227,15 @@ ApplicationWindow {
     }
 
     function navLabel(tab) {
+        var ids = root.navTabIds
+        var labels = (hubState.meta && hubState.meta.navItems) ? hubState.meta.navItems : ids
+        var idx = ids.indexOf(tab)
+        var label = idx >= 0 ? labels[idx] : tab
         if (tab === "Farm Plan") {
             var count = (hubState.queue || []).length
-            return count > 0 ? ("Farm Plan (" + count + ")") : "Farm Plan"
+            return count > 0 ? root.tr("nav.farmPlanCount", {count: count}) : label
         }
-        return tab
+        return label
     }
 
     function closeHubWindow() {
@@ -244,7 +289,8 @@ ApplicationWindow {
         }
         if (result.showWizard) {
             root.showWizard = true
-            root.wizardStep = root.licenseAccepted ? 1 : 0
+            const needsLanguage = !!(hubState.meta && !hubState.meta.uiLanguageSelected)
+            root.wizardStep = needsLanguage ? 0 : (root.licenseAccepted ? 2 : 1)
         }
         if (result.action) {
             root.pendingInstanceAction = result.action
@@ -265,12 +311,12 @@ ApplicationWindow {
     }
 
     function readinessLabel(item) {
-        if (!item || !item.readiness) return "Unknown"
+        if (!item || !item.readiness) return root.tr("instances.readiness.unknown")
         const status = item.readiness.status || ""
-        if (status === "ready") return "Ready"
-        if (status === "needs_farm_plan") return "Needs farm plan"
-        if (status === "port_conflict") return "Port conflict"
-        if (status === "no_emulator") return "No emulator"
+        if (status === "ready") return root.tr("instances.readiness.ready")
+        if (status === "needs_farm_plan") return root.tr("instances.readiness.needsFarmPlan")
+        if (status === "port_conflict") return root.tr("instances.readiness.portConflict")
+        if (status === "no_emulator") return root.tr("instances.readiness.noEmulator")
         return item.readiness.message || status
     }
 
@@ -412,7 +458,7 @@ ApplicationWindow {
             statusText = result.message
             statusOk = false
         } else if (result.ok) {
-            statusText = "Saved"
+            statusText = root.tr("status.saved")
             statusOk = true
             statusToastTimer.restart()
         }
@@ -433,11 +479,11 @@ ApplicationWindow {
 
     function runAction(action) {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.tr("status.waitForAction")
             statusOk = false
             return
         }
-        statusText = "Working..."
+        statusText = root.tr("status.working")
         statusOk = true
         const result = applyBridgeResult(hubBridge.runAction(action))
         if (result.ok && !result.pending) {
@@ -447,11 +493,11 @@ ApplicationWindow {
 
     function runActionWithPayload(action, payload) {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.tr("status.waitForAction")
             statusOk = false
             return
         }
-        statusText = "Working..."
+        statusText = root.tr("status.working")
         statusOk = true
         const result = applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
         if (result.ok && !result.pending) {
@@ -461,17 +507,17 @@ ApplicationWindow {
 
     function startBot() {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.tr("status.waitForAction")
             statusOk = false
             return
         }
         if (!(hubState.preflight && hubState.preflight.ready)) {
             root.activeTab = "Overview"
-            statusText = "Run pre-flight checks first, then press START."
+            statusText = root.tr("chrome.startBar.runChecks")
             statusOk = false
             return
         }
-        statusText = "Checking pre-flight..."
+        statusText = root.tr("status.checkingPreflight")
         statusOk = true
         applyBridgeResult(hubBridge.startPyla())
     }
@@ -490,6 +536,7 @@ ApplicationWindow {
 
     Component.onCompleted: {
         applyTheme()
+        reloadTranslations()
         reloadState()
         runAction("ensure-brawler-icons")
         if (settingsOnly) {
@@ -497,11 +544,20 @@ ApplicationWindow {
             activeTab = "Farm Plan"
             return
         }
+        const needsLanguage = !!(hubState.meta && !hubState.meta.uiLanguageSelected)
         const needsLicense = !(hubState.meta && hubState.meta.licenseAccepted)
         const needsWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
-        showWizard = needsLicense || needsWizard
-        wizardStep = needsLicense ? 0 : 1
-        if (showWizard && wizardStep >= 1) {
+        showWizard = needsLanguage || needsLicense || needsWizard
+        if (needsLanguage) {
+            wizardStep = 0
+        } else if (needsLicense) {
+            wizardStep = 1
+        } else if (needsWizard) {
+            wizardStep = 2
+        } else {
+            showWizard = false
+        }
+        if (showWizard && wizardStep >= 2) {
             runAction("preflight-check")
         }
     }
@@ -527,6 +583,9 @@ ApplicationWindow {
         }
         function onActionBusyChanged(busy) {
             root.hubBusy = busy
+        }
+        function onLanguageChanged() {
+            root.reloadTranslations()
         }
     }
 
@@ -2048,7 +2107,7 @@ ApplicationWindow {
                             onClicked: {
                                 var target = root.trophyTargetFromUi(pushAllTargetInput.editText, root.pushAllTarget)
                                 if (target <= 0) {
-                                    root.statusText = "Enter a valid trophy target."
+                                    root.statusText = root.tr("status.invalidTrophyTarget")
                                     root.statusOk = false
                                     return
                                 }
@@ -2062,7 +2121,7 @@ ApplicationWindow {
                             compact: true
                             onClicked: {
                                 if (!(root.hubState.queue && root.hubState.queue.length)) {
-                                    root.statusText = "Farm plan is empty."
+                                    root.statusText = root.tr("status.farmPlanEmpty")
                                     root.statusOk = false
                                     return
                                 }
@@ -2076,7 +2135,7 @@ ApplicationWindow {
                             compact: true
                             onClicked: {
                                 if (!(root.hubState.queue && root.hubState.queue.length)) {
-                                    root.statusText = "Farm plan is empty."
+                                    root.statusText = root.tr("status.farmPlanEmpty")
                                     root.statusOk = false
                                     return
                                 }
@@ -2352,7 +2411,7 @@ ApplicationWindow {
                         font.weight: Font.Bold
                     }
                     Text {
-                        text: settingsOnly ? "Pyla-RL Settings (bot running)" : "Pyla-RL Hub"
+                        text: settingsOnly ? root.tr("chrome.subtitle.settingsRunning") : root.tr("chrome.subtitle.hub")
                         color: theme.muted
                         font.pixelSize: 13
                         font.weight: Font.DemiBold
@@ -3083,6 +3142,33 @@ ApplicationWindow {
                                 label: "Show Setup Wizard Again"
                                 secondary: true
                                 onClicked: root.runAction("reset-setup-wizard")
+                            }
+                        }
+                    }
+
+                    FormPanel {
+                        title: root.tr("settings.language.title")
+                        FieldRow {
+                            label: root.tr("settings.language.title")
+                            hint: root.tr("settings.language.hint")
+                            Row {
+                                spacing: 8
+                                ChoicePill {
+                                    label: root.tr("settings.language.english")
+                                    selected: root.hubLanguage === "en"
+                                    onClicked: {
+                                        applyBridgeResult(hubBridge.setLanguage("en"))
+                                        root.reloadTranslations()
+                                    }
+                                }
+                                ChoicePill {
+                                    label: root.tr("settings.language.russian")
+                                    selected: root.hubLanguage === "ru"
+                                    onClicked: {
+                                        applyBridgeResult(hubBridge.setLanguage("ru"))
+                                        root.reloadTranslations()
+                                    }
+                                }
                             }
                         }
                     }
@@ -4029,28 +4115,53 @@ ApplicationWindow {
                 anchors.margins: 16
                 spacing: 12
                 Text {
-                    text: root.wizardStep === 0 ? "Step 1: Free Use License"
-                        : (root.wizardStep === 1 ? "Step 2: Environment"
-                        : (root.wizardStep === 2 ? "Step 3: Optional Setup" : "Step 4: Farm Plan"))
+                    text: root.wizardStep === 0 ? root.tr("wizard.language.title")
+                        : (root.wizardStep === 1 ? root.tr("wizard.step1.title")
+                        : (root.wizardStep === 2 ? root.tr("wizard.step2.title")
+                        : (root.wizardStep === 3 ? root.tr("wizard.step3.title") : root.tr("wizard.step4.title"))))
                     color: theme.text
                     font.pixelSize: 16
                     font.weight: Font.Bold
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: root.wizardStep === 0
-                        ? ((hubBrand ? hubBrand.productName : "Pyla-RL") + " is free and open source under CC BY-NC 4.0. You may use and modify it, but you must not sell or resell it.")
-                        : (root.wizardStep === 1
-                            ? "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview. Full guides for every feature are in the Help tab."
-                            : (root.wizardStep === 2
-                                ? "Optional: configure Discord, Telegram, or API tabs for notifications and remote control. See the Help tab for setup tutorials."
-                                : "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty. Open Help anytime for full guides."))
+                    visible: root.wizardStep !== 0
+                    text: root.wizardStep === 1
+                        ? root.tr("brand.licenseLine", {product: (hubBrand ? hubBrand.productName : "Pyla-RL"), license: (hubBrand ? hubBrand.licenseName : "CC BY-NC 4.0")})
+                        : (root.wizardStep === 2
+                            ? root.tr("wizard.step2.body")
+                            : (root.wizardStep === 3
+                                ? root.tr("wizard.step3.body")
+                                : root.tr("wizard.step4.body")))
+                    color: theme.muted
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: root.wizardStep === 0
+                    text: root.tr("wizard.language.subtitle")
                     color: theme.muted
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
                 }
                 RowLayout {
                     visible: root.wizardStep === 0
+                    spacing: 8
+                    Layout.fillWidth: true
+                    ChoicePill {
+                        label: root.tr("wizard.language.english")
+                        selected: root.hubLanguage === "en"
+                        onClicked: root.hubLanguage = "en"
+                    }
+                    ChoicePill {
+                        label: root.tr("wizard.language.russian")
+                        selected: root.hubLanguage === "ru"
+                        onClicked: root.hubLanguage = "ru"
+                    }
+                }
+                RowLayout {
+                    visible: root.wizardStep === 1
                     spacing: 8
                     Layout.fillWidth: true
 
@@ -4084,7 +4195,7 @@ ApplicationWindow {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: "I understand Pyla-RL is free and I will not sell it."
+                                text: root.tr("wizard.licenseText")
                                 color: theme.muted
                                 font.pixelSize: 11
                                 wrapMode: Text.WordWrap
@@ -4101,31 +4212,31 @@ ApplicationWindow {
                     }
                 }
                 Text {
-                    visible: root.wizardStep === 0 && !root.licenseTermsAccepted
+                    visible: root.wizardStep === 1 && !root.licenseTermsAccepted
                     Layout.fillWidth: true
-                    text: "Select the agreement above to enable Next."
+                    text: root.tr("wizard.licenseHint")
                     color: theme.faint
                     font.pixelSize: 10
                 }
                 RowLayout {
                     spacing: 8
                     HubButton {
-                        label: "Back"
+                        label: root.tr("wizard.back")
                         secondary: true
                         visible: root.wizardStep > 0
                         onClicked: root.wizardStep -= 1
                     }
                     HubButton {
-                        label: "Run Checks"
+                        label: root.tr("wizard.runChecks")
                         secondary: true
-                        visible: root.wizardStep === 1
+                        visible: root.wizardStep === 2
                         enabled: !root.hubBusy
                         onClicked: root.runAction("preflight-check")
                     }
                     HubButton {
-                        label: "Open Help"
+                        label: root.tr("wizard.openHelp")
                         secondary: true
-                        visible: root.wizardStep >= 2
+                        visible: root.wizardStep >= 3
                         onClicked: {
                             root.showWizard = false
                             root.activeTab = "Help"
@@ -4133,19 +4244,33 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     HubButton {
-                        label: root.wizardStep < 3 ? "Next" : "Finish"
-                        clickable: root.wizardStep !== 0 || root.licenseTermsAccepted
+                        label: root.wizardStep < 4 ? root.tr("wizard.next") : root.tr("wizard.finish")
+                        clickable: root.wizardStep !== 1 || root.licenseTermsAccepted
                         onClicked: {
                             if (root.wizardStep === 0) {
-                                root.runAction("accept-license")
-                                if (hubState.meta && hubState.meta.firstRunWizard) {
+                                applyBridgeResult(hubBridge.setLanguage(root.hubLanguage))
+                                root.reloadTranslations()
+                                const needsLicense = !(hubState.meta && hubState.meta.licenseAccepted)
+                                const needsWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
+                                if (needsLicense) {
                                     root.wizardStep = 1
+                                } else if (needsWizard) {
+                                    root.wizardStep = 2
                                 } else {
                                     root.showWizard = false
                                 }
                                 return
                             }
-                            if (root.wizardStep < 3) {
+                            if (root.wizardStep === 1) {
+                                root.runAction("accept-license")
+                                if (hubState.meta && hubState.meta.firstRunWizard) {
+                                    root.wizardStep = 2
+                                } else {
+                                    root.showWizard = false
+                                }
+                                return
+                            }
+                            if (root.wizardStep < 4) {
                                 root.wizardStep += 1
                             } else {
                                 root.runAction("complete-wizard")
@@ -4291,7 +4416,7 @@ ApplicationWindow {
                         onClicked: {
                             var target = root.trophyTargetFromUi(pickerTargetInput.editText, root.pickerTarget)
                             if (target <= 0) {
-                                root.statusText = "Enter a valid trophy target."
+                                root.statusText = root.tr("status.invalidTrophyTarget")
                                 root.statusOk = false
                                 return
                             }

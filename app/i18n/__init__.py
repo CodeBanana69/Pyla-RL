@@ -108,6 +108,18 @@ def reload_language_from_config() -> str:
     return get_language()
 
 
+def configure_from_general_config() -> str:
+    """Load ui_language from cfg/general_config.toml on each get_language() call."""
+
+    def _loader():
+        from utils import load_toml_as_dict
+
+        return load_toml_as_dict("cfg/general_config.toml").get("ui_language", _DEFAULT_LANGUAGE)
+
+    configure_config_loader(_loader)
+    return reload_language_from_config()
+
+
 def catalog_for_language(language: str | None = None) -> dict[str, str]:
     lang = normalize_language(language or get_language())
     catalog = dict(_load_catalog(_DEFAULT_LANGUAGE))

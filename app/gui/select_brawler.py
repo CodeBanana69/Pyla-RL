@@ -27,6 +27,7 @@ from tkinter import filedialog
 
 from gui.main import install_tk_background_error_filter
 from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
+from i18n import configure_from_general_config, translate
 
 orig_screen_width, orig_screen_height = 1920, 1080
 width, height = pyautogui.size()
@@ -38,6 +39,7 @@ scale_factor *= 96/get_dpi_scale()
 class SelectBrawler:
 
     def __init__(self, data_setter, brawlers):
+        configure_from_general_config()
         self.app = ctk.CTk()
         install_tk_background_error_filter(self.app)
         tk._default_root = self.app
@@ -48,7 +50,7 @@ class SelectBrawler:
         window_height = min(max(necessary_height, int(560 * scale_factor)), int(760 * scale_factor))
         self.content_width = int(720 * scale_factor)
         image_frame_height = max(int(250 * scale_factor), window_height - int(212 * scale_factor))
-        self.app.title("Pyla-RL")
+        self.app.title(translate("select.title"))
         self.brawlers = brawlers
 
         self.app.geometry(f"{str(int(820 * scale_factor))}x{window_height}+{str(int(600 * scale_factor))}")
@@ -139,7 +141,7 @@ class SelectBrawler:
         self.filter_entry = ctk.CTkEntry(
             search_wrap,
             textvariable=self.filter_var,
-            placeholder_text="Search brawler",
+            placeholder_text=translate("select.search"),
             font=("Segoe UI", int(13 * scale_factor), "bold"),
             width=int(348 * scale_factor),
             height=int(30 * scale_factor),
@@ -196,7 +198,7 @@ class SelectBrawler:
 
         ctk.CTkButton(
             actions,
-            text="Push All",
+            text=translate("select.pushAll"),
             command=self.open_push_all_target_window,
             fg_color=self.colors['panel'],
             hover_color=self.colors['panel2'],
@@ -210,7 +212,7 @@ class SelectBrawler:
         ).place(x=0, y=int(3 * scale_factor))
         self.start_button = ctk.CTkButton(
             actions,
-            text="Start Pyla",
+            text=translate("select.startPyla"),
             command=self.start_bot,
             fg_color=self.colors['cherry red'],
             hover_color=self.colors['red'],
@@ -225,7 +227,7 @@ class SelectBrawler:
         self.start_button.place(x=int(162 * scale_factor), y=int(3 * scale_factor))
         ctk.CTkButton(
             actions,
-            text="Push Order",
+            text=translate("select.pushOrder"),
             command=self.open_push_order_window,
             fg_color=self.colors['panel'],
             hover_color=self.colors['panel2'],
@@ -462,7 +464,7 @@ class SelectBrawler:
     def open_push_order_window(self):
         top = ctk.CTkToplevel(self.app)
         self._configure_frameless_window(top)
-        top.title("Push Order")
+        top.title(translate("select.pushOrder"))
         top.attributes("-topmost", True)
         win_w = int(820 * scale_factor)
         win_h = int(570 * scale_factor)
@@ -478,7 +480,7 @@ class SelectBrawler:
 
         selected_count_label = ctk.CTkLabel(
             top_bar,
-            text="0 selected",
+            text=translate("select.selectedCount", count=0),
             font=("Segoe UI", int(12 * scale_factor), "bold"),
             text_color=self.colors['darker_white'],
         )
@@ -530,7 +532,7 @@ class SelectBrawler:
 
         def refresh_grid_state():
             queued_brawlers = set(self.push_all_priority_order)
-            selected_count_label.configure(text=f"{len(queued_brawlers)} selected")
+            selected_count_label.configure(text=translate("select.selectedCount", count=len(queued_brawlers)))
             for brawler, widgets in grid_cards.items():
                 queued = brawler in queued_brawlers
                 widgets["frame"].configure(
@@ -550,7 +552,7 @@ class SelectBrawler:
             if not self.push_all_priority_order:
                 ctk.CTkLabel(
                     queue_frame,
-                    text="No priority order selected",
+                    text=translate("select.noPriority"),
                     font=("Segoe UI", int(13 * scale_factor), "bold"),
                     text_color=self.colors['darker_white'],
                 ).grid(row=0, column=0, padx=int(14 * scale_factor), pady=int(24 * scale_factor), sticky="w")

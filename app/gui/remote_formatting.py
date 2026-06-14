@@ -4,16 +4,6 @@ from typing import Any
 
 from runtime_control import PAUSED, STOP_REQUESTED
 
-RESULT_LABELS = {
-    "1st": "1st Place",
-    "2nd": "2nd Place",
-    "3rd": "3rd Place (Tie)",
-    "4th": "4th Place",
-    "victory": "Victory",
-    "defeat": "Defeat",
-    "draw": "Draw",
-}
-
 EMBED_COLORS = {
     "running": 0x30D158,
     "paused": 0xFF9F0A,
@@ -25,24 +15,16 @@ EMBED_COLORS = {
     "recovery": 0xFF9F0A,
 }
 
-STATUS_FIELD_LABELS = {
-    "runtime": "Runtime",
-    "state": "State",
-    "ips": "IPS",
-    "feed_fps": "Feed FPS",
-    "emulator": "Emulator",
-    "adb_device": "ADB Device",
-    "brawler": "Brawler",
-    "target": "Target",
-    "last_match": "Last Match",
-    "queue_preview": "Queue",
-    "last_recovery": "Last Recovery",
-}
+
+def _t(key: str, /, **params: Any) -> str:
+    from i18n import translate
+
+    return translate(key, **params)
 
 
 def format_result(value: Any) -> str:
-    result = str(value or "finished").strip()
-    return RESULT_LABELS.get(result.lower(), result)
+    result = str(value or "finished").strip().lower()
+    return _t(f"remote.result.{result}", default=result)
 
 
 def format_number(value: Any) -> str:
@@ -75,7 +57,7 @@ def format_queue_row_line(row: dict, *, active: bool = False) -> str:
 
 def format_queue_lines(queue, limit: int = 5) -> str:
     if not queue:
-        return "Farm plan is empty."
+        return _t("remote.queueEmpty")
     lines = []
     for index, row in enumerate(queue[:limit]):
         if not isinstance(row, dict):
@@ -83,7 +65,7 @@ def format_queue_lines(queue, limit: int = 5) -> str:
         lines.append(format_queue_row_line(row, active=index == 0))
     remaining = len(queue) - limit
     if remaining > 0:
-        lines.append(f"  … and {remaining} more")
+        lines.append(_t("remote.queueMore", count=remaining))
     return "\n".join(lines)
 
 
@@ -101,14 +83,26 @@ def format_queue_preview_names(queue, limit: int = 3) -> str:
 
 def format_status_lines(details: dict[str, Any]) -> list[tuple[str, str]]:
     lines = []
-    for key in STATUS_FIELD_LABELS:
+    for key in (
+        "runtime",
+        "state",
+        "ips",
+        "feed_fps",
+        "emulator",
+        "adb_device",
+        "brawler",
+        "target",
+        "last_match",
+        "queue_preview",
+        "last_recovery",
+    ):
         value = details.get(key)
         if value is None or value == "":
             continue
         text = str(value)
         if key == "brawler":
             text = text.title()
-        lines.append((STATUS_FIELD_LABELS[key], text))
+        lines.append((_t(f"remote.status.{key}"), text))
     return lines
 
 
@@ -157,16 +151,17 @@ def format_brawler_complete_description(details: dict[str, Any]) -> str:
     brawler = str(details.get("brawler") or "").title()
     if brawler:
         target = details.get("target")
-        suffix = f" at **{format_number(target)}**" if target not in (None, "") else ""
-        return f"**{brawler}** reached the target{suffix}."
-    return "Configured target reached."
+        if target not in (None, ""):
+            return _t("remote.targetReached", brawler=brawler, target=format_number(target))
+        return _t("remote.targetReached", brawler=brawler, target="")
+    return _t("remote.targetReachedGeneric")
 
 
 def format_recovery_description(details: dict[str, Any]) -> str:
     notice = str(details.get("notice") or details.get("detail") or "").strip()
     if notice:
         return notice
-    return "Pyla-RL triggered a recovery action."
+    return _t("remote.recoveryDefault")
 
 
 def format_field_value(key: str, value: Any) -> str:
@@ -236,26 +231,14 @@ def format_telegram_stats(stats: dict[str, Any]) -> str:
 
 
 def format_telegram_help() -> str:
-    sections = [
-        ("Control", "/status, /stats, /pause, /resume, /quit, /pause_menu"),
-        ("Farm Plan", "/push, /skip, /remove, /target, /queue"),
-        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator"),
-        ("Other", "/screenshot, /back, /press"),
-    ]
-    lines = ["<b>Pyla-RL Telegram commands</b>"]
-    for title, commands in sections:
-        lines.append(f"<b>{title}</b>")
-        lines.append(commands)
-        lines.append("")
-    lines.append("Use /setup to show this list. Save this chat ID in the Telegram tab before control commands work.")
-    return "\n".join(lines).strip()
+    return _t("remote.help.telegram")
 
 
 def format_telegram_status(runtime_state: str, details: dict[str, Any]) -> str:
-    runtime_label = runtime_label_from_state(runtime_state)
+    runtime_label = _t(f"remote.state.{runtime_label_from_state(runtime_state)}")
     lines = [
-        "<b>Pyla-RL status</b>",
-        f"<b>Runtime:</b> {runtime_label}",
+        f"<b>{_t('remote.help.statusTitle')}</b>",
+        f"<b>{_t('remote.status.runtime')}:</b> {runtime_label}",
     ]
     for label, value in format_status_lines(details):
         lines.append(f"<b>{label}:</b> {value}")

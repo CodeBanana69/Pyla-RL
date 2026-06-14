@@ -11,6 +11,7 @@ from gui.emulator_adb import (
     ports_for_emulator,
     run_adb as _run_adb,
 )
+from i18n import translate
 from utils import load_toml_as_dict, save_dict_as_toml
 
 RESOLUTION_1080P_OK = {
@@ -114,7 +115,7 @@ def check_emulator_status(emulator, port=None):
 
     adb_result = connect_emulator_adb(selected, configured_port)
     adb_ok = bool(adb_result.get("ok"))
-    adb_detail = str(adb_result.get("detail") or "ADB check failed")
+    adb_detail = str(adb_result.get("detail") or translate("preflight.adbFailed"))
     return {
         "ok": adb_ok,
         "process_ok": True,
@@ -138,7 +139,7 @@ def _emulator_status_summary(selected_emulator=None):
 def _selected_emulator_status(selected_emulator, process_ok, process_detail, adb_result):
     selected_key = normalize_emulator_name(selected_emulator).lower()
     adb_ok = bool(adb_result.get("ok"))
-    adb_detail = str(adb_result.get("detail") or "ADB check failed")
+    adb_detail = str(adb_result.get("detail") or translate("preflight.adbFailed"))
     if not process_ok:
         return {
             selected_key: {
@@ -176,7 +177,7 @@ def run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_po
             "checks": [
                 _check_item(
                     "preflight",
-                    "Pre-flight checks",
+                    translate("preflight.checksTitle"),
                     False,
                     str(exc),
                     "required",
@@ -214,14 +215,14 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
     if adb_ok and persist_port and connected_port:
         _persist_discovered_port(selected_emulator, connected_port, previous_port)
 
-    adb_label = f"ADB device {serial or f'127.0.0.1:{configured_port}'}"
+    adb_label = translate("preflight.adbLabel", serial=serial or f"127.0.0.1:{configured_port}")
     checks.append(_check_item(
         "adb",
         adb_label,
         adb_ok,
-        adb_result.get("detail") if adb_ok else adb_result.get("detail", "ADB check failed"),
+        adb_result.get("detail") if adb_ok else adb_result.get("detail", translate("preflight.adbFailed")),
         "required",
-        fix={"action": "reconnect_adb", "label": "Reconnect ADB"} if not adb_ok else None,
+        fix={"action": "reconnect_adb", "label": translate("preflight.fix.reconnectAdb")} if not adb_ok else None,
     ))
 
     selected_status = emulator_status.get(selected_emulator.lower(), {})
@@ -236,11 +237,11 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         )
     checks.append(_check_item(
         "emulator",
-        f"{selected_emulator} process",
+        translate("preflight.emulatorProcess", emulator=selected_emulator),
         process_ok,
         process_detail,
         "recommended",
-        fix={"action": "start_emulator", "label": "Start Emulator"} if not process_ok else None,
+        fix={"action": "start_emulator", "label": translate("preflight.fix.startEmulator")} if not process_ok else None,
     ))
 
     package = str(general.get("brawl_stars_package", "com.supercell.brawlstars"))
@@ -251,15 +252,15 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
             foreground_ok = package in output
     checks.append(_check_item(
         "game",
-        "Brawl Stars foreground",
+        translate("preflight.gameForeground"),
         foreground_ok,
-        "In foreground" if foreground_ok else "Open Brawl Stars on the emulator before START",
+        translate("preflight.gameInForeground") if foreground_ok else translate("preflight.gameOpenBeforeStart"),
         "recommended",
-        fix={"action": "launch_game", "label": "Launch Game"} if not foreground_ok else None,
+        fix={"action": "launch_game", "label": translate("preflight.fix.launchGame")} if not foreground_ok else None,
     ))
 
     resolution_ok = False
-    resolution_detail = "Use 1920x1080 emulator resolution for best accuracy"
+    resolution_detail = translate("preflight.resolutionHint")
     if adb_ok and serial:
         size_output, size_error = _run_adb(["shell", "wm", "size"], serial=serial)
         physical_size, override_size = _parse_wm_sizes(size_output or "")
@@ -271,18 +272,18 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
 
     checks.append(_check_item(
         "resolution",
-        "1080p recommended",
+        translate("preflight.resolutionLabel"),
         resolution_ok,
         resolution_detail,
         "recommended",
-        fix={"action": "set_resolution", "label": "Resolution Help"} if not resolution_ok else None,
+        fix={"action": "set_resolution", "label": translate("preflight.fix.resolutionHelp")} if not resolution_ok else None,
     ))
 
     checks.append(_check_item(
         "scaling",
-        "Windows display scaling 100%",
+        translate("preflight.zoom"),
         bool(correct_zoom),
-        "Display scaling is 100%" if correct_zoom else "Set Windows display scaling to 100% to avoid misclicks",
+        translate("preflight.zoomOk") if correct_zoom else translate("preflight.zoomFix"),
         "recommended",
     ))
 
@@ -302,4 +303,4 @@ def test_emulator_connection(emulator=None, port=None):
     adb = next((item for item in result["checks"] if item["id"] == "adb"), None)
     if adb and adb["ok"]:
         return True, adb["detail"]
-    return False, adb["detail"] if adb else "ADB check failed"
+    return False, adb["detail"] if adb else translate("preflight.adbFailed")

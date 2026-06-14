@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from PySide6.QtCore import QObject, Signal, Slot
+from i18n import translate
 
 BLOCKING_HUB_ACTIONS = frozenset({
     "build-push-all",
@@ -21,20 +22,20 @@ BLOCKING_HUB_ACTIONS = frozenset({
     "refresh-history",
 })
 
-PENDING_ACTION_MESSAGES = {
-    "build-push-all": "Building farm plan...",
-    "preflight-check": "Running pre-flight checks...",
-    "preflight-fix": "Applying pre-flight fix...",
-    "test-emulator": "Testing emulator connection...",
-    "api-test": "Testing Brawl Stars API...",
-    "sort-queue": "Sorting farm plan...",
-    "sort-queue-by-trophies": "Sorting farm plan...",
-    "import-queue": "Importing farm plan...",
-    "calibrate-performance": "Calibrating performance profile...",
-    "check-updates": "Checking for updates...",
-    "export-history": "Exporting match history...",
-    "refresh-history": "Refreshing match history...",
-    "start-pyla": "Checking pre-flight...",
+PENDING_ACTION_KEYS = {
+    "build-push-all": "hub.action.buildQueueRunning",
+    "preflight-check": "hub.action.preflightRunning",
+    "preflight-fix": "hub.action.preflightRunning",
+    "test-emulator": "hub.action.testEmulatorRunning",
+    "api-test": "hub.action.apiTestRunning",
+    "sort-queue": "hub.action.sortQueueRunning",
+    "sort-queue-by-trophies": "hub.action.sortQueueRunning",
+    "import-queue": "hub.action.importQueueRunning",
+    "calibrate-performance": "hub.action.calibrateRunning",
+    "check-updates": "hub.action.checkUpdatesRunning",
+    "export-history": "hub.action.exportHistoryRunning",
+    "refresh-history": "hub.action.refreshHistoryRunning",
+    "start-pyla": "hub.action.startingPyla",
 }
 
 
@@ -43,7 +44,10 @@ def is_blocking_hub_action(action: str) -> bool:
 
 
 def pending_action_message(action: str) -> str:
-    return PENDING_ACTION_MESSAGES.get(str(action or "").strip().lower(), "Working...")
+    key = PENDING_ACTION_KEYS.get(str(action or "").strip().lower())
+    if key:
+        return translate(key)
+    return translate("status.working")
 
 
 class HubActionWorker(QObject):

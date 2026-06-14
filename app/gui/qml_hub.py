@@ -8,6 +8,12 @@ from pathlib import Path
 from gui.hub_state import HubStateStore, _to_bool as _to_bool_setting
 
 
+def _hub_msg(key, /, **params):
+    from i18n import translate
+
+    return translate(f"hub.action.{key}", **params)
+
+
 def _normalize_dialog_path(raw_path):
     path = str(raw_path or "").strip()
     if not path:
@@ -91,6 +97,7 @@ class QmlHub:
             instancesUpdated = Signal()
             actionFinished = Signal(str)
             actionBusyChanged = Signal(bool)
+            languageChanged = Signal()
 
             def __init__(
                 self,
@@ -142,6 +149,28 @@ class QmlHub:
             def actionBusy(self):
                 return self._action_busy
 
+            @Slot(result=str)
+            def language(self):
+                from i18n import get_language
+
+                return get_language()
+
+            @Slot(str, str, result=str)
+            def tr(self, key, params_json=""):
+                from i18n import translate
+
+                params = json.loads(params_json) if params_json else {}
+                return translate(key, **params)
+
+            @Slot(str, result=str)
+            def setLanguage(self, language):
+                from i18n import set_language
+
+                set_language(language, persist=True)
+                self._store.reload_general_config()
+                self.languageChanged.emit()
+                return json.dumps({"ok": True, "state": self._ui_state()})
+
             def _set_action_busy(self, busy):
                 busy = bool(busy)
                 if self._action_busy == busy:
@@ -170,10 +199,7 @@ class QmlHub:
                     thread.wait(3000)
                 self.actionFinished.emit(json.dumps({
                     "ok": False,
-                    "message": (
-                        "Hub action timed out. If checks never finish, restart the Hub "
-                        "and confirm the emulator is running."
-                    ),
+                    "message": _hub_msg("actionTimeout"),
                     "state": self._ui_state(),
                 }))
 
@@ -191,7 +217,7 @@ class QmlHub:
                     if self._action_thread.isRunning():
                         return json.dumps({
                             "ok": False,
-                            "message": "Another hub action is still running.",
+                            "message": _hub_msg("anotherRunning"),
                             "state": self._ui_state(),
                         })
                     self._clear_action_state()
@@ -423,7 +449,7 @@ class QmlHub:
                     payload = json.loads(payload_json or "{}")
                     instance_id = payload.get("id", "")
                     self._store.save_instance_local_settings(instance_id, payload)
-                    return json.dumps({"ok": True, "message": "Instance settings saved.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": _hub_msg("settingsSaved"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -436,7 +462,7 @@ class QmlHub:
                         payload.get("from_id", "default"),
                     )
                     self.queueChanged.emit()
-                    return json.dumps({"ok": True, "message": "Farm plan copied.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": _hub_msg("farmPlanCopied"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -472,7 +498,7 @@ class QmlHub:
                         from discord_notifier import last_discord_error
 
                         raise ValueError(last_discord_error() or "Webhook test failed.")
-                    return json.dumps({"ok": True, "message": "Webhook test sent.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": _hub_msg("webhookTestSent"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -481,7 +507,7 @@ class QmlHub:
                 try:
                     payload = json.loads(payload_json or "{}")
                     profile = self._store.save_instance_profile(payload.get("id", ""), payload)
-                    return json.dumps({"ok": True, "message": f"Saved instance '{profile['id']}'.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": _hub_msg("instanceSaved", id=profile['id']), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -577,6 +603,7 @@ class QmlHub:
 
             def _run_preflight(self):
                 from gui.preflight import run_preflight_checks
+                from i18n import translate
 
                 emulator, port = self._preflight_emulator_args()
                 try:
@@ -590,7 +617,7 @@ class QmlHub:
                         "ready": False,
                         "checks": [{
                             "id": "preflight",
-                            "label": "Pre-flight checks",
+                            "label": translate("preflight.checksTitle"),
                             "ok": False,
                             "severity": "required",
                             "detail": str(exc),
@@ -761,7 +788,7 @@ class QmlHub:
                     for check in result["checks"]:
                         prefix = "OK" if check["ok"] else "WARN"
                         lines.append(f"{prefix}: {check['label']} - {check['detail']}")
-                    summary = "Ready to start." if result["ready"] else "Fix required checks before START."
+                    summary = _hub_msg("preflightReady") if result["ready"] else _hub_msg("preflightFixRequired")
                     return summary + "\n" + "\n".join(lines)
                 if action == "preflight-fix":
                     from gui.preflight_fixes import run_preflight_fix
@@ -782,8 +809,8 @@ class QmlHub:
                     emulator, port = self._preflight_emulator_args()
                     ok, message = test_emulator_connection(emulator=emulator, port=port)
                     if ok:
-                        return f"Emulator connection OK: {message}"
-                    return f"Emulator connection failed: {message}"
+                        return _hub_msg("emulatorOk", detail=message)
+                    return _hub_msg("emulatorFailed", detail=message)
                 if action == "export-history":
                     path = self._store.export_match_history_csv()
                     return f"Match history exported to {path}"
@@ -815,7 +842,7 @@ class QmlHub:
                     if not queue:
                         raise ValueError("Selected file did not contain a brawler queue.")
                     save_queue(queue)
-                    return f"Imported {len(queue)} brawler(s) from {Path(path).name}."
+                    return _hub_msg("farmPlanImported", count=len(queue), name=Path(path).name)
                 if action == "export-queue":
                     path = _normalize_dialog_path(payload.get("path", ""))
                     queue = self._store.load_queue()
@@ -828,14 +855,14 @@ class QmlHub:
                     from gui.brawler_queue import save_queue
 
                     save_queue(queue, path)
-                    return f"Exported {len(queue)} brawler(s) to {Path(path).name}."
+                    return _hub_msg("farmPlanExported", count=len(queue), name=Path(path).name)
                 if action == "clear-queue":
                     self._store.save_queue([])
-                    return "Farm plan cleared."
+                    return _hub_msg("queueCleared")
                 if action == "build-push-all":
                     target = int(payload.get("target", 1000) or 1000)
                     queue = self._store.build_push_all(target)
-                    return f"Built Push All queue with {len(queue)} brawler(s) to {target} trophies."
+                    return _hub_msg("queueBuilt", count=len(queue), target=target)
                 if action == "sort-queue-by-trophies":
                     descending = str(payload.get("order", "desc")).strip().lower() != "asc"
                     queue = self._store.sort_queue_by_trophies(descending=descending)
@@ -930,13 +957,13 @@ class QmlHub:
                     return "First-run wizard dismissed."
                 if action == "show-wizard":
                     return {
-                        "message": "Setup wizard reopened.",
+                        "message": _hub_msg("wizardReopened"),
                         "showWizard": True,
                     }
                 if action == "reset-setup-wizard":
                     self._store.update_config("settings", "first_run_wizard", "yes")
                     return {
-                        "message": "Setup wizard will show again on next launch. Opening it now.",
+                        "message": _hub_msg("wizardReset"),
                         "showWizard": True,
                     }
                 if action == "accept-license":
@@ -945,7 +972,7 @@ class QmlHub:
                     from utils import project_root
 
                     mark_hub_license_acknowledged(project_root())
-                    return "License accepted. Pyla-RL is free and must not be sold."
+                    return _hub_msg("licenseAccepted")
                 if action == "check-updates":
                     import webbrowser
 
@@ -1001,7 +1028,7 @@ class QmlHub:
                 if not self._preflight_cache.get("ready"):
                     return json.dumps({
                         "ok": False,
-                        "message": "Pre-flight checks failed. Run checks on Overview and fix required items.",
+                        "message": _hub_msg("preflightFailedStart"),
                         "state": self._ui_state(),
                     })
                 self._store.apply_state({
@@ -1015,7 +1042,7 @@ class QmlHub:
                     persist_queue(queue)
                 return json.dumps({
                     "ok": True,
-                    "message": "Starting Pyla-RL...",
+                    "message": _hub_msg("startingMessage"),
                     "state": self._ui_state(),
                     "closeHub": True,
                 })
@@ -1025,7 +1052,7 @@ class QmlHub:
                 if self._settings_only:
                     return json.dumps({
                         "ok": False,
-                        "message": "START is disabled while the bot is running. Close this window when finished editing settings.",
+                        "message": _hub_msg("settingsDisabledWhileRunning"),
                         "state": self._ui_state(),
                     })
                 from gui.instance_config import is_multi_instance_enabled
@@ -1033,7 +1060,7 @@ class QmlHub:
                 if is_multi_instance_enabled():
                     return json.dumps({
                         "ok": True,
-                        "message": "Multi-instance mode is enabled. Start bots from the Instances tab.",
+                        "message": _hub_msg("multiInstanceUseInstances"),
                         "state": self._ui_state(),
                         "multiInstance": True,
                     })
@@ -1042,7 +1069,7 @@ class QmlHub:
                 if not _to_bool(self._store.general_config.get("license_accepted", "no")):
                     return json.dumps({
                         "ok": False,
-                        "message": "Accept the free-use license in the hub wizard or Settings → About before START.",
+                        "message": _hub_msg("licenseRequiredBeforeStart"),
                         "state": self._ui_state(),
                     })
                 return self._start_background_action("start-pyla", start_pyla=True)
@@ -1059,7 +1086,7 @@ class QmlHub:
                     from gui.hub_tutorials import open_tutorial_doc
 
                     path = open_tutorial_doc(doc_path)
-                    return json.dumps({"ok": True, "message": f"Opened {Path(path).name}"})
+                    return json.dumps({"ok": True, "message": _hub_msg("openedFile", name=Path(path).name)})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc)})
 
@@ -1105,6 +1132,18 @@ class QmlHub:
         from gui import brand
 
         self._store = HubStateStore()
+        from i18n import (
+            catalog_for_language,
+            configure_cache_invalidator,
+            configure_config_loader,
+            get_language,
+            reload_language_from_config,
+            translate,
+        )
+
+        configure_config_loader(lambda: self._store.general_config.get("ui_language", "en"))
+        configure_cache_invalidator(self._store.invalidate_static_ui_cache)
+        reload_language_from_config()
         self._multi_instance_service = None
 
         def _start_multi_instance_service():
@@ -1155,12 +1194,15 @@ class QmlHub:
         context.setContextProperty("hubVersion", self.version_str)
         context.setContextProperty("latestVersion", self.latest_version_str or "")
         context.setContextProperty("correctZoom", self.correct_zoom)
+        _lang = get_language()
+        context.setContextProperty("hubLanguage", _lang)
+        context.setContextProperty("hubI18n", catalog_for_language(_lang))
         context.setContextProperty("hubBrand", {
-            "productName": brand.PRODUCT_NAME,
-            "freeNotice": brand.FREE_NOTICE,
-            "footerNotice": brand.FOOTER_NOTICE,
+            "productName": translate("brand.productName"),
+            "freeNotice": translate("brand.freeNotice"),
+            "footerNotice": translate("brand.footerNotice"),
             "officialGithub": brand.OFFICIAL_GITHUB,
-            "licenseName": brand.LICENSE_NAME,
+            "licenseName": translate("brand.licenseName"),
         })
 
         qml_path = Path(__file__).resolve().parent / "qml" / "PylaHub.qml"

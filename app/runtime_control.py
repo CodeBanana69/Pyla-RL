@@ -366,6 +366,9 @@ def run_window(state_path, metrics_path=None):
     import customtkinter as ctk
 
     from gui.theme import get_palette, load_ui_theme_mode, resolve_theme_mode
+    from i18n import configure_from_general_config, translate
+
+    configure_from_general_config()
 
     pal = get_palette(load_ui_theme_mode())
     ctk.set_appearance_mode(resolve_theme_mode(load_ui_theme_mode()))
@@ -380,7 +383,7 @@ def run_window(state_path, metrics_path=None):
         window_height += 58
 
     root = ctk.CTk()
-    root.title("Pyla-RL Control")
+    root.title(translate("pause.title"))
     root.geometry(f"310x{window_height}")
     root.resizable(False, False)
     root.attributes("-topmost", True)
@@ -388,7 +391,7 @@ def run_window(state_path, metrics_path=None):
     root.configure(fg_color=pal["chrome"])
 
     compact_root = ctk.CTkToplevel(root)
-    compact_root.title("Pyla-RL Control")
+    compact_root.title(translate("pause.title"))
     compact_root.geometry("286x54")
     compact_root.resizable(False, False)
     compact_root.attributes("-topmost", True)
@@ -402,11 +405,11 @@ def run_window(state_path, metrics_path=None):
     except (IndexError, ValueError):
         owner_pid = None
 
-    status_var = tk.StringVar(value="Running")
-    button_var = tk.StringVar(value="Pause Bot")
-    ips_var = tk.StringVar(value="IPS --")
-    compact_status_var = tk.StringVar(value="Running")
-    compact_button_var = tk.StringVar(value="Pause")
+    status_var = tk.StringVar(value=translate("pause.running"))
+    button_var = tk.StringVar(value=translate("pause.pauseBot"))
+    ips_var = tk.StringVar(value=translate("pause.ipsEmpty"))
+    compact_status_var = tk.StringVar(value=translate("pause.running"))
+    compact_button_var = tk.StringVar(value=translate("pause.pause"))
 
     def start_move(window, event):
         window._pyla_drag_offset = (event.x_root - window.winfo_x(), event.y_root - window.winfo_y())
@@ -463,7 +466,7 @@ def run_window(state_path, metrics_path=None):
 
     ctk.CTkLabel(
         chrome,
-        text="Pyla  ·  Control",
+        text=translate("pause.title"),
         text_color=pal["text"],
         font=("Segoe UI", 13, "bold"),
     ).place(relx=0.5, rely=0.5, anchor="center")
@@ -531,7 +534,7 @@ def run_window(state_path, metrics_path=None):
 
     title = ctk.CTkLabel(
         panel,
-        text="STATUS",
+        text=translate("pause.status"),
         text_color=pal["muted"],
         font=("Segoe UI", 11, "bold"),
     )
@@ -664,7 +667,7 @@ def run_window(state_path, metrics_path=None):
             session_line2_var.get(),
             session_notice_var.get(),
         )
-        session_notice_var.set("Copied!")
+        session_notice_var.set(translate("pause.copied"))
         if copy_reset_job["id"] is not None:
             root.after_cancel(copy_reset_job["id"])
 
@@ -705,7 +708,7 @@ def run_window(state_path, metrics_path=None):
 
     stop_button = ctk.CTkButton(
         button_row,
-        text="Stop Bot",
+        text=translate("pause.stopBot"),
         command=request_stop_bot,
         width=170,
         height=34,
@@ -721,7 +724,7 @@ def run_window(state_path, metrics_path=None):
 
     hub_button = ctk.CTkButton(
         button_row,
-        text="Open Hub",
+        text=translate("pause.openHub"),
         command=open_settings_hub,
         width=170,
         height=34,
@@ -743,9 +746,9 @@ def run_window(state_path, metrics_path=None):
         handle_control_command()
         paused = read_state(state_path) == PAUSED
         metrics = read_current_metrics()
-        status_text = "Paused" if paused else "Running"
-        button_text = "Resume Bot" if paused else "Pause Bot"
-        compact_button_text = "Resume" if paused else "Pause"
+        status_text = translate("pause.paused") if paused else translate("pause.running")
+        button_text = translate("pause.resumeBot") if paused else translate("pause.pauseBot")
+        compact_button_text = translate("pause.resume") if paused else translate("pause.pause")
         status_color = pal["accent"] if paused else pal["success"]
         status_var.set(status_text)
         button_var.set(button_text)
@@ -812,7 +815,7 @@ def run_window(state_path, metrics_path=None):
 
     ctk.CTkButton(
         compact_chrome,
-        text="Hub",
+        text=translate("pause.hub"),
         command=open_settings_hub,
         width=44,
         height=30,

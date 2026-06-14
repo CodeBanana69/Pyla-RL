@@ -3,7 +3,44 @@ import os
 from pathlib import Path
 
 from gui.hub_validators import validate_config_value
+from i18n import catalog_for_language, normalize_language, reload_language_from_config, translate
 from utils import load_toml_as_dict, resolve_project_path, save_dict_as_toml
+
+_NAV_TAB_IDS = (
+    "Overview",
+    "Instances",
+    "Farm Plan",
+    "Settings",
+    "Discord",
+    "Telegram",
+    "API",
+    "Timers",
+    "Match History",
+    "Help",
+)
+_NAV_KEYS = (
+    "nav.overview",
+    "nav.instances",
+    "nav.farmPlan",
+    "nav.settings",
+    "nav.discord",
+    "nav.telegram",
+    "nav.api",
+    "nav.timers",
+    "nav.matchHistory",
+    "nav.help",
+)
+_QUEUE_SORT_SPEC = (
+    ("cups_desc", "farmPlan.sort.cupsHighToLow"),
+    ("cups_asc", "farmPlan.sort.cupsLowToHigh"),
+    ("gap_asc", "farmPlan.sort.closestToTarget"),
+    ("gap_desc", "farmPlan.sort.furthestFromTarget"),
+    ("target_desc", "farmPlan.sort.targetHighToLow"),
+    ("target_asc", "farmPlan.sort.targetLowToHigh"),
+    ("name_asc", "farmPlan.sort.nameAToZ"),
+    ("name_desc", "farmPlan.sort.nameZToA"),
+    ("efficiency", "farmPlan.sort.bestTrophiesPerHour"),
+)
 
 
 def _to_bool(value):
@@ -58,6 +95,8 @@ class HubStateStore:
         "cpu_or_gpu": ("general", "str"),
         "directml_device_id": ("general", "str"),
         "ui_theme": ("general", "str"),
+        "ui_language": ("general", "str"),
+        "ui_language_selected": ("general", "yesno"),
         "ui_animations": ("general", "yesno"),
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
@@ -210,11 +249,18 @@ class HubStateStore:
         self._cached_static_meta = None
         self._cached_source_status = None
 
+    def reload_general_config(self):
+        self.general_config = load_toml_as_dict(self.general_config_path)
+        self.invalidate_static_ui_cache()
+        reload_language_from_config()
+        return self.ui_state()
+
     def _static_ui_meta(self):
         if self._cached_static_meta is not None:
             return self._cached_static_meta
 
         from gui.brawler_queue import brawler_icon_uri, load_push_order
+        from gui import brand
         from gui.hub_tutorials import tutorial_topics
         from gui.official_source import read_build_info, verify_official_source
         from performance_profile import PERFORMANCE_PROFILES
@@ -223,10 +269,31 @@ class HubStateStore:
         if self._cached_source_status is None:
             self._cached_source_status = verify_official_source()
 
+        lang = normalize_language(self.general_config.get("ui_language", "en"))
         brawler_names = get_brawler_list()
         self._cached_static_meta = {
+            "navTabIds": list(_NAV_TAB_IDS),
+            "navItems": [translate(key, language=lang) for key in _NAV_KEYS],
+            "queueSortOptions": [
+                {"id": sort_id, "label": translate(label_key, language=lang)}
+                for sort_id, label_key in _QUEUE_SORT_SPEC
+            ],
+            "brand": {
+                "productName": translate("brand.productName", language=lang),
+                "freeNotice": translate("brand.freeNotice", language=lang),
+                "footerNotice": translate("brand.footerNotice", language=lang),
+                "officialGithub": brand.OFFICIAL_GITHUB,
+                "licenseName": translate("brand.licenseName", language=lang),
+            },
+            "i18n": catalog_for_language(lang),
+            "uiLanguage": lang,
+            "uiLanguageSelected": _to_bool(self.general_config.get("ui_language_selected", "yes")),
             "profileDescriptions": {
-                key: profile.get("description", "")
+                key: translate(
+                    f"profile.{key}",
+                    language=lang,
+                    default=profile.get("description", ""),
+                )
                 for key, profile in PERFORMANCE_PROFILES.items()
             },
             "firstRunWizard": _to_bool(self.general_config.get("first_run_wizard", "yes")),
@@ -240,7 +307,7 @@ class HubStateStore:
                 {"name": name, "icon": brawler_icon_uri(name)}
                 for name in brawler_names
             ],
-            "tutorials": tutorial_topics(),
+            "tutorials": tutorial_topics(lang),
             "playstyles": [
                 {
                     "filename": item.get("filename", ""),
@@ -315,6 +382,8 @@ class HubStateStore:
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
         self.general_config.setdefault("ui_theme", "system")
+        self.general_config.setdefault("ui_language", "en")
+        self.general_config.setdefault("ui_language_selected", "yes")
         self.general_config.setdefault("ui_animations", "yes")
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
@@ -692,6 +761,9 @@ class HubStateStore:
             save_dict_as_toml(self.time_tresholds, self.time_tresholds_path)
         else:
             raise KeyError(section)
+        if section == "settings" and key in {"ui_language", "ui_language_selected"}:
+            self.invalidate_static_ui_cache()
+            reload_language_from_config()
         return self.ui_state()
 
     def export_match_history_csv(self):

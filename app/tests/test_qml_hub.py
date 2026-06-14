@@ -344,7 +344,7 @@ class QmlHubStateTests(unittest.TestCase):
 
         self.assertNotIn('label: "LDPlayer"\n                                    iconKind:', qml)
         self.assertNotIn('label: "MuMu"\n                                    iconKind:', qml)
-        self.assertIn('text: settingsOnly ? "Pyla-RL Settings (bot running)" : "Pyla-RL Hub"', qml)
+        self.assertIn('text: settingsOnly ? root.tr("chrome.subtitle.settingsRunning") : root.tr("chrome.subtitle.hub")', qml)
         self.assertIn("id: startButton", qml)
         self.assertIn("id: closeSettingsButton", qml)
         self.assertIn("id: startBar", qml)
@@ -371,9 +371,9 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("if self._action_worker is None:", bridge)
         self.assertIn("statusToastTimer.stop()", qml)
         self.assertIn("if (result.ok && !result.pending)", qml)
-        self.assertIn('statusText = "Run pre-flight checks first, then press START."', qml)
+        self.assertIn('statusText = root.tr("chrome.startBar.runChecks")', qml)
         self.assertIn("reloadState()\n        }", qml)
-        self.assertIn("statusText = \"Please wait for the current hub action to finish.\"\n            statusOk = false", qml)
+        self.assertIn('statusText = root.tr("status.waitForAction")', qml)
         self.assertIn("enabled: !root.hubBusy\n                                        onClicked: applyBridgeResult(hubBridge.runPreflightFix", qml)
 
     def test_normalize_dialog_path_handles_file_urls(self):
@@ -415,15 +415,12 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("result.showWizard", qml)
         self.assertIn("def tutorialTopicsJson(self):", bridge)
         self.assertIn("def openTutorialDoc(self, doc_path):", bridge)
-        self.assertIn('"tutorials": tutorial_topics()', Path("gui/hub_state.py").read_text(encoding="utf-8"))
+        self.assertIn('"tutorials": tutorial_topics(lang)', Path("gui/hub_state.py").read_text(encoding="utf-8"))
 
     def test_qml_instances_tab_is_always_available(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 
-        self.assertIn(
-            'readonly property var navItems: ["Overview", "Instances", "Farm Plan", "Settings", "Discord", "Telegram", "API", "Timers", "Match History", "Help"]',
-            qml,
-        )
+        self.assertIn("readonly property var navTabIds:", qml)
         self.assertIn("setMultiInstanceEnabled", qml)
         self.assertIn('visible: root.activeTab === "Instances"', qml)
 
@@ -480,7 +477,7 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("onClicked: hubBridge.openPatreon()", qml)
 
     def test_qml_hub_is_primary_without_legacy_fallback(self):
-        main_source = Path("app/main.py").read_text(encoding="utf-8")
+        main_source = (Path(__file__).resolve().parent.parent / "main.py").read_text(encoding="utf-8")
 
         self.assertIn("from gui.qml_hub import QmlHub", main_source)
         self.assertIn("return QmlHub(*args, **kwargs)", main_source)

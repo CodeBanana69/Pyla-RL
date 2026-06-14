@@ -42,6 +42,8 @@ def ensure_hub_first_run_wizard(project_dir):
 
     config_path = _cfg_dir(project_dir) / "general_config.toml"
     config = toml.load(config_path) if config_path.exists() else {}
+    config.setdefault("ui_language", "en")
+    config.setdefault("ui_language_selected", "no")
     config["first_run_wizard"] = "yes"
     config["license_accepted"] = "no"
     config_path.parent.mkdir(parents=True, exist_ok=True)

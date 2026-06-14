@@ -140,16 +140,18 @@ def build_error_embed(message: str) -> discord.Embed:
 
 
 def build_help_embed() -> discord.Embed:
+    from i18n import translate
+
     embed = discord.Embed(
-        title="Pyla-RL Remote Commands",
-        description="Use these slash commands to control your local bot instance.",
+        title=translate("remote.help.discordTitle"),
+        description=translate("remote.help.discordDescription"),
         color=EMBED_COLORS["info"],
     )
     sections = [
-        ("Control", "/start, /pause, /stop_all, /status, /stats"),
-        ("Farm Plan", "/push, /skip, /remove, /target, /queue"),
-        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator"),
-        ("Other", "/screenshot, /press, /back, /pause_menu"),
+        (translate("remote.help.sectionControl"), translate("remote.help.discordControlCommands")),
+        (translate("remote.help.sectionFarmPlan"), translate("remote.help.discordFarmCommands")),
+        (translate("remote.help.sectionRecovery"), translate("remote.help.discordRecoveryCommands")),
+        (translate("remote.help.sectionOther"), translate("remote.help.discordOtherCommands")),
     ]
     for name, commands in sections:
         embed.add_field(name=name, value=commands, inline=False)

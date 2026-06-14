@@ -314,7 +314,9 @@ class TelegramControlServer:
             )
             return
 
-        await async_send_message(chat_id, "Unknown command. Send /help.", token=token)
+        from i18n import translate
+
+        await async_send_message(chat_id, translate("remote.help.unknownCommand"), token=token)
 
     async def _send_farm_plan_result(self, chat_id, token, ok, message, *, title: str) -> None:
         if ok and isinstance(message, dict):
