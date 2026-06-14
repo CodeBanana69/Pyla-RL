@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 from gui.emulator_adb import connect_emulator_adb, run_adb
@@ -31,7 +33,27 @@ def run_preflight_fix(action: str, *, emulator: str | None = None, port: int | N
         return _launch_game(selected, configured_port)
     if action == "set_resolution":
         return False, "Set emulator resolution to 1920x1080 in the emulator settings, then re-run pre-flight."
+    if action == "fix_gpu_runtime":
+        return _fix_gpu_runtime()
     return False, f"Unknown fix action '{action}'."
+
+
+def _fix_gpu_runtime() -> tuple[bool, str]:
+    from gpu_support import primary_vendor, recommended_setup_onnx_variant
+
+    variant = recommended_setup_onnx_variant(primary_vendor())
+    script = str(Path(__file__).resolve().parents[1] / "tools" / "fix_gpu_runtime.py")
+    completed = subprocess.run(
+        [sys.executable, script, variant],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    output = (completed.stdout or completed.stderr or "").strip()
+    if completed.returncode == 0:
+        return True, output or f"GPU runtime repair finished ({variant})."
+    return False, output or f"GPU runtime repair failed ({variant})."
 
 
 def _start_emulator(emulator: str, port: int) -> tuple[bool, str]:

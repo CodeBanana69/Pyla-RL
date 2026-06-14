@@ -118,7 +118,7 @@ def feed_fps_warning(metrics):
     return feed_fps + 1.5 < ips
 
 
-def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None):
+def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None, perf=None, system=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     samples = list(history)
@@ -132,6 +132,10 @@ def write_metrics(path, ips, feed_fps, history, max_samples=None, session=None):
     normalized_session = _normalize_session(session)
     if normalized_session is not None:
         payload["session"] = normalized_session
+    if isinstance(perf, dict) and perf:
+        payload["perf"] = perf
+    if isinstance(system, dict) and system:
+        payload["system"] = system
     text = json.dumps(payload)
     for attempt in range(3):
         try:
@@ -167,6 +171,12 @@ def read_metrics(path):
     session = _normalize_session(data.get("session"))
     if session is not None:
         result["session"] = session
+    perf = data.get("perf")
+    if isinstance(perf, dict):
+        result["perf"] = perf
+    system = data.get("system")
+    if isinstance(system, dict):
+        result["system"] = system
     return result
 
 

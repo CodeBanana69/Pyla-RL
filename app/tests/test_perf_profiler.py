@@ -1,0 +1,94 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from perf_profiler import PerfProfiler, configure_profiler, get_profiler
+from runtime_metrics import read_metrics, write_metrics
+
+
+class PerfProfilerTests(unittest.TestCase):
+    def test_rollup_computes_stage_stats(self):
+        profiler = PerfProfiler({"perf_instrumentation": "yes"})
+        profiler.record("main_onnx", 20.0)
+        profiler.record("main_onnx", 30.0)
+        profiler.record("play_main", 55.0)
+        rollup = profiler.rollup(ips=10.0, feed_fps=60.0, game_state="match")
+        self.assertEqual(rollup["stages"]["main_onnx"]["count"], 2)
+        self.assertEqual(rollup["stages"]["main_onnx"]["avg_ms"], 25.0)
+        self.assertIn("bottleneck", rollup)
+
+    def test_classify_cpu_inference_fallback(self):
+        profiler = PerfProfiler({"perf_instrumentation": "yes"})
+        profiler.set_inference_health({"inference_health": {"using_cpu_despite_gpu": True}})
+        rollup = {"stages": {}, "counters": {}, "loop_ms": {"avg_ms": 0.0, "total_ms": 0.0}}
+        label = profiler.classify_bottleneck(rollup, ips=5.0, feed_fps=60.0)
+        self.assertEqual(label, "cpu_inference_fallback")
+
+    def test_disabled_profiler_is_noop(self):
+        configure_profiler({"perf_instrumentation": "no", "perf_auto_when_ips_below": 0})
+        profiler = get_profiler()
+        with profiler.time_stage("play_main"):
+            pass
+        self.assertEqual(profiler.rollup(), {})
+
+    def test_auto_enable_when_ips_low(self):
+        profiler = PerfProfiler({"perf_instrumentation": "no", "perf_auto_when_ips_below": 12.0})
+        profiler.maybe_auto_enable(8.0)
+        self.assertTrue(profiler.enabled)
+
+
+class RuntimeMetricsPerfTests(unittest.TestCase):
+    def test_write_read_metrics_with_perf_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runtime_metrics.json"
+            perf = {"bottleneck": "inference_bound", "stages": {"main_onnx": {"avg_ms": 12.0}}}
+            system = {"primary_gpu": "Test GPU"}
+            write_metrics(path, 15.0, 60.0, [15.0], perf=perf, system=system)
+            data = read_metrics(path)
+            self.assertEqual(data["ips"], 15.0)
+            self.assertEqual(data["perf"]["bottleneck"], "inference_bound")
+            self.assertEqual(data["system"]["primary_gpu"], "Test GPU")
+
+    def test_read_metrics_backward_compatible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "runtime_metrics.json"
+            path.write_text(
+                json.dumps({"ips": 9.0, "feed_fps": 30.0, "history": [9.0]}),
+                encoding="utf-8",
+            )
+            data = read_metrics(path)
+            self.assertNotIn("perf", data)
+            self.assertEqual(data["feed_fps"], 30.0)
+
+
+class InferenceHealthTests(unittest.TestCase):
+    @patch("inference_health.detect_graphics_cards", return_value=[("nvidia", "NVIDIA GeForce RTX 3060")])
+    @patch("inference_health.primary_vendor", return_value="nvidia")
+    @patch("inference_health.resolve_inference_device", return_value="cuda")
+    def test_audit_flags_cpu_despite_gpu(self, *_mocks):
+        from unittest.mock import Mock
+
+        from inference_health import audit_inference_setup
+
+        detector = Mock()
+        detector.get_provider_info.return_value = {
+            "requested": "CUDAExecutionProvider",
+            "actual": "CPUExecutionProvider",
+            "model_path": "models/mainInGameModel.onnx",
+        }
+        detector.detect_objects.return_value = {}
+
+        play = Mock()
+        play.Detect_main_info = detector
+        play.Detect_tile_detector = None
+        play.Detect_close_tile_detector = None
+
+        health = audit_inference_setup(play, {"cpu_or_gpu": "auto"})
+        self.assertTrue(health["inference_health"]["using_cpu_despite_gpu"])
+        self.assertEqual(health["provider_summary"], "CPU(!)")
+
+
+if __name__ == "__main__":
+    unittest.main()

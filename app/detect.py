@@ -1,5 +1,6 @@
 ﻿import os
 import platform
+import time
 import warnings
 
 import cv2
@@ -218,10 +219,10 @@ def _postprocess_raw(raw_output, conf_thresh=0.6, iou_thresh=0.6):
 
 
 class Detect:
-    def __init__(self, model_path, ignore_classes=None, classes=None, input_size=(640, 640)):
-        optimal_threads = get_optimal_threads()
-        cv2.setNumThreads(optimal_threads)
+    def __init__(self, model_path, ignore_classes=None, classes=None, input_size=(640, 640), model_tag="model"):
+        self.model_tag = str(model_tag or "model")
         self.preferred_device = load_toml_as_dict("cfg/general_config.toml")["cpu_or_gpu"]
+        self.requested_provider = ""
         self.model_path = resolve_project_path(model_path)
         self.classes = classes
         self.ignore_classes = set(ignore_classes) if ignore_classes else set()
@@ -231,6 +232,10 @@ class Detect:
             raise FileNotFoundError(f"Model file not found: {self.model_path}")
 
         self.model, self.device = self.load_model()
+        if self.device != "CPUExecutionProvider":
+            cv2.setNumThreads(1)
+        else:
+            cv2.setNumThreads(get_optimal_threads())
         self.input_name = self.model.get_inputs()[0].name
         self.output_names = [output.name for output in self.model.get_outputs()]
         self._padded_img_buffer = np.full(
@@ -244,7 +249,29 @@ class Detect:
     def load_model(self):
         global _provider_fallback_warning_printed
         providers = _build_providers(self.preferred_device)
+        self.requested_provider = _provider_name(providers[0])
         return self._load_model_with_providers(providers)
+
+    def get_provider_info(self):
+        return {
+            "requested": self.requested_provider or self.device,
+            "actual": self.device,
+            "model_path": self.model_path,
+            "model_tag": self.model_tag,
+        }
+
+    def _record_init_fallback(self, requested_provider, actual_provider):
+        try:
+            from inference_health import record_provider_fallback
+
+            record_provider_fallback(
+                self.model_tag,
+                requested_provider,
+                actual_provider,
+                error="session initialized on fallback provider",
+            )
+        except Exception:
+            pass
 
     def _load_model_with_providers(self, providers):
         global _provider_fallback_warning_printed
@@ -262,6 +289,8 @@ class Detect:
             so.inter_op_num_threads = 1
         model = ort.InferenceSession(self.model_path, sess_options=so, providers=providers)
         actual_provider = model.get_providers()[0]
+        if actual_provider == "CPUExecutionProvider" and first_provider != "CPUExecutionProvider":
+            self._record_init_fallback(first_provider, actual_provider)
         if (
                 actual_provider == "CPUExecutionProvider"
                 and first_provider != "CPUExecutionProvider"
@@ -279,8 +308,15 @@ class Detect:
         if self.device == "CPUExecutionProvider":
             return False
 
+        previous_provider = self.device
         providers = _fallback_providers_after_runtime_failure(self.device)
         fallback_provider = _provider_name(providers[0])
+        try:
+            from inference_health import record_provider_fallback
+
+            record_provider_fallback(self.model_tag, previous_provider, fallback_provider, error=str(error))
+        except Exception:
+            pass
         if not _runtime_provider_fallback_warning_printed:
             print(
                 f"WARNING: ONNX provider {self.device} failed during inference; "
@@ -296,6 +332,10 @@ class Detect:
         self.model, self.device = self._load_model_with_providers(providers)
         self.input_name = self.model.get_inputs()[0].name
         self.output_names = [output.name for output in self.model.get_outputs()]
+        if self.device != "CPUExecutionProvider":
+            cv2.setNumThreads(1)
+        else:
+            cv2.setNumThreads(get_optimal_threads())
         return True
 
     def preprocess_image(self, img):
@@ -338,15 +378,36 @@ class Detect:
         return results
 
     def detect_objects(self, img, conf_tresh=0.6):
+        try:
+            from perf_profiler import get_profiler
+
+            profiler = get_profiler()
+        except Exception:
+            profiler = None
+
         orig_h, orig_w = img.shape[:2]
+        preprocess_started = time.perf_counter() if profiler and profiler.enabled else None
         preprocessed_img, resized_w, resized_h = self.preprocess_image(img)
+        if preprocess_started is not None:
+            profiler.record(f"onnx_preprocess:{self.model_tag}", (time.perf_counter() - preprocess_started) * 1000.0)
+
+        infer_started = time.perf_counter() if profiler and profiler.enabled else None
         try:
             outputs = self.model.run(self.output_names, {self.input_name: preprocessed_img})
         except Exception as e:
             if not self._fallback_after_runtime_failure(e):
                 raise
             outputs = self.model.run(self.output_names, {self.input_name: preprocessed_img})
+        if infer_started is not None:
+            profiler.record(f"onnx_inference:{self.model_tag}", (time.perf_counter() - infer_started) * 1000.0)
+
+        post_started = time.perf_counter() if profiler and profiler.enabled else None
         detections = self.postprocess(outputs, (orig_h, orig_w), (resized_w, resized_h), conf_tresh)
+        if post_started is not None:
+            profiler.record(f"onnx_postprocess:{self.model_tag}", (time.perf_counter() - post_started) * 1000.0)
+
+        if profiler and profiler.enabled and self.device == "CPUExecutionProvider":
+            profiler.mark_counter("onnx_cpu_frames")
 
         results = {}
         for detection in detections:

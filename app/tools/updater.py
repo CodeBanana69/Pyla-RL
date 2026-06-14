@@ -1,7 +1,7 @@
 ﻿import json
 import os
-import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -10,6 +10,8 @@ import urllib.parse
 import zipfile
 import ctypes
 from pathlib import Path
+
+from core.toml_merge import merge_toml_text
 
 
 REPO_OWNER = "CodeBanana69"
@@ -36,16 +38,18 @@ SKIPPED_FILES = {
     "adbwinusbapi.dll",
     "brawl_stars_api.local.toml",
     "downgrader.exe",
-    "setup.exe",
     "telegram_chats.toml",
     "telegram_config.local.toml",
     "support_reporting.local.toml",
-    "updater.exe",
 }
 
-ROOT_LAUNCHER_FILES = {
+ROOT_LAUNCHER_BINARIES = (
     "setup.exe",
     "updater.exe",
+)
+
+ROOT_LAUNCHER_FILES = {
+    *ROOT_LAUNCHER_BINARIES,
     "pyla-rl.bat",
     "readme.md",
     "README.md",
@@ -54,6 +58,122 @@ ROOT_LAUNCHER_FILES = {
 OBSOLETE_FILES = {
     "downgrader.exe",
 }
+
+PENDING_LAUNCHER_SUFFIX = ".new"
+FINISH_UPDATE_SCRIPT = "_pyla_finish_update.cmd"
+
+
+def running_executable_path() -> Path | None:
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        return Path(sys.executable).resolve()
+    except OSError:
+        return None
+
+
+def pending_launcher_path(destination: Path) -> Path:
+    return destination.with_name(destination.name + PENDING_LAUNCHER_SUFFIX)
+
+
+def is_running_executable(path: Path) -> bool:
+    running = running_executable_path()
+    if running is None:
+        return False
+    try:
+        return path.resolve() == running
+    except OSError:
+        return False
+
+
+def apply_pending_launcher_updates(project_dir: Path) -> list[str]:
+    installed: list[str] = []
+    for name in ROOT_LAUNCHER_BINARIES:
+        destination = project_dir / name
+        pending = pending_launcher_path(destination)
+        if not pending.is_file():
+            continue
+        try:
+            if destination.exists():
+                backup = destination.with_suffix(destination.suffix + ".old")
+                backup.unlink(missing_ok=True)
+                try:
+                    destination.replace(backup)
+                except OSError:
+                    destination.unlink(missing_ok=True)
+            pending.replace(destination)
+            installed.append(name)
+            print(f"Installed pending update for {name}")
+        except OSError as exc:
+            print(f"Could not install pending update for {name}: {exc}")
+    return installed
+
+
+def stage_launcher_update(project_dir: Path, name: str, source: Path) -> str:
+    destination = project_dir / name
+    if is_running_executable(destination):
+        shutil.copy2(source, pending_launcher_path(destination))
+        return "pending"
+    backup = destination.with_suffix(destination.suffix + ".old")
+    backup.unlink(missing_ok=True)
+    if destination.exists():
+        try:
+            destination.replace(backup)
+        except OSError:
+            pass
+    shutil.copy2(source, destination)
+    return "installed"
+
+
+def schedule_pending_launcher_finalize(project_dir: Path) -> bool:
+    updater_exe = project_dir / "updater.exe"
+    pending = pending_launcher_path(updater_exe)
+    if not pending.is_file() or os.name != "nt":
+        return False
+
+    batch_path = project_dir / FINISH_UPDATE_SCRIPT
+    batch_path.write_text(
+        "\n".join(
+            [
+                "@echo off",
+                "ping 127.0.0.1 -n 2 >nul",
+                f'del /f /q "{updater_exe}" 2>nul',
+                f'move /y "{pending}" "{updater_exe}"',
+                f'del /f /q "{batch_path}" 2>nul',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        creationflags |= subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(
+        ["cmd", "/c", str(batch_path)],
+        cwd=str(project_dir),
+        creationflags=creationflags,
+        close_fds=True,
+    )
+    return True
+
+
+def copy_root_launcher_files(source_install: Path, project_install: Path) -> list[str]:
+    updated: list[str] = []
+    pending: list[str] = []
+    for name in ROOT_LAUNCHER_BINARIES:
+        source = source_install / name
+        if not source.is_file():
+            continue
+        result = stage_launcher_update(project_install, name, source)
+        if result == "pending":
+            pending.append(name)
+            print(f"Staged {name} (will finish after this updater closes)")
+        else:
+            updated.append(name)
+            print(f"Updated {name}")
+    if pending and schedule_pending_launcher_finalize(project_install):
+        print("A short helper will install the new updater.exe after this window closes.")
+    return updated + pending
 
 
 def wait_for_enter(prompt="Press Enter to close...") -> None:
@@ -290,104 +410,6 @@ def download_file(url: str, destination: Path, label: str) -> Path:
     return destination
 
 
-def split_toml_value_and_comment(raw_value: str) -> tuple[str, str]:
-    in_single_quote = False
-    in_double_quote = False
-    escaped = False
-
-    for index, char in enumerate(raw_value):
-        if escaped:
-            escaped = False
-            continue
-        if in_double_quote and char == "\\":
-            escaped = True
-            continue
-        if char == '"' and not in_single_quote:
-            in_double_quote = not in_double_quote
-            continue
-        if char == "'" and not in_double_quote:
-            in_single_quote = not in_single_quote
-            continue
-        if char == "#" and not in_single_quote and not in_double_quote:
-            return raw_value[:index].rstrip(), raw_value[index:]
-    return raw_value.rstrip(), ""
-
-
-def clean_preserved_toml_value(key: str, value: str) -> str:
-    if key != "player_tag":
-        return value
-    stripped = value.strip()
-    if len(stripped) < 2 or stripped[0] not in ('"', "'") or stripped[-1] != stripped[0]:
-        return value
-    inner = stripped[1:-1]
-    placeholder = "#YOURTAG"
-    if inner.upper().endswith(placeholder) and inner.upper() != placeholder:
-        return f"{stripped[0]}{inner[:-len(placeholder)]}{stripped[0]}"
-    return value
-
-
-def normalize_toml_key(key: str) -> str:
-    key = key.strip()
-    if len(key) >= 2 and key[0] == key[-1] and key[0] in ('"', "'"):
-        key = key[1:-1]
-    stripped = key.replace("\\ufeff", "").lstrip("\ufeff")
-    if stripped == "personal_webhook":
-        return "personal_webhook"
-    return stripped or key
-
-
-def parse_simple_toml(text: str) -> dict:
-    values = {}
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        raw_key, raw_value = stripped.split("=", 1)
-        key = normalize_toml_key(raw_key)
-        raw_value = split_toml_value_and_comment(raw_value.strip())[0].strip()
-        if key:
-            values[key] = clean_preserved_toml_value(key, raw_value)
-    return values
-
-
-_TOML_KEY_PATTERN = re.compile(
-    r'^(\s*)("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[A-Za-z0-9_\-]+)(\s*=\s*)(.*)$'
-)
-
-
-def merge_toml_text(new_text: str, old_text: str) -> str:
-    old_values = parse_simple_toml(old_text)
-    new_values = parse_simple_toml(new_text)
-    merged_lines = []
-    used_keys = set()
-
-    for line in new_text.splitlines():
-        match = _TOML_KEY_PATTERN.match(line)
-        if not match:
-            merged_lines.append(line)
-            continue
-        prefix, raw_key, equals, new_value = match.groups()
-        key = normalize_toml_key(raw_key)
-        _, suffix = split_toml_value_and_comment(new_value)
-        if key in old_values:
-            separator = " " if suffix and not suffix.startswith(" ") else ""
-            merged_lines.append(f"{prefix}{key}{equals}{old_values[key]}{separator}{suffix}")
-            used_keys.add(key)
-        else:
-            merged_lines.append(line)
-            used_keys.add(key)
-
-    missing_user_keys = [key for key in old_values if key not in used_keys and key not in new_values]
-    if missing_user_keys:
-        if merged_lines and merged_lines[-1].strip():
-            merged_lines.append("")
-        merged_lines.append("# Kept from your previous config")
-        for key in missing_user_keys:
-            merged_lines.append(f"{key} = {old_values[key]}")
-
-    return "\n".join(merged_lines).rstrip() + "\n"
-
-
 def merge_json_data(new_data, old_data):
     if isinstance(new_data, dict) and isinstance(old_data, dict):
         merged = dict(new_data)
@@ -608,6 +630,7 @@ def install_from_zip(project_dir: Path, url: str, label: str, marker_sha: str | 
         source_root = find_project_root(extract_dir)
         print(f"Installing update from: {source_root}")
         copy_update_files(source_root, project_dir)
+        copy_root_launcher_files(source_root, project_dir)
         remove_obsolete_files(project_dir)
         restore_preserved_files(project_dir, backup_dir)
         write_local_update_info(project_dir, marker_sha, selected_ref=selected_ref)
@@ -652,6 +675,8 @@ def main() -> int:
         print("updater.exe must be inside the Pyla-RL install folder next to app/main.py and app/cfg/.")
         wait_for_enter()
         return 1
+
+    apply_pending_launcher_updates(project_dir)
 
     if "--smoke-test" in sys.argv:
         print("Smoke test passed. Updater can see the Pyla-RL project folder.")
@@ -713,6 +738,7 @@ def main() -> int:
         else:
             print("Update completed.")
         print("Your cfg settings were kept, with new config keys added.")
+        print("setup.exe and updater.exe were updated when included in the downloaded package.")
         print("Run setup.exe if the update added new dependencies.")
         wait_for_enter()
         return 0

@@ -85,11 +85,12 @@ class Play:
         self.verbose_debug = config_bool(load_toml_as_dict("cfg/debug_settings.toml").get('verbose_debug'), False)
         if self.verbose_debug:
             os.makedirs(DEBUG_FRAMES_DIR, exist_ok=True)
-        self.Detect_main_info = Detect(main_info_model, classes=['enemy', 'teammate', 'player'])
+        self.Detect_main_info = Detect(main_info_model, classes=['enemy', 'teammate', 'player'], model_tag="main")
         self.tile_detector_model_classes = bot_config["wall_model_classes"]
         self.Detect_tile_detector = Detect(
             tile_detector_model,
             classes=self.tile_detector_model_classes,
+            model_tag="tile",
         )
         close_model_path = resolve_project_path(close_tile_detector_model)
         if self.close_tile_detector_enabled and not os.path.exists(close_model_path):
@@ -100,6 +101,7 @@ class Play:
                 self.Detect_close_tile_detector = Detect(
                     close_model_path,
                     classes=self.tile_detector_model_classes,
+                    model_tag="close_tile",
                 )
                 self._log_tile_detection_mode(
                     f"Close tile wall detector enabled ({close_model_path}, {CLOSE_TILE_CROP_SIZE}x{CLOSE_TILE_CROP_SIZE} crop).",
@@ -1047,8 +1049,13 @@ class Play:
         return result
 
     def get_main_data(self, frame):
-        data = self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
-        return data
+        try:
+            from perf_profiler import get_profiler
+
+            with get_profiler().time_stage("main_onnx"):
+                return self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
+        except ImportError:
+            return self.Detect_main_info.detect_objects(frame, conf_tresh=self.entity_detection_confidence)
 
     def is_path_blocked(self, player_box, move_direction, walls, distance=None):
         if distance is None:
@@ -1982,23 +1989,38 @@ class Play:
     offset_tile_boxes = offset_tile_data
 
     def _detect_tile_data(self, detector, frame, conf_tresh):
-        tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
-        primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
-        previous_primary_count = self.last_wall_primary_count
-        self.last_wall_primary_count = primary_count
-        if (
-            primary_count < self.wall_detection_retry_min_objects
-            and previous_primary_count < self.wall_detection_retry_min_objects
-            and self.wall_detection_retry_confidence < conf_tresh
-        ):
-            retry_data = detector.detect_objects(
-                frame,
-                conf_tresh=self.wall_detection_retry_confidence,
-            )
-            retry_count = sum(len(boxes or []) for boxes in (retry_data or {}).values())
-            if retry_count > primary_count:
-                tile_data = retry_data
-        return tile_data
+        try:
+            from perf_profiler import get_profiler
+
+            profiler = get_profiler()
+        except ImportError:
+            profiler = None
+
+        def _run():
+            tile_data = detector.detect_objects(frame, conf_tresh=conf_tresh)
+            primary_count = sum(len(boxes or []) for boxes in (tile_data or {}).values())
+            previous_primary_count = self.last_wall_primary_count
+            self.last_wall_primary_count = primary_count
+            if (
+                primary_count < self.wall_detection_retry_min_objects
+                and previous_primary_count < self.wall_detection_retry_min_objects
+                and self.wall_detection_retry_confidence < conf_tresh
+            ):
+                if profiler:
+                    profiler.mark_counter("tile_retry")
+                retry_data = detector.detect_objects(
+                    frame,
+                    conf_tresh=self.wall_detection_retry_confidence,
+                )
+                retry_count = sum(len(boxes or []) for boxes in (retry_data or {}).values())
+                if retry_count > primary_count:
+                    tile_data = retry_data
+            return tile_data
+
+        if profiler:
+            with profiler.time_stage("wall_onnx"):
+                return _run()
+        return _run()
 
     def get_tile_data(self, frame, player_data=None):
         player_pos = self._resolve_player_pos(player_data)
@@ -2009,6 +2031,12 @@ class Play:
         ):
             crop, crop_x, crop_y = self.crop_close_tile_region(frame, player_pos)
             if crop is not None:
+                try:
+                    from perf_profiler import get_profiler
+
+                    get_profiler().mark_counter("close_tile_crop")
+                except Exception:
+                    pass
                 crop_box = [crop_x, crop_y, crop_x + CLOSE_TILE_CROP_SIZE, crop_y + CLOSE_TILE_CROP_SIZE]
                 tile_data = self._detect_tile_data(
                     self.Detect_close_tile_detector,
@@ -2523,72 +2551,98 @@ class Play:
         if debug_view is None or not debug_view.enabled:
             return
 
-        self.frame = frame
-        advanced_visuals = bool(getattr(debug_view, "advanced_visuals", self.advanced_visuals))
-        debug_data = {
-            "state": state,
-            "player": [],
-            "enemy": [],
-            "teammate": [],
-            "wall": [],
-            "attack_range": 0,
-            "super_range": 0,
-            "effective_enemy_range": 0,
-            "poison_gas": {},
-            "movement": None,
-            "joystick": [self.window_controller.joystick_x, self.window_controller.joystick_y],
-            "advanced_visuals": advanced_visuals,
-            "joystick_radius": int(JOYSTICK_RADIUS * (self.window_controller.scale_factor or 1)),
-            "joystick_directions": [],
-            "enemy_los_lines": [],
-            "teammate_los_lines": [],
-            "player_hit_circle": None,
-        }
+        try:
+            from perf_profiler import get_profiler
 
-        if data:
-            for key in ["player", "enemy", "teammate", "wall"]:
-                debug_data[key] = [[int(v) for v in box[:4]] for box in (data.get(key) or []) if len(box) >= 4]
-            try:
-                _, attack_range, super_range = self.get_brawler_range(self.current_brawler)
-                debug_data["attack_range"] = int(attack_range)
-                debug_data["super_range"] = int(super_range)
-                debug_data["effective_enemy_range"] = int(self.get_effective_enemy_range(self.current_brawler))
-            except Exception:
-                pass
-            if debug_data["player"]:
+            profiler = get_profiler()
+        except ImportError:
+            profiler = None
+
+        def _publish():
+            self.frame = frame
+            advanced_visuals = bool(getattr(debug_view, "advanced_visuals", self.advanced_visuals))
+            debug_data = {
+                "state": state,
+                "player": [],
+                "enemy": [],
+                "teammate": [],
+                "wall": [],
+                "attack_range": 0,
+                "super_range": 0,
+                "effective_enemy_range": 0,
+                "poison_gas": {},
+                "movement": None,
+                "joystick": [self.window_controller.joystick_x, self.window_controller.joystick_y],
+                "advanced_visuals": advanced_visuals,
+                "joystick_radius": int(JOYSTICK_RADIUS * (self.window_controller.scale_factor or 1)),
+                "joystick_directions": [],
+                "enemy_los_lines": [],
+                "teammate_los_lines": [],
+                "player_hit_circle": None,
+            }
+
+            if data:
+                for key in ["player", "enemy", "teammate", "wall"]:
+                    debug_data[key] = [[int(v) for v in box[:4]] for box in (data.get(key) or []) if len(box) >= 4]
                 try:
-                    debug_data["poison_gas"] = self.is_there_poison_gas(debug_data["player"][0])
+                    _, attack_range, super_range = self.get_brawler_range(self.current_brawler)
+                    debug_data["attack_range"] = int(attack_range)
+                    debug_data["super_range"] = int(super_range)
+                    debug_data["effective_enemy_range"] = int(self.get_effective_enemy_range(self.current_brawler))
                 except Exception:
                     pass
-                if advanced_visuals and early_access:
-                    add_advanced_visuals(self, debug_data)
+                if debug_data["player"]:
+                    try:
+                        debug_data["poison_gas"] = self.is_there_poison_gas(debug_data["player"][0])
+                    except Exception:
+                        pass
+                    if advanced_visuals and early_access:
+                        add_advanced_visuals(self, debug_data)
 
-        if movement is not None:
-            debug_data["movement"] = [float(movement[0]), float(movement[1])]
-        if self.last_tile_detection_debug:
-            debug_data["close_tile_debug"] = dict(self.last_tile_detection_debug)
-        if debug_data.get("player"):
-            try:
-                foot_x, foot_y, foot_r = self.get_player_foot_circle(debug_data["player"][0])
-                debug_data["player_hit_circle"] = [int(foot_x), int(foot_y), int(round(foot_r))]
-            except (TypeError, ValueError, IndexError):
-                pass
-        intent = getattr(self, "match_intent_summary", "")
-        if intent:
-            debug_data["match_intent"] = intent[:96]
-        if not data:
-            debug_data["status"] = f"No detections ({state})"
-        debug_data.update(self._build_debug_overlay_hints(data, movement))
+            if movement is not None:
+                debug_data["movement"] = [float(movement[0]), float(movement[1])]
+            if self.last_tile_detection_debug:
+                debug_data["close_tile_debug"] = dict(self.last_tile_detection_debug)
+            if debug_data.get("player"):
+                try:
+                    foot_x, foot_y, foot_r = self.get_player_foot_circle(debug_data["player"][0])
+                    debug_data["player_hit_circle"] = [int(foot_x), int(foot_y), int(round(foot_r))]
+                except (TypeError, ValueError, IndexError):
+                    pass
+            intent = getattr(self, "match_intent_summary", "")
+            if intent:
+                debug_data["match_intent"] = intent[:96]
+            if not data:
+                debug_data["status"] = f"No detections ({state})"
+            debug_data.update(self._build_debug_overlay_hints(data, movement))
+            debug_view.publish(frame, debug_data)
 
-        debug_view.publish(frame, debug_data)
+        if profiler:
+            with profiler.time_stage("publish_debug_view"):
+                _publish()
+        else:
+            _publish()
 
     def main(self, frame, brawler, main):
+        try:
+            from perf_profiler import get_profiler
+
+            profiler = get_profiler()
+        except ImportError:
+            profiler = None
+
         current_time = time.time()
         state = main.get_latest_state()
         data = self.get_main_data(frame)
         if current_time - self.time_since_walls_checked > self.walls_treshold:
+            if profiler:
+                profiler.mark_counter("wall_pass")
             tile_data = self.get_tile_data(frame, data.get("player"))
-            walls, map_objects = self.process_tile_data(tile_data, frame)
+            if profiler:
+                with profiler.time_stage("tile_postprocess"):
+                    walls, map_objects = self.process_tile_data(tile_data, frame)
+            else:
+                walls, map_objects = self.process_tile_data(tile_data, frame)
             line_of_sight_walls = self.map_object_boxes_for_classes(
                 map_objects,
                 self.line_of_sight_map_object_classes(),
@@ -2614,7 +2668,11 @@ class Play:
                 self.line_of_sight_map_object_classes(),
             )
 
-        data = self.validate_game_data(data)
+        if profiler:
+            with profiler.time_stage("validate_data"):
+                data = self.validate_game_data(data)
+        else:
+            data = self.validate_game_data(data)
         self.track_no_detections(data)
         if data:
             self.time_since_player_last_found = time.time()
@@ -2622,10 +2680,16 @@ class Play:
                 data = None
 
         if not data:
+            if profiler:
+                profiler.mark_counter("no_detection_path")
             if current_time - self.time_since_player_last_found > 1.0:
                 self.window_controller.release_movement()
             if current_time - self.time_since_last_proceeding > self.no_detection_proceed_delay:
-                current_state = get_state(frame)
+                if profiler:
+                    with profiler.time_stage("state_get_state"):
+                        current_state = get_state(frame)
+                else:
+                    current_state = get_state(frame)
                 if current_state != "match":
                     main.handle_detected_state(current_state)
                     state = current_state
@@ -2641,12 +2705,24 @@ class Play:
             self.publish_debug_view(frame, data, state)
             return
         self.time_since_last_proceeding = time.time()
-        self.refresh_ready_abilities(frame, current_time)
+        if profiler:
+            with profiler.time_stage("abilities_cv"):
+                self.refresh_ready_abilities(frame, current_time)
+        else:
+            self.refresh_ready_abilities(frame, current_time)
         self.frame = frame
-        movement = self.loop(brawler, data, current_time)
+        if profiler:
+            with profiler.time_stage("movement_logic"):
+                movement = self.loop(brawler, data, current_time)
+        else:
+            movement = self.loop(brawler, data, current_time)
         self.publish_debug_view(frame, data, state, movement)
         if movement is not None:
-            self.do_movement(movement)
+            if profiler:
+                with profiler.time_stage("do_movement"):
+                    self.do_movement(movement)
+            else:
+                self.do_movement(movement)
 
 
 Movement = Play

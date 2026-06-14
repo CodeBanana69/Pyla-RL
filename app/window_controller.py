@@ -1148,6 +1148,12 @@ class WindowController:
 
     def _record_scrcpy_restart(self, clean_stop):
         self.scrcpy_restart_count = getattr(self, "scrcpy_restart_count", 0) + 1
+        try:
+            from perf_profiler import get_profiler
+
+            get_profiler().mark_counter("scrcpy_restart")
+        except Exception:
+            pass
         now = time.time()
         window = [stamp for stamp in getattr(self, "scrcpy_restart_window", []) if now - stamp <= 600]
         window.append(now)
@@ -1355,6 +1361,12 @@ class WindowController:
             raise ConnectionError("Emulator is offline and auto-restart is disabled.")
         c_time = time.time()
         if c_time - self.time_since_checked_if_brawl_stars_crashed > self.check_if_brawl_stars_crashed_timer:
+            try:
+                from perf_profiler import get_profiler
+
+                get_profiler().mark_counter("foreground_check_ran")
+            except Exception:
+                pass
             try:
                 opened_app = _get_foreground_package(self.connected_serial, timeout=4)
                 if not opened_app:

@@ -339,12 +339,36 @@ class DefaultEasyOCR:
 
 cached_toml = {}
 
+
+def _load_toml_file(resolved_file_path: str):
+    from core.toml_merge import dedupe_toml_text, parse_simple_toml
+
+    with open(resolved_file_path, "r", encoding="utf-8-sig") as handle:
+        text = handle.read()
+    try:
+        return toml.loads(text)
+    except toml.decoder.TomlDecodeError as exc:
+        if "Duplicate" not in str(exc):
+            raise
+        repaired = dedupe_toml_text(text)
+        if repaired != text:
+            with open(resolved_file_path, "w", encoding="utf-8") as handle:
+                handle.write(repaired)
+            text = repaired
+        try:
+            return toml.loads(text)
+        except toml.decoder.TomlDecodeError:
+            flat = parse_simple_toml(text)
+            if flat:
+                return flat
+            raise exc
+
+
 def load_toml_as_dict(file_path):
     resolved_file_path = resolve_project_path(file_path)
     if resolved_file_path not in cached_toml:
         if os.path.exists(resolved_file_path):
-            with open(resolved_file_path, 'r', encoding='utf-8-sig') as f:
-                cached_toml[resolved_file_path] = toml.load(f)
+            cached_toml[resolved_file_path] = _load_toml_file(resolved_file_path)
         else:
             cached_toml[resolved_file_path] = {}
     return cached_toml[resolved_file_path]

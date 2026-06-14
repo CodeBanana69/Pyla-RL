@@ -44,4 +44,7 @@ Pyla-XXZ.bat
 PylaAi-XXZ.bat
 setup.exe.old
 updater.exe.old
+setup.exe.new
+updater.exe.new
+_pyla_finish_update.cmd
 *.spec

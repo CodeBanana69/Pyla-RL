@@ -397,6 +397,21 @@ def pyla_main(data):
             )
             self.playstyle_info, pyla_code = load_pyla_script(current_playstyle)
             self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
+            from inference_health import audit_inference_setup, log_startup_health
+            from perf_profiler import configure_profiler
+
+            self.perf_profiler = configure_profiler()
+            self.perf_profiler.bind_runtime(play=self.Play, window_controller=self.window_controller)
+            inference_health = audit_inference_setup(self.Play, general_config)
+            log_startup_health(inference_health)
+            self.perf_profiler.set_inference_health(inference_health)
+            self.perf_profiler.write_trace_line(
+                {
+                    "ts": time.time(),
+                    "event": "startup",
+                    "system": self.perf_profiler.system_snapshot(self.window_controller),
+                }
+            )
             self.Time_management = TimeManagement()
             self.lobby_automator = LobbyAutomation(self.window_controller)
 
@@ -1127,6 +1142,9 @@ def pyla_main(data):
                 runtime_log.log_warn("digest", f"Daily digest failed: {exc}")
 
         def main(self):
+            from perf_profiler import get_profiler
+
+            profiler = get_profiler()
             s_time = time.time()
             c = 0
             self.runtime_control.mark_running()
@@ -1135,23 +1153,24 @@ def pyla_main(data):
                     self.stop_gracefully()
                     break
 
-                self.pump_remote_commands()
-                if hasattr(self, "performance_autotuner"):
-                    self.performance_autotuner.observe_ips(self.ips_history)
-                    if self.get_latest_state() == "lobby":
-                        self.performance_autotuner.apply_pending_adjustment(self.window_controller)
-                self._maybe_send_daily_digest()
-                if self.instance_id:
-                    from gui.instance_registry import update_manifest_heartbeat
-                    from gui.session_state import persist_worker_session
+                with profiler.time_stage("side_tasks"):
+                    self.pump_remote_commands()
+                    if hasattr(self, "performance_autotuner"):
+                        self.performance_autotuner.observe_ips(self.ips_history)
+                        if self.get_latest_state() == "lobby":
+                            self.performance_autotuner.apply_pending_adjustment(self.window_controller)
+                    self._maybe_send_daily_digest()
+                    if self.instance_id:
+                        from gui.instance_registry import update_manifest_heartbeat
+                        from gui.session_state import persist_worker_session
 
-                    update_manifest_heartbeat(
-                        self.instance_id,
-                        self.build_runtime_snapshot(),
-                        state_path=self.control_window.state_path,
-                        metrics_path=self.metrics_path,
-                    )
-                    persist_worker_session(self)
+                        update_manifest_heartbeat(
+                            self.instance_id,
+                            self.build_runtime_snapshot(),
+                            state_path=self.control_window.state_path,
+                            metrics_path=self.metrics_path,
+                        )
+                        persist_worker_session(self)
 
                 self.update_runtime_control_notice()
 
@@ -1180,14 +1199,23 @@ def pyla_main(data):
                     if elapsed > 0:
                         current_ips = c / elapsed
                         self.ips_ema = current_ips if self.ips_ema is None else (self.ips_ema * 0.75 + current_ips * 0.25)
+                        profiler.maybe_auto_enable(current_ips)
+                        perf_rollup = {}
                         if self.ips_ema is not None:
                             self.ips_history.append(self.ips_ema)
+                            perf_rollup = profiler.rollup(
+                                ips=current_ips,
+                                feed_fps=self.perf_feed_fps,
+                                game_state=format_state_label(self.state),
+                            )
                             write_metrics(
                                 self.metrics_path,
                                 self.ips_ema,
                                 self.perf_feed_fps,
                                 self.ips_history,
                                 session=self.build_runtime_snapshot(),
+                                perf=perf_rollup,
+                                system=profiler.system_snapshot(self.window_controller),
                             )
                         intent = getattr(self.Play, "match_intent_summary", "") or ""
                         runtime_label = self.runtime_control_label()
@@ -1196,30 +1224,35 @@ def pyla_main(data):
                             perf_text = f"{runtime_label.upper()} | {perf_text}"
                         if intent:
                             perf_text += f" | {intent}"
+                        perf_text += profiler.format_console_suffix(perf_rollup)
                         runtime_log.log_status_line(perf_text)
                     s_time = now
                     c = 0
 
                 self.check_and_handle_brawl_stars_crash()
                 try:
-                    frame = self.window_controller.screenshot()
+                    with profiler.time_stage("screenshot"):
+                        frame = self.window_controller.screenshot()
                 except ConnectionError:
                     emit_recovery_event("stale_feed", "screenshot connection error")
                     self.window_controller.restart_scrcpy_client()
                     continue
 
                 _, last_ft = self.window_controller.get_latest_frame()
+                if last_ft > 0:
+                    profiler.record_metric("frame_age_ms", max(0.0, (now - last_ft) * 1000.0))
                 if last_ft > 0 and (now - last_ft) > self.window_controller.FRAME_STALE_TIMEOUT:
                     stale_age = now - last_ft
-                    self.window_controller.release_movement()
-                    emit_recovery_event("stale_feed", f"age={stale_age:.1f}s")
-                    if stale_age > 30:
-                        if not self.window_controller.reconnect_scrcpy():
-                            self.restart_brawl_stars()
-                    else:
-                        if self.sleep_interruptible(1) == "stop":
-                            self.stop_gracefully()
-                            break
+                    with profiler.time_stage("stale_feed"):
+                        self.window_controller.release_movement()
+                        emit_recovery_event("stale_feed", f"age={stale_age:.1f}s")
+                        if stale_age > 30:
+                            if not self.window_controller.reconnect_scrcpy():
+                                self.restart_brawl_stars()
+                        else:
+                            if self.sleep_interruptible(1) == "stop":
+                                self.stop_gracefully()
+                                break
                     continue
 
                 self.record_feed_fps()
@@ -1228,23 +1261,31 @@ def pyla_main(data):
                     if self.should_replay_duplicate_frame(last_ft):
                         brawler = self._get_play_brawler_name()
                         self.Play.current_brawler = brawler
-                        self.Play.main(frame, brawler, self)
+                        with profiler.time_stage("duplicate_replay"):
+                            self.Play.main(frame, brawler, self)
                         c += 1
+                    else:
+                        profiler.mark_counter("duplicate_skip")
                     time.sleep(0.005)
                     continue
                 self.last_processed_frame_id = frame_id
 
-                self.manage_time_tasks(frame)
+                with profiler.time_stage("manage_time_tasks"):
+                    self.manage_time_tasks(frame)
                 brawler = self._get_play_brawler_name()
                 self.Play.current_brawler = brawler
-                self.Play.main(frame, brawler, self)
+                with profiler.time_stage("play_main"):
+                    self.Play.main(frame, brawler, self)
                 c += 1
 
                 if self.max_ips and frame_start is not None:
                     target_period = 1 / self.max_ips
                     work_time = time.perf_counter() - frame_start
-                    if work_time < target_period:
-                        time.sleep(target_period - work_time)
+                    sleep_time = target_period - work_time
+                    if sleep_time > 0:
+                        sleep_started = time.perf_counter()
+                        time.sleep(sleep_time)
+                        profiler.record("max_ips_sleep", (time.perf_counter() - sleep_started) * 1000.0)
 
     worker = Main()
     worker.main()
