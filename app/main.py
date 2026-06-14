@@ -59,10 +59,9 @@ def repair_numpy_before_cv2_import():
 
 repair_numpy_before_cv2_import()
 
-try:
-    import cv2
-except ModuleNotFoundError:
-    raise SystemExit(1) from None
+from opencv_runtime import ensure_opencv_runtime
+
+ensure_opencv_runtime()
 
 from gui.win_dpi import bootstrap_windows_dpi
 

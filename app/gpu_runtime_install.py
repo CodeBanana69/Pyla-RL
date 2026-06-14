@@ -120,7 +120,7 @@ root = Path({str(root)!r})
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
-from visual_debug_window import opencv_runtime_ready, repair_opencv_runtime
+from opencv_runtime import opencv_runtime_ready, repair_opencv_runtime
 
 if not opencv_runtime_ready():
     repair_opencv_runtime()
