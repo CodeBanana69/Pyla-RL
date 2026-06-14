@@ -3567,6 +3567,25 @@ class Play:
                     state = current_state
                     self.time_since_last_proceeding = current_time
                 else:
+                    # region agent log
+                    try:
+                        from agent_debug_log import agent_debug_log
+                        from state_finder import get_state_detection_scores
+
+                        screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        agent_debug_log(
+                            "C",
+                            "play.py:main",
+                            "no_detection_pressing_proceed_as_match",
+                            {
+                                "current_state": current_state,
+                                "main_guarded_state": getattr(main, "guarded_state", None),
+                                "scores": get_state_detection_scores(screenshot_bgr),
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # endregion
                     try:
                         import runtime_log
                         runtime_log.log_warn("match", "Player not detected — pressing proceed")

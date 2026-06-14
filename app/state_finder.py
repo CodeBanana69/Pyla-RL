@@ -121,6 +121,23 @@ def find_game_result(screenshot):
     return False
 
 
+def get_state_detection_scores(image):
+    lobby_template = states_path + "lobby_menu.png"
+    lobby_region = region_data["lobby_menu"]
+    height, width = image.shape[:2]
+    return {
+        "frame_w": width,
+        "frame_h": height,
+        "lobby_score": round(template_match_score_in_region(image, lobby_template, lobby_region), 4),
+        "lobby_threshold": 0.7,
+        "lobby_match": is_in_lobby(image),
+        "match_making": is_in_match_making(image),
+        "brawler_selection": is_in_brawler_selection(image),
+        "shop": is_in_shop(image),
+        "end_match": bool(is_in_end_of_a_match(image)),
+    }
+
+
 def get_in_game_state(image):
     game_result = is_in_end_of_a_match(image)
     if game_result: return f"end_{game_result}"

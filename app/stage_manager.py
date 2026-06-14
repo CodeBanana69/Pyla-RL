@@ -597,6 +597,19 @@ class StageManager:
                     self.Trophy_observer.current_trophies = trophies
                     self.Trophy_observer.win_streak = win_streak
         print("state is lobby, starting game")
+        # region agent log
+        try:
+            from agent_debug_log import agent_debug_log
+
+            agent_debug_log(
+                "E",
+                "stage_manager.py:start_game",
+                "lobby_start_game_called",
+                {"brawler": self.brawlers_pick_data[0].get("brawler") if self.brawlers_pick_data else None},
+            )
+        except Exception:
+            pass
+        # endregion
         values = {
             "trophies": self.Trophy_observer.current_trophies,
             "wins": self.Trophy_observer.current_wins

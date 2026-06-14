@@ -631,8 +631,23 @@ def pyla_main(data):
         def handle_detected_state(self, state):
             if state is None:
                 return
+            prior = getattr(self, "guarded_state", None)
             self.set_latest_state(state)
             self.guarded_state = state
+            # region agent log
+            if state != prior:
+                try:
+                    from agent_debug_log import agent_debug_log
+
+                    agent_debug_log(
+                        "E",
+                        "main.py:handle_detected_state",
+                        "state_transition",
+                        {"from_state": prior, "to_state": state},
+                    )
+                except Exception:
+                    pass
+            # endregion
             runtime_log.log_info("state", format_state_label(state))
             on_queue_file_changed(self.Stage_manager)
             self.Stage_manager.do_state(state, None)
@@ -695,6 +710,24 @@ def pyla_main(data):
                     pending_for,
                     self.lobby_after_match_confirm_seconds,
                 ):
+                    # region agent log
+                    try:
+                        from agent_debug_log import agent_debug_log
+
+                        agent_debug_log(
+                            "B",
+                            "main.py:apply_state_context_guard",
+                            "lobby_blocked_after_match",
+                            {
+                                "detected_state": detected_state,
+                                "previous_state": previous_state,
+                                "pending_for": round(pending_for, 3),
+                                "confirm_seconds": self.lobby_after_match_confirm_seconds,
+                            },
+                        )
+                    except Exception:
+                        pass
+                    # endregion
                     if now - self.pending_lobby_notice >= 5.0:
                         runtime_log.log_info(
                             "state",
@@ -770,6 +803,40 @@ def pyla_main(data):
                     previous_state,
                     allow_panel_escape=allow_panel_escape,
                 )
+                # region agent log
+                try:
+                    from agent_debug_log import agent_debug_log
+                    from state_finder import get_state_detection_scores
+
+                    block_reason = None
+                    if detected_state == "lobby" and state == "match":
+                        if previous_state == "match" and self.pending_lobby_since is not None:
+                            block_reason = "lobby_after_match_confirm"
+                        else:
+                            block_reason = "normalize_or_overlay_guard"
+                    elif detected_state != "match" and state == "match":
+                        block_reason = "detected_non_match_normalized_to_match"
+                    elif detected_state == "match" and state == "match":
+                        block_reason = "default_match_fallback"
+                    agent_debug_log(
+                        "A",
+                        "main.py:manage_time_tasks",
+                        "state_detection_cycle",
+                        {
+                            "detected_state": detected_state,
+                            "previous_state": previous_state,
+                            "guarded_state": state,
+                            "block_reason": block_reason,
+                            "pending_lobby_since": self.pending_lobby_since,
+                            "lobby_after_match_confirm_seconds": self.lobby_after_match_confirm_seconds,
+                            "match_launch_pending": self.match_launch_pending,
+                            "lobby_seen_since_match": self.lobby_seen_since_match,
+                            "scores": get_state_detection_scores(screenshot_bgr),
+                        },
+                    )
+                except Exception:
+                    pass
+                # endregion
                 if previous_state == "match" and state != "match":
                     if hasattr(self.Play, "reset_match_control_state"):
                         self.Play.reset_match_control_state()
