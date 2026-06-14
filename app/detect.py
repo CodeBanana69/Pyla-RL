@@ -296,9 +296,19 @@ class Detect:
                 and first_provider != "CPUExecutionProvider"
                 and not _provider_fallback_warning_printed
         ):
+            detail = ""
+            if first_provider == "CUDAExecutionProvider":
+                try:
+                    from gpu_runtime_install import verify_cuda_dlls
+
+                    ok, missing = verify_cuda_dlls()
+                    if not ok:
+                        detail = f" Missing CUDA DLLs: {', '.join(missing)}."
+                except Exception:
+                    pass
+            fix_hint = gpu_help_message("session_cpu_fallback", vendor=primary_vendor())
             print(
-                f"WARNING: ONNX requested {first_provider}, but the session fell back to CPU. "
-                "NVIDIA users run: py -3.11-64 tools\\fix_gpu_runtime.py cuda"
+                f"WARNING: ONNX requested {first_provider}, but the session fell back to CPU.{detail} {fix_hint}".strip()
             )
             _provider_fallback_warning_printed = True
         return model, actual_provider

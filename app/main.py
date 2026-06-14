@@ -396,10 +396,11 @@ def pyla_main(data):
                 "current_playstyle", "team_showdown.pyla"
             )
             self.playstyle_info, pyla_code = load_pyla_script(current_playstyle)
-            self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
-            from inference_health import audit_inference_setup, log_startup_health
+            from inference_health import audit_inference_setup, ensure_gpu_inference_runtime, log_startup_health
             from perf_profiler import configure_profiler
 
+            ensure_gpu_inference_runtime(general_config)
+            self.Play = Play(*self.load_models(), self.window_controller, pyla_code)
             self.perf_profiler = configure_profiler()
             self.perf_profiler.bind_runtime(play=self.Play, window_controller=self.window_controller)
             inference_health = audit_inference_setup(self.Play, general_config)

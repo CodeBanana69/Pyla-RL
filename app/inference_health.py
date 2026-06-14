@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 from gpu_support import (
+    apply_gpu_config,
     detect_graphics_cards,
     gpu_help_message,
     normalize_preferred_device,
@@ -16,7 +21,13 @@ from gpu_support import (
     recommended_directml_device_id,
     resolve_inference_device,
 )
-from utils import load_toml_as_dict
+from utils import load_toml_as_dict, resolve_project_path
+
+_EXPECTED_PROVIDER = {
+    "cuda": "CUDAExecutionProvider",
+    "directml": "DmlExecutionProvider",
+    "openvino": "OpenVINOExecutionProvider",
+}
 
 
 def _gpu_provider_names() -> set[str]:
@@ -154,6 +165,128 @@ def audit_inference_setup(play, config: dict[str, Any] | None = None) -> dict[st
         "inference_health": inference_health,
         "provider_summary": provider_summary,
     }
+
+
+def evaluate_gpu_runtime_status(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Check whether the configured GPU ONNX runtime is installed and usable."""
+    config = config if config is not None else load_toml_as_dict("cfg/general_config.toml")
+    configured = str(config.get("cpu_or_gpu", "auto") or "auto")
+    configured_normalized = normalize_preferred_device(configured)
+    if configured_normalized == "cpu":
+        return {"needs_repair": False, "reason": "cpu_configured"}
+
+    cards = detect_graphics_cards()
+    if not _has_physical_gpu(cards):
+        return {"needs_repair": False, "reason": "no_gpu"}
+
+    resolved = resolve_inference_device(configured, cards)
+    vendor = primary_vendor(cards)
+    expected_provider = _EXPECTED_PROVIDER.get(resolved, "")
+    if not expected_provider:
+        return {"needs_repair": False, "reason": "unsupported_resolution", "resolved": resolved}
+
+    try:
+        import onnxruntime as ort
+
+        available_providers = list(ort.get_available_providers())
+    except Exception as exc:
+        return {
+            "needs_repair": True,
+            "reason": "onnxruntime_import_failed",
+            "error": str(exc),
+            "fix_hint": gpu_help_message("missing_gpu_provider", vendor=vendor),
+        }
+
+    if expected_provider not in available_providers:
+        return {
+            "needs_repair": True,
+            "reason": "missing_gpu_provider",
+            "resolved": resolved,
+            "expected_provider": expected_provider,
+            "available_providers": available_providers,
+            "fix_hint": gpu_help_message("missing_gpu_provider", vendor=vendor),
+        }
+
+    if resolved == "cuda":
+        from gpu_runtime_install import verify_cuda_dlls
+
+        ok, missing = verify_cuda_dlls()
+        if not ok:
+            return {
+                "needs_repair": True,
+                "reason": "missing_cuda_dlls",
+                "missing_cuda_dlls": missing,
+                "fix_hint": gpu_help_message("session_cpu_fallback", vendor=vendor),
+            }
+
+    if os.environ.get("PYLAAI_SKIP_GPU_SMOKE") == "1":
+        return {
+            "needs_repair": False,
+            "reason": "ok",
+            "resolved": resolved,
+            "expected_provider": expected_provider,
+        }
+
+    from gpu_runtime_install import _variant_verified, smoke_test_variant
+
+    probe = smoke_test_variant(resolved, runs=1, timeout=120)
+    if not _variant_verified(resolved, probe):
+        return {
+            "needs_repair": True,
+            "reason": "session_cpu_fallback",
+            "resolved": resolved,
+            "expected_provider": expected_provider,
+            "probe": probe,
+            "fix_hint": gpu_help_message("session_cpu_fallback", vendor=vendor),
+        }
+
+    return {
+        "needs_repair": False,
+        "reason": "ok",
+        "resolved": resolved,
+        "expected_provider": expected_provider,
+        "probe": probe,
+    }
+
+
+def ensure_gpu_inference_runtime(config: dict[str, Any] | None = None, *, auto_repair: bool = True) -> dict[str, Any]:
+    """Repair GPU ONNX runtime before models load. Restarts the process when packages change."""
+    status = evaluate_gpu_runtime_status(config)
+    if not status.get("needs_repair"):
+        return status
+    if not auto_repair:
+        print(
+            "WARNING: GPU inference is not ready "
+            f"({status.get('reason')}). {status.get('fix_hint') or ''}".strip()
+        )
+        return status
+    if os.environ.get("PYLAAI_GPU_RUNTIME_REPAIR") == "1":
+        print(
+            "WARNING: GPU inference is still unavailable after an automatic repair attempt "
+            f"({status.get('reason')}). Continuing on CPU."
+        )
+        return status
+
+    print(
+        "GPU inference is not ready "
+        f"({status.get('reason')}). Installing the correct ONNX runtime..."
+    )
+    os.environ["PYLAAI_GPU_RUNTIME_REPAIR"] = "1"
+
+    from gpu_runtime_install import auto_install_gpu_runtime
+
+    import toml
+
+    cards = detect_graphics_cards()
+    chosen, _, _, _ = auto_install_gpu_runtime(cards=cards, verify=True, benchmark_runs=0)
+    config_path = Path(resolve_project_path("cfg/general_config.toml"))
+    cfg = toml.load(config_path) if config_path.exists() else {}
+    apply_gpu_config(cfg, chosen, cards)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(toml.dumps(cfg), encoding="utf-8")
+    print("GPU runtime repaired. Restarting Pyla-RL...")
+    subprocess.run([sys.executable] + sys.argv)
+    sys.exit(0)
 
 
 def record_provider_fallback(model_tag: str, from_provider: str, to_provider: str, error: str | None = None) -> None:

@@ -67,6 +67,31 @@ class InferenceHealthTests(unittest.TestCase):
     @patch("inference_health.detect_graphics_cards", return_value=[("nvidia", "NVIDIA GeForce RTX 3060")])
     @patch("inference_health.primary_vendor", return_value="nvidia")
     @patch("inference_health.resolve_inference_device", return_value="cuda")
+    @patch("inference_health._has_physical_gpu", return_value=True)
+    @patch("onnxruntime.get_available_providers", return_value=["CUDAExecutionProvider", "CPUExecutionProvider"])
+    @patch("gpu_runtime_install.verify_cuda_dlls", return_value=(False, ["cudnn64_9.dll"]))
+    def test_evaluate_flags_missing_cuda_dlls(self, *_mocks):
+        from inference_health import evaluate_gpu_runtime_status
+
+        status = evaluate_gpu_runtime_status({"cpu_or_gpu": "auto"})
+        self.assertTrue(status["needs_repair"])
+        self.assertEqual(status["reason"], "missing_cuda_dlls")
+
+    @patch("inference_health.detect_graphics_cards", return_value=[("amd", "AMD Radeon RX 7900 XT")])
+    @patch("inference_health.primary_vendor", return_value="amd")
+    @patch("inference_health.resolve_inference_device", return_value="directml")
+    @patch("inference_health._has_physical_gpu", return_value=True)
+    @patch("onnxruntime.get_available_providers", return_value=["CPUExecutionProvider"])
+    def test_evaluate_flags_missing_gpu_provider(self, *_mocks):
+        from inference_health import evaluate_gpu_runtime_status
+
+        status = evaluate_gpu_runtime_status({"cpu_or_gpu": "directml"})
+        self.assertTrue(status["needs_repair"])
+        self.assertEqual(status["reason"], "missing_gpu_provider")
+
+    @patch("inference_health.detect_graphics_cards", return_value=[("nvidia", "NVIDIA GeForce RTX 3060")])
+    @patch("inference_health.primary_vendor", return_value="nvidia")
+    @patch("inference_health.resolve_inference_device", return_value="cuda")
     def test_audit_flags_cpu_despite_gpu(self, *_mocks):
         from unittest.mock import Mock
 
