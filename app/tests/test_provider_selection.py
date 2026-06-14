@@ -3,7 +3,14 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from detect import Detect, _build_providers, _configure_session_options_for_provider, _fallback_providers_after_runtime_failure, _provider_name
+from detect import (
+    Detect,
+    _build_providers,
+    _configure_session_options_for_provider,
+    _fallback_providers_after_runtime_failure,
+    _provider_name,
+    gpu_provider_requires_serial_inference,
+)
 from utils import DefaultEasyOCR
 
 
@@ -77,10 +84,14 @@ class ProviderSelectionTests(unittest.TestCase):
         "DmlExecutionProvider",
         "CPUExecutionProvider",
     ])
-    def test_cuda_runtime_failure_falls_back_to_directml_then_cpu(self, *_):
+    def test_cuda_runtime_failure_falls_back_to_cpu_only(self, *_):
         providers = _fallback_providers_after_runtime_failure("CUDAExecutionProvider")
-        self.assertEqual(providers[0], "DmlExecutionProvider")
-        self.assertEqual(providers[-1], "CPUExecutionProvider")
+        self.assertEqual(providers, ["CPUExecutionProvider"])
+
+    def test_gpu_provider_requires_serial_inference(self):
+        self.assertTrue(gpu_provider_requires_serial_inference("CUDAExecutionProvider"))
+        self.assertTrue(gpu_provider_requires_serial_inference("DmlExecutionProvider"))
+        self.assertFalse(gpu_provider_requires_serial_inference("CPUExecutionProvider"))
 
     @patch("detect.ort.get_available_providers", return_value=[
         "CUDAExecutionProvider",

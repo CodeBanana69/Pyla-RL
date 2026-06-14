@@ -30,7 +30,12 @@ warnings.filterwarnings(
 debug = load_toml_as_dict("cfg/general_config.toml")["super_debug"] == "yes"
 
 _GPU_PROVIDERS = frozenset({"CUDAExecutionProvider", "DmlExecutionProvider"})
-_dml_inference_lock = threading.Lock()
+_gpu_inference_lock = threading.Lock()
+_cuda_runtime_failed = threading.Event()
+
+
+def gpu_provider_requires_serial_inference(provider) -> bool:
+    return _provider_name(provider) in _GPU_PROVIDERS
 
 
 def get_optimal_threads(max_limit=4):
@@ -129,6 +134,9 @@ def _fallback_providers_after_runtime_failure(failed_provider):
     failed_provider = _provider_name(failed_provider)
     available_providers = set(ort.get_available_providers())
     providers = []
+    # CUDA illegal-memory failures poison the device context; switch straight to CPU.
+    if failed_provider == "CUDAExecutionProvider":
+        return ["CPUExecutionProvider"]
     if failed_provider != "DmlExecutionProvider" and "DmlExecutionProvider" in available_providers:
         providers.append(_directml_provider())
     providers.append("CPUExecutionProvider")
@@ -543,6 +551,9 @@ class Detect:
 
         providers = _fallback_providers_after_runtime_failure(self.device)
         fallback_provider = _provider_name(providers[0])
+        if self.device == "CUDAExecutionProvider":
+            _cuda_runtime_failed.set()
+
         if not _runtime_provider_fallback_warning_printed:
             print(
                 f"WARNING: ONNX provider {self.device} failed during inference; "
@@ -595,7 +606,15 @@ class Detect:
         detections = _postprocess_raw(raw_output, conf_thresh=conf_tresh, iou_thresh=0.6)
         return _scale_detections(detections, orig_img_shape, resized_shape)
 
-    def _run_model(self, preprocessed_img):
+    def _run_model(self, preprocessed_img, *, _retried_cuda_poison=False):
+        if (
+            not _retried_cuda_poison
+            and self.device == "CUDAExecutionProvider"
+            and _cuda_runtime_failed.is_set()
+        ):
+            if self._fallback_after_runtime_failure("CUDA runtime previously failed"):
+                return self._run_model(preprocessed_img, _retried_cuda_poison=True)
+
         model_input = self._coerce_model_input(preprocessed_img)
 
         def _execute():
@@ -605,8 +624,8 @@ class Detect:
                 return self._io_binding.copy_outputs_to_cpu()
             return self.model.run(self.output_names, {self.input_name: model_input})
 
-        if self.device == "DmlExecutionProvider":
-            with _dml_inference_lock:
+        if self.device in _GPU_PROVIDERS:
+            with _gpu_inference_lock:
                 return _execute()
         return _execute()
 

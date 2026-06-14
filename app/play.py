@@ -7,7 +7,7 @@ import time
 import cv2
 import numpy as np
 
-from detect import Detect
+from detect import Detect, gpu_provider_requires_serial_inference
 try:
     from early_access.early_access import add_advanced_visuals
     early_access = True
@@ -2735,7 +2735,7 @@ class Play:
     def perceive_concurrent(self, frame, current_time=None):
         """Run entity and wall detection concurrently when wall tick is due."""
         current_time = current_time or time.time()
-        if getattr(self.Detect_main_info, "device", "") == "DmlExecutionProvider":
+        if gpu_provider_requires_serial_inference(getattr(self.Detect_main_info, "device", "")):
             return self.perceive(frame, current_time=current_time)
         if current_time - self.time_since_walls_checked <= self.walls_treshold:
             return self.perceive(frame, current_time=current_time)
