@@ -29,7 +29,7 @@ BASE_REQUIREMENTS = [
     "opencv-python==4.8.0.76",
     "requests",
     "ultralytics",
-    "aiohttp",
+    "aiohttp>=3.9.0,<3.14",
     "easyocr",
     "google-play-scraper",
     "pyautogui>=0.9.54",
@@ -48,10 +48,11 @@ def run(command):
 
 def install_base_requirements():
     print("Installing/repairing PylaAi core Python packages...")
-    run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
+    run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "wheel"])
+    run([sys.executable, "-m", "pip", "install", "setuptools>=70,<82"])
     run([sys.executable, "-m", "pip", "install", "--upgrade", *BASE_REQUIREMENTS])
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    run([sys.executable, "-m", "pip", "install", "--upgrade", "opencv-python==4.8.0.76"])
+    run([sys.executable, "-m", "pip", "install", "--force-reinstall", "opencv-python==4.8.0.76"])
     run([
         sys.executable,
         "-m",
@@ -83,15 +84,14 @@ def detect_runtime_variant():
 
 
 def update_config(variant):
-    root = Path(__file__).resolve().parents[1]
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-    from utils import load_toml_as_dict, save_dict_as_toml
+    import toml
 
+    root = Path(__file__).resolve().parents[1]
     config_path = root / "cfg" / "general_config.toml"
-    config = load_toml_as_dict(str(config_path))
+    config = toml.load(config_path) if config_path.exists() else {}
     apply_gpu_config(config, variant, detect_graphics_cards())
-    save_dict_as_toml(config, str(config_path))
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(toml.dumps(config), encoding="utf-8")
     print(
         f"Updated {config_path}: cpu_or_gpu = {config.get('cpu_or_gpu')!r}, "
         f"directml_device_id = {config.get('directml_device_id', 'auto')!r}"
@@ -173,11 +173,25 @@ def main():
         except Exception as exc:
             print(f"WARNING: Could not update cfg/general_config.toml automatically: {exc}")
     else:
-        results = [install_and_benchmark_variant(args.variant)]
-        chosen = args.variant if results[-1].get("ok") else "cpu"
-        if chosen != args.variant:
-            install_variant("cpu")
-        update_config(chosen)
+        result = install_and_benchmark_variant(args.variant)
+        results = [result]
+        if result.get("ok"):
+            chosen = args.variant
+            update_config(chosen)
+        else:
+            chosen = args.variant
+            print(
+                f"ERROR: {args.variant} runtime verification failed. "
+                "general_config.toml was not changed."
+            )
+            if args.variant == "cuda":
+                print(
+                    "If CUDA DLLs are still missing after this run, manually run:\n"
+                    "  py -3.11-64 -m pip uninstall -y torch torchvision\n"
+                    "  py -3.11-64 -m pip install --force-reinstall --no-cache-dir "
+                    "torch torchvision --index-url https://download.pytorch.org/whl/cu121"
+                )
+            return 1
 
     import onnxruntime as ort
 

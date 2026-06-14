@@ -28,12 +28,35 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent
 
 
-def pip_run(args, python=None, upgrade=False):
+def pip_run(args, python=None, upgrade=False, force_reinstall=False):
     python = python or sys.executable
     command = [python, "-m", "pip", "install"]
-    if upgrade:
+    if force_reinstall:
+        command.extend(["--force-reinstall", "--no-cache-dir"])
+    elif upgrade:
         command.append("--upgrade")
     subprocess.check_call(command + list(args))
+
+
+def _uninstall_torch(python=None):
+    python = python or sys.executable
+    subprocess.run([python, "-m", "pip", "uninstall", "-y", "torch", "torchvision"], check=False)
+
+
+NVIDIA_CUDA_DLL_PACKAGES = [
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12",
+    "nvidia-cuda-runtime-cu12",
+]
+
+
+def _pip_install_torch_cuda(compute_cap=0.0, python=None, *, force_reinstall=False):
+    pip_run(
+        torch_cuda_install_args(compute_cap),
+        python=python,
+        upgrade=not force_reinstall,
+        force_reinstall=force_reinstall,
+    )
 
 
 def uninstall_onnx_variants(python=None):
@@ -87,7 +110,8 @@ def install_variant(variant, compute_cap=0.0, python=None):
 
     uninstall_onnx_variants(python)
     if variant == "cuda":
-        pip_run(torch_cuda_install_args(compute_cap), python=python, upgrade=True)
+        _uninstall_torch(python)
+        _pip_install_torch_cuda(compute_cap, python=python, force_reinstall=True)
     pip_run([package], python=python, upgrade=True)
 
 
@@ -102,8 +126,14 @@ def verify_cuda_dlls(verbose=False):
 
 
 def repair_cuda_torch(compute_cap=0.0, python=None, verbose=False):
-    pip_run(torch_cuda_install_args(compute_cap), python=python, upgrade=True)
-    return verify_cuda_dlls(verbose=verbose)
+    _uninstall_torch(python=python)
+    _pip_install_torch_cuda(compute_cap, python=python, force_reinstall=True)
+    ok, missing = verify_cuda_dlls(verbose=verbose)
+    if not ok:
+        print("Installing NVIDIA CUDA dependency wheels for cuDNN/cuBLAS...")
+        pip_run(NVIDIA_CUDA_DLL_PACKAGES, python=python, upgrade=True)
+        ok, missing = verify_cuda_dlls(verbose=verbose)
+    return ok, missing
 
 
 def smoke_test_variant(variant, python=None, runs=2, timeout=180):
