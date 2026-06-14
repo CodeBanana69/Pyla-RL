@@ -20,6 +20,12 @@ import cv2
 import numpy as np
 from packaging import version
 
+if not hasattr(cv2, "IMREAD_COLOR"):
+    raise ImportError(
+        "OpenCV is not installed correctly (cv2 is missing IMREAD_COLOR). "
+        "Run app/setup.py or: pip install --force-reinstall opencv-python==4.8.0.76"
+    )
+
 DEVELOPER_API_BASE_URL = "https://developer.brawlstars.com/api/"
 _brawl_stars_api_refresh_done = False
 _brawl_stars_api_refresh_signature = None

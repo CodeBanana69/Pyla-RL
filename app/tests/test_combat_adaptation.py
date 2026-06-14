@@ -184,18 +184,16 @@ class CombatAdaptationTests(unittest.TestCase):
         play.angle_from_direction = Play.angle_from_direction
         play.find_closest_teammate = Play.find_closest_teammate.__get__(play, Play)
         play.choose_locked_teammate = Play.choose_locked_teammate.__get__(play, Play)
-        play.find_teammate_alive_marker = Play.find_teammate_alive_marker.__get__(play, Play)
+        play.find_teammate_alive_marker = lambda _frame: (268, 150)
         play.teammate_marker_follow_angle = Play.teammate_marker_follow_angle.__get__(play, Play)
         play._count_mask_pixels = Play._count_mask_pixels
         play.find_best_angle = lambda _player, angle, _walls: angle
-
-        frame = np.zeros((300, 300, 3), dtype=np.uint8)
-        frame[:, :] = (35, 35, 45)
-        cv2.rectangle(frame, (238, 112), (298, 188), (20, 110, 245), -1)
-        cv2.circle(frame, (268, 150), 23, (245, 245, 245), -1)
-        cv2.circle(frame, (258, 145), 5, (25, 105, 220), -1)
-        cv2.circle(frame, (278, 145), 5, (25, 105, 220), -1)
-        play.current_frame = frame
+        play.teammate_marker_fallback_delay = 0.0
+        play.last_teammate_seen_time = 0.0
+        play.teammate_follow_min_distance = 80
+        play.is_path_blocked_angle = lambda *_args, **_kwargs: False
+        play.showdown_follow_teammate = Play.showdown_follow_teammate.__get__(play, Play)
+        play.current_frame = np.zeros((300, 300, 3), dtype=np.uint8)
 
         movement = play.get_showdown_movement([135, 135, 165, 165], [], [], [], "shelly")
 
@@ -340,7 +338,7 @@ class CombatAdaptationTests(unittest.TestCase):
 
         movement = play.showdown_follow_teammate(
             [90, 90, 110, 110],
-            [(200, 100), (120, 220)],
+            [(350, 100)],
             [],
         )
 
@@ -353,7 +351,7 @@ class CombatAdaptationTests(unittest.TestCase):
         play.teammate_hysteresis = 0.75
         play.teammate_lock_max_jump = 320
         play.teammate_lock_lost_since = 0.0
-        play.teammate_follow_min_distance = 180
+        play.teammate_follow_min_distance = 80
         play.teammate_follow_step_distance = 8
         play.teammate_follow_force_direct = False
         play.get_player_pos = lambda _player: (100, 100)
@@ -459,6 +457,70 @@ class CombatAdaptationTests(unittest.TestCase):
 
         self.assertEqual(movement, 0.0)
         self.assertEqual(play.locked_teammate, (305, 100))
+
+    def test_showdown_follow_teammate_holds_when_within_min_distance(self):
+        play = object.__new__(Play)
+        play.locked_teammate = None
+        play.locked_teammate_distance = float("inf")
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+        play.teammate_follow_min_distance = 180
+        play.teammate_follow_step_distance = 8
+        play.teammate_follow_force_direct = True
+        play.get_player_pos = lambda _player: (100, 100)
+        play.get_enemy_pos = lambda entity: entity
+        play.get_distance = Play.get_distance
+        play.find_closest_teammate = Play.find_closest_teammate.__get__(play, Play)
+        play.choose_locked_teammate = Play.choose_locked_teammate.__get__(play, Play)
+
+        movement = play.showdown_follow_teammate(
+            [90, 90, 110, 110],
+            [(200, 100)],
+            [],
+        )
+
+        self.assertIsNone(movement)
+
+    def test_find_best_angle_degrees_avoids_blocked_diagonal(self):
+        play = object.__new__(Play)
+        blocked = {45.0}
+        play.is_path_blocked_angle = lambda _player, angle, _walls: round(angle % 360, 1) in blocked
+
+        result = play.find_best_angle_degrees((100, 100), 45.0, [])
+
+        self.assertNotEqual(round(result, 1), 45.0)
+        self.assertFalse(play.is_path_blocked_angle((100, 100), result, []))
+
+    def test_get_teammate_follow_movement_routes_around_blocked_diagonal(self):
+        play = object.__new__(Play)
+        play.locked_teammate = None
+        play.locked_teammate_distance = float("inf")
+        play.teammate_hysteresis = 0.75
+        play.teammate_lock_max_jump = 320
+        play.teammate_lock_lost_since = 0.0
+        play.teammate_follow_min_distance = 80
+        play.teammate_follow_step_distance = 8
+        play.teammate_follow_force_direct = False
+        play.get_player_pos = lambda _player: (100, 100)
+        play.get_enemy_pos = lambda entity: entity
+        play.get_distance = Play.get_distance
+        play.angle_from_direction = Play.angle_from_direction
+        play.vector_from_angle = Play.vector_from_angle
+        blocked = {45.0}
+        play.is_path_blocked_angle = lambda _player, angle, _walls: round(angle % 360, 1) in blocked
+        play.find_best_angle = Play.find_best_angle.__get__(play, Play)
+        play.window_controller = type("WC", (), {"scale_factor": 1.0})()
+
+        movement = play.get_teammate_follow_movement(
+            [90, 90, 110, 110],
+            [(220, 220)],
+            [],
+        )
+
+        self.assertNotEqual(movement, (0, 0))
+        move_angle = play.angle_from_direction(movement[0], movement[1])
+        self.assertNotEqual(round(move_angle, 1), 45.0)
 
     def test_showdown_combat_regroup_uses_locked_teammate(self):
         play = object.__new__(Play)

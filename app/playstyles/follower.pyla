@@ -1,26 +1,14 @@
 ﻿{"name": "Follower", "description": "Follow teammates when no enemies", "brawlers": ["all"], "gamemodes": ["all"], "author": "Official", "date": "2026-04-23"}
 def no_enemy_movement():
-    player_pos = get_entity_pos(player_data)
-    closest_teammate_coords, dist = find_closest_teammate(teammate_data, player_pos, walls)
-    if not closest_teammate_coords:
-        return 0, -JOYSTICK_RADIUS
-    if dist <= 60:
-        return 0, 0
-    direction_x = closest_teammate_coords[0] - player_pos[0]
-    direction_y = closest_teammate_coords[1] - player_pos[1]
-    movement_options = [(direction_x, direction_y), (direction_x, 0), (0, direction_y)]
-
-    for move in movement_options:
+    movement = get_teammate_follow_movement(player_data, teammate_data, walls)
+    if movement is not None:
+        return movement
+    alternative_moves = [(0, -JOYSTICK_RADIUS), (-JOYSTICK_RADIUS, 0), (0, JOYSTICK_RADIUS), (JOYSTICK_RADIUS, 0)]
+    random.shuffle(alternative_moves)
+    for move in alternative_moves:
         if not is_path_blocked(player_data, move, walls):
             return move
-    else:
-        # If all preferred directions are blocked, try other directions
-        alternative_moves = [(0, -JOYSTICK_RADIUS), (-JOYSTICK_RADIUS, 0), (0, JOYSTICK_RADIUS), (JOYSTICK_RADIUS, 0)]
-        for move in alternative_moves:
-            if not is_path_blocked(player_data, move, walls):
-                return move
-        else:
-            return movement_options[0]
+    return (0, -JOYSTICK_RADIUS)
 
 brawler_info = brawlers_info.get(brawler)
 if not brawler_info:

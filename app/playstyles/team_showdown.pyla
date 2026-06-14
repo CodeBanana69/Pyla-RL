@@ -12,19 +12,10 @@ def no_enemy_movement(player_data, walls):
     return preferred_movement
 
 def teammate_follow_movement():
-    closest_teammate_coords, _ = find_closest_teammate(teammate_data, player_pos, walls)
-    if not closest_teammate_coords:
-        return no_enemy_movement(player_data, walls)
-    direction_x = closest_teammate_coords[0] - player_pos[0]
-    direction_y = closest_teammate_coords[1] - player_pos[1]
-    move_horizontal = (direction_x, 0)
-    move_vertical = (0, direction_y)
-    move_diagonal = (direction_x, direction_y)
-    movement_options = [move_diagonal, move_vertical, move_horizontal]
-    for move in movement_options:
-        if not is_path_blocked(player_data, move, walls):
-            return move
-    return move_diagonal
+    movement = get_teammate_follow_movement(player_data, teammate_data, walls)
+    if movement is not None:
+        return movement
+    return no_enemy_movement(player_data, walls)
 
 def avoid_poison_gas_movement():
     counts = is_there_poison_gas(player_data)

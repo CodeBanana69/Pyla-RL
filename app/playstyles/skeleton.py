@@ -161,6 +161,14 @@ def find_closest_teammate(
     """
     return (0.0, 0.0), 0.0
 
+def get_teammate_follow_movement(
+    player_data: Tuple[float, float, float, float],
+    teammates: List[List[float]],
+    walls_list: List[List[float]],
+) -> Tuple[float, float]:
+    """Wall-aware teammate follow vector. Returns (0, 0) when close enough to hold."""
+    return (0.0, 0.0)
+
 def is_there_poison_gas(player_data: tuple[float, float, float, float]) -> dict:
     """Checks if there's poison gas in the given direction from the player"""
     return {"up": 0, "down": 0, "left": 0, "right": 0}

@@ -219,13 +219,9 @@ def avoid_poison_gas():
 # ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
 
 def no_enemy_movement():
-    closest_teammate_coords, teammate_distance = find_closest_teammate(
-        teammate_data, player_pos, walls
-    )
-
-    if closest_teammate_coords is not None:
-        if teammate_distance is None or teammate_distance > TILE_SIZE * 3:
-            return move_toward(closest_teammate_coords)
+    follow_movement = get_teammate_follow_movement(player_data, teammate_data, walls)
+    if follow_movement is not None and (follow_movement[0] != 0 or follow_movement[1] != 0):
+        return follow_movement
 
     forward = (0, -JOYSTICK_RADIUS)
     if not is_blocked(forward):
