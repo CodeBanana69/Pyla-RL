@@ -1608,8 +1608,8 @@ class WindowController:
         self,
         angle_degrees: float,
         radius: float = 250.0,
-        duration: float = 0.18,
-        hold: float = 0.06,
+        duration: float = 0.09,
+        hold: float = 0.02,
         release: bool = True,
     ):
         x, y = key_coords_dict["M"]
@@ -1626,7 +1626,7 @@ class WindowController:
             end_x,
             end_y,
             duration=duration,
-            step_len=12.0,
+            step_len=18.0,
             hold=hold,
             release=release,
             pointer_id=self.PID_ATTACK,

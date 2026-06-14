@@ -339,8 +339,8 @@ class Play:
 
         if hasattr(self.window_controller, "aim_attack_angle"):
             radius = float(getattr(self, "aim_swipe_radius", 250.0) or 250.0)
-            duration = float(getattr(self, "aim_swipe_duration", 0.18) or 0.18)
-            hold = float(getattr(self, "aim_swipe_hold", 0.06) or 0.06)
+            duration = float(getattr(self, "aim_swipe_duration", 0.09) or 0.09)
+            hold = float(getattr(self, "aim_swipe_hold", 0.02) or 0.02)
             self.window_controller.aim_attack_angle(
                 float(angle_degrees),
                 radius=radius,
@@ -462,8 +462,8 @@ class Play:
             return False
 
         radius = float(getattr(self, "aim_swipe_radius", 250.0) or 250.0)
-        duration = float(getattr(self, "aim_swipe_duration", 0.18) or 0.18)
-        hold = float(getattr(self, "aim_swipe_hold", 0.06) or 0.06)
+        duration = float(getattr(self, "aim_swipe_duration", 0.09) or 0.09)
+        hold = float(getattr(self, "aim_swipe_hold", 0.02) or 0.02)
         self.window_controller.aim_attack_angle(
             angle,
             radius=radius,
@@ -1325,7 +1325,7 @@ class Play:
     def get_teammate_follow_movement(self, player_data, teammate_data, walls):
         angle = self.showdown_follow_teammate(player_data, teammate_data, walls)
         if angle is None:
-            return (0, 0)
+            return self.ensure_active_movement((0, 0), player_data, walls)
         return self.vector_from_angle(angle)
 
     def get_strafe_angle(self, toward_enemy_angle, current_time, enemy_distance=None, safe_range=None):
@@ -1805,7 +1805,47 @@ class Play:
             if key in data and data[key]:
                 self.time_since_detections[key] = time.time()
 
+    def _movement_magnitude(self, movement):
+        movement_vector = self.movement_to_vector(movement)
+        if movement_vector is None:
+            return 0.0
+        return math.hypot(movement_vector[0], movement_vector[1])
+
+    def _pick_idle_movement(self, player_data, walls):
+        moves = [
+            (0, -JOYSTICK_RADIUS),
+            (-JOYSTICK_RADIUS, 0),
+            (0, JOYSTICK_RADIUS),
+            (JOYSTICK_RADIUS, 0),
+        ]
+        random.shuffle(moves)
+        for move in moves:
+            if not self.is_path_blocked(player_data, move, walls):
+                return move
+        player_pos = self.get_player_pos(player_data)
+        roam_angle = self.showdown_roam(player_data, walls)
+        return self.vector_from_angle(roam_angle)
+
+    def ensure_active_movement(self, movement, player_data, walls):
+        if not config_bool(getattr(self, "always_move_enabled", "yes"), True):
+            return movement
+        min_mag = float(getattr(self, "always_move_min_magnitude", 25.0) or 25.0)
+        if player_data is None:
+            if self._movement_magnitude(movement) >= min_mag:
+                return movement
+            return self.get_random_movement()
+        if self._movement_magnitude(movement) >= min_mag:
+            return movement
+        return self._pick_idle_movement(player_data, walls)
+
     def do_movement(self, movement):
+        player_data = None
+        walls = []
+        context = getattr(self, "context", None)
+        if isinstance(context, dict) and context.get("player_data") is not None:
+            player_data = context["player_data"]
+            walls = context.get("walls") or []
+        movement = self.ensure_active_movement(movement, player_data, walls)
         movement_vector = self.movement_to_vector(movement)
         if movement_vector is None:
             self.window_controller.release_movement()
@@ -1839,8 +1879,10 @@ class Play:
         self.attack_min_interval = float(bot_config.get("attack_min_interval", 0.35))
         self.aimed_attacks_enabled = bot_config.get("aimed_attacks", "yes")
         self.aim_swipe_radius = float(bot_config.get("aim_swipe_radius", 250.0))
-        self.aim_swipe_duration = float(bot_config.get("aim_swipe_duration", 0.18))
-        self.aim_swipe_hold = float(bot_config.get("aim_swipe_hold", 0.06))
+        self.aim_swipe_duration = float(bot_config.get("aim_swipe_duration", 0.09))
+        self.aim_swipe_hold = float(bot_config.get("aim_swipe_hold", 0.02))
+        self.always_move_enabled = bot_config.get("always_move", "yes")
+        self.always_move_min_magnitude = float(bot_config.get("always_move_min_magnitude", 25.0))
         smart_aim = bot_config.get("smart_aim_enabled")
         if smart_aim is None:
             smart_aim = bot_config.get("lead_shots", "yes")
@@ -2506,6 +2548,11 @@ class Play:
                 data.get("enemy") or [],
                 data.get("wall") or [],
             )
+            movement = self.ensure_active_movement(
+                movement,
+                data["player"][0],
+                data.get("wall") or [],
+            )
         self._update_match_intent(brawler, data)
         self.current_frame = self.frame
         escape_override = False
@@ -2547,9 +2594,16 @@ class Play:
                         escape_override = True
 
         if self.movement_to_vector(movement) is None:
-            self.window_controller.release_movement()
-            self.last_movement = ''
-            return None
+            if data.get("player"):
+                movement = self.ensure_active_movement(
+                    movement,
+                    data["player"][0],
+                    data.get("wall") or [],
+                )
+            if self.movement_to_vector(movement) is None:
+                self.window_controller.release_movement()
+                self.last_movement = ''
+                return None
         movement = self.clamp_movement(movement)
         current_time = time.time()
         if not escape_override:

@@ -12,8 +12,8 @@ class CombatSmartAttackTests(unittest.TestCase):
         play.smart_aim_enabled = "yes"
         play.aimed_attacks_enabled = "yes"
         play.aim_swipe_radius = 250.0
-        play.aim_swipe_duration = 0.18
-        play.aim_swipe_hold = 0.06
+        play.aim_swipe_duration = 0.09
+        play.aim_swipe_hold = 0.02
         play.attack_min_interval = 0.35
         play.projectile_speed_px_s = 1200.0
         play.current_brawler = "shelly"
@@ -88,7 +88,7 @@ class CombatSmartAttackTests(unittest.TestCase):
         args, kwargs = play.window_controller.aim_attack_angle.call_args
         self.assertAlmostEqual(args[0], 0.0, places=3)
         self.assertGreaterEqual(kwargs.get("radius", args[1] if len(args) > 1 else 0), 200.0)
-        self.assertGreaterEqual(kwargs.get("duration", 0.0), 0.1)
+        self.assertGreaterEqual(kwargs.get("duration", 0.0), 0.05)
 
     def test_attack_pacing_suppresses_rapid_taps(self):
         play = self._make_play()
