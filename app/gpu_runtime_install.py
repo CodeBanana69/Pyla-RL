@@ -120,6 +120,14 @@ root = Path({str(root)!r})
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
+from visual_debug_window import opencv_runtime_ready, repair_opencv_runtime
+
+if not opencv_runtime_ready():
+    repair_opencv_runtime()
+    import importlib
+    import cv2 as _cv2
+    importlib.reload(_cv2)
+
 from detect import Detect
 
 model_path = root / "models" / "mainInGameModel.onnx"

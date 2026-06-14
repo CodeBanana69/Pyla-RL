@@ -104,6 +104,12 @@ def setup_pyla():
         "scikit-image", "ninja", "pyclipper", "python-bidi", "Shapely",
     ])
 
+    from visual_debug_window import opencv_runtime_ready, repair_opencv_runtime
+
+    if not opencv_runtime_ready():
+        print("OpenCV install looks broken; repairing before GPU runtime setup...")
+        repair_opencv_runtime()
+
     target, ver, name = get_gpu_data()
     status_pytorch, status_accel = "CPU Edition", "N/A"
     
@@ -185,7 +191,9 @@ def setup_pyla():
     force_install(["adbutils==2.12.0", "av==12.3.0"])
     force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
     subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    force_install(["opencv-python==4.8.0.76"], no_deps=True)
+    from visual_debug_window import repair_opencv_runtime
+
+    repair_opencv_runtime()
     try:
         from visual_debug_window import OPENCV_REPAIR_CMD, opencv_highgui_available, visual_debug_backend_name
 

@@ -60,8 +60,10 @@ def resolve_project_path(file_path):
     return os.path.join(project_root(), normalized)
 
 
-def imread_unicode(file_path, flags=cv2.IMREAD_COLOR):
+def imread_unicode(file_path, flags=None):
     """Load an image when the path may contain non-ASCII characters (Windows)."""
+    if flags is None:
+        flags = int(getattr(cv2, "IMREAD_COLOR", 1))
     resolved_path = os.fspath(file_path)
     if not os.path.exists(resolved_path):
         return None
