@@ -59,12 +59,24 @@ def _pip_install_torch_cuda(compute_cap=0.0, python=None, *, force_reinstall=Fal
     )
 
 
-def uninstall_onnx_variants(python=None):
+def _onnx_package_installed(package: str, python=None) -> bool:
     python = python or sys.executable
-    subprocess.run(
-        [python, "-m", "pip", "uninstall", "-y", *ONNX_VARIANTS],
+    completed = subprocess.run(
+        [python, "-m", "pip", "show", package],
+        capture_output=True,
+        text=True,
         check=False,
     )
+    return completed.returncode == 0
+
+
+def uninstall_onnx_variants(python=None):
+    """Remove any installed ONNX Runtime variant before installing another."""
+    python = python or sys.executable
+    installed = [package for package in ONNX_VARIANTS if _onnx_package_installed(package, python)]
+    if not installed:
+        return
+    subprocess.run([python, "-m", "pip", "uninstall", "-y", *installed], check=False)
 
 
 def torch_cuda_install_args(compute_cap=0.0):
