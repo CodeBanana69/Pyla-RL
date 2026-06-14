@@ -162,6 +162,10 @@ def main():
     )
     args = parser.parse_args()
 
+    from tools.python_runtime import ensure_project_python_for_tools
+
+    ensure_project_python_for_tools(script_path=Path(__file__).resolve())
+
     install_base_requirements()
     cards = detect_graphics_cards()
 

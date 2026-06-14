@@ -37,6 +37,8 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("download_with_powershell", source)
         self.assertIn("certificate fallback", source)
         self.assertIn("verify_windows_signature", source)
+        self.assertIn("_powershell_literal", source)
+        self.assertNotIn("$args[0]", source)
         self.assertIn("ssl._create_unverified_context", source)
 
     def test_gpu_repair_installs_qml_dependency(self):

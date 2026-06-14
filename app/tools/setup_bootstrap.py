@@ -59,9 +59,14 @@ def ensure_supported_windows():
     return True
 
 
-def verify_windows_signature(path, label):
+def _powershell_literal(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def verify_windows_signature(path, label, *, required=True):
     if platform.system() != "Windows" or path.suffix.lower() != ".exe":
         return True
+    path_literal = _powershell_literal(str(path))
     try:
         result = subprocess.run(
             [
@@ -71,11 +76,10 @@ def verify_windows_signature(path, label):
                 "Bypass",
                 "-Command",
                 (
-                    "$sig = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+                    f"$sig = Get-AuthenticodeSignature -LiteralPath {path_literal}; "
                     "if ($sig.Status -eq 'Valid') { exit 0 } "
                     "Write-Host ('Signature status: ' + $sig.Status); exit 1"
                 ),
-                str(path),
             ],
             text=True,
             capture_output=True,
@@ -90,6 +94,9 @@ def verify_windows_signature(path, label):
             print(result.stderr.strip())
     except Exception as exc:
         print(f"Could not verify {label} signature: {exc}")
+    if not required:
+        print(f"WARNING: Continuing without verified signature for {label}.")
+        return True
     return False
 
 
@@ -100,6 +107,8 @@ def download_with_urllib(url, destination, timeout=45, insecure=False):
 
 
 def download_with_powershell(url, destination):
+    url_literal = _powershell_literal(url)
+    dest_literal = _powershell_literal(str(destination))
     result = subprocess.run(
         [
             "powershell",
@@ -109,10 +118,8 @@ def download_with_powershell(url, destination):
             "-Command",
             (
                 "$ProgressPreference='SilentlyContinue'; "
-                "Invoke-WebRequest -Uri $args[0] -OutFile $args[1] -UseBasicParsing"
+                f"Invoke-WebRequest -Uri {url_literal} -OutFile {dest_literal} -UseBasicParsing"
             ),
-            url,
-            str(destination),
         ],
         text=True,
         capture_output=True,
@@ -123,9 +130,10 @@ def download_with_powershell(url, destination):
         raise RuntimeError(message or f"PowerShell download failed with exit code {result.returncode}")
 
 
-def download_file(url, destination, label):
+def download_file(url, destination, label, *, required=True, require_signature=True):
     if destination.exists() and destination.stat().st_size > 1_000_000:
-        return destination
+        if not require_signature or verify_windows_signature(destination, label, required=required):
+            return destination
 
     print(f"Downloading {label}...")
     errors = []
@@ -140,13 +148,17 @@ def download_file(url, destination, label):
                 destination.unlink()
             action()
             if destination.exists() and destination.stat().st_size > 1_000_000:
-                if verify_windows_signature(destination, label):
+                if not require_signature or verify_windows_signature(destination, label, required=required):
                     return destination
                 errors.append(f"{name}: downloaded file did not have a valid Windows signature")
             else:
                 errors.append(f"{name}: downloaded file was empty or incomplete")
         except Exception as exc:
             errors.append(f"{name}: {exc}")
+
+    if destination.exists() and destination.stat().st_size > 1_000_000 and not required:
+        print(f"WARNING: Using {label} without a verified signature.")
+        return destination
 
     print("")
     print(f"Could not download {label}.")
@@ -164,9 +176,10 @@ def download_file(url, destination, label):
     print("Download errors:")
     for error in errors:
         print(f"- {error}")
+    if not required:
+        return None
     input("Press Enter to close...")
     raise SystemExit(1)
-    return destination
 
 
 def python_info(command):
@@ -251,11 +264,20 @@ def install_python():
 
 
 def install_vc_redist():
+    destination = Path(tempfile.gettempdir()) / "pylaai-vc_redist.x64.exe"
     installer = download_file(
         VC_REDIST_URL,
-        Path(tempfile.gettempdir()) / "pylaai-vc_redist.x64.exe",
+        destination,
         "Microsoft Visual C++ Redistributable x64",
+        required=False,
+        require_signature=False,
     )
+    if installer is None:
+        print("")
+        print("WARNING: Visual C++ Redistributable could not be downloaded automatically.")
+        print("Setup will continue. If you later see missing DLL errors, install it manually:")
+        print(VC_REDIST_URL)
+        return
     print("Installing Microsoft Visual C++ Redistributable x64...")
     result = subprocess.run([
         str(installer),

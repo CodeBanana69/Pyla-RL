@@ -50,23 +50,41 @@ def _numpy_major_version(python=None) -> int | None:
 def repair_numpy(python=None, *, verbose=True, reinstall_opencv=True) -> bool:
     """Pin NumPy 1.x and rebuild OpenCV 4.8 wheels that break on NumPy 2.x."""
     python = python or sys.executable
+    try:
+        from tools.python_runtime import is_supported_python, unsupported_python_message
+
+        if not is_supported_python(python):
+            raise RuntimeError(unsupported_python_message(python))
+    except ImportError:
+        pass
+
     major = _numpy_major_version(python)
     if major is not None and major < 2:
         return False
     if verbose:
         label = "missing" if major is None else f"{major}.x"
         print(f"Repairing NumPy ({label} -> 1.x) for OpenCV 4.8 compatibility...")
-    subprocess.check_call(
-        [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", NUMPY_PIN],
-    )
+
+    def _pip_no_deps(*packages: str) -> None:
+        completed = subprocess.run(
+            [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", *packages],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(
+                f"pip install failed for {', '.join(packages)} using {python}.\n{detail}"
+            )
+
+    _pip_no_deps(NUMPY_PIN)
     if reinstall_opencv:
         subprocess.run(
             [python, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
             check=False,
         )
-        subprocess.check_call(
-            [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", OPENCV_PIN],
-        )
+        _pip_no_deps(OPENCV_PIN)
     return True
 
 

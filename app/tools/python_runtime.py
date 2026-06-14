@@ -3,12 +3,90 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 PYTHON_PIN_RELATIVE = Path("cfg") / "pyla_python.txt"
 SETUP_STATUS_RELATIVE = Path("cfg") / "setup_runtime.json"
+SUPPORTED_PYTHON = (3, 11)
+
+
+def bundle_dir() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def project_dir() -> Path:
+    return bundle_dir().parent
+
+
+def python_version_info(python_command: list[str] | str) -> tuple[int, int, int] | None:
+    if isinstance(python_command, str):
+        python_command = [python_command]
+    completed = subprocess.run(
+        python_command + ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    parts = (completed.stdout or "").strip().split(".")
+    try:
+        return int(parts[0]), int(parts[1]), int(parts[2])
+    except (IndexError, TypeError, ValueError):
+        return None
+
+
+def is_supported_python(python_command: list[str] | str) -> bool:
+    version = python_version_info(python_command)
+    return version is not None and version[:2] == SUPPORTED_PYTHON
+
+
+def unsupported_python_message(python_command: list[str] | str) -> str:
+    version = python_version_info(python_command)
+    label = version and f"{version[0]}.{version[1]}.{version[2]}" or "unknown"
+    executable = python_command if isinstance(python_command, str) else " ".join(python_command)
+    return (
+        f"Pyla-RL requires Python 3.11 64-bit (current: {label} via {executable}). "
+        "Run setup.exe, use pyla-rl.bat, or rerun with: py -3.11-64 tools\\fix_gpu_runtime.py auto"
+    )
+
+
+def resolve_project_python_executable() -> str | None:
+    bundle = bundle_dir()
+    pin = read_python_pin(bundle)
+    if pin and is_supported_python(pin):
+        return pin
+
+    venv_python = bundle / ".venv" / "Scripts" / "python.exe"
+    if venv_python.exists() and is_supported_python(str(venv_python)):
+        return str(venv_python)
+
+    for command in (["py", "-3.11-64"], ["py", "-3.11"]):
+        if is_supported_python(command):
+            probe = probe_runtime_imports(command)
+            if probe.get("ok"):
+                return str(probe.get("executable") or "")
+
+    if is_supported_python(sys.executable):
+        return sys.executable
+    return None
+
+
+def ensure_project_python_for_tools(*, script_path: Path | None = None) -> str:
+    resolved = resolve_project_python_executable()
+    if not resolved:
+        raise SystemExit(unsupported_python_message(sys.executable))
+
+    if script_path is not None and os.path.normcase(resolved) != os.path.normcase(sys.executable):
+        print(unsupported_python_message(sys.executable))
+        print(f"Switching to project Python: {resolved}")
+        os.execv(resolved, [resolved, str(script_path), *sys.argv[1:]])
+    return resolved
+
 
 
 def python_pin_path(project_dir: Path) -> Path:
