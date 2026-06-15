@@ -155,7 +155,9 @@ for _item in TUTORIAL_TOPICS:
 
 
 def tutorial_topics() -> list[dict[str, str]]:
-    return [dict(topic) for topic in TUTORIAL_TOPICS]
+    from gui.i18n import localized_tutorial_topics
+
+    return localized_tutorial_topics()
 
 
 def tutorial_topic(topic_id: str) -> dict[str, str] | None:

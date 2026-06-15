@@ -21,20 +21,20 @@ BLOCKING_HUB_ACTIONS = frozenset({
     "refresh-history",
 })
 
-PENDING_ACTION_MESSAGES = {
-    "build-push-all": "Building farm plan...",
-    "preflight-check": "Running pre-flight checks...",
-    "preflight-fix": "Applying pre-flight fix...",
-    "test-emulator": "Testing emulator connection...",
-    "api-test": "Testing Brawl Stars API...",
-    "sort-queue": "Sorting farm plan...",
-    "sort-queue-by-trophies": "Sorting farm plan...",
-    "import-queue": "Importing farm plan...",
-    "calibrate-performance": "Calibrating performance profile...",
-    "check-updates": "Checking for updates...",
-    "export-history": "Exporting match history...",
-    "refresh-history": "Refreshing match history...",
-    "start-pyla": "Checking pre-flight...",
+PENDING_ACTION_MESSAGE_KEYS = {
+    "build-push-all": "msg.building_farm_plan",
+    "preflight-check": "msg.running_preflight",
+    "preflight-fix": "msg.applying_preflight_fix",
+    "test-emulator": "msg.testing_emulator",
+    "api-test": "msg.testing_api",
+    "sort-queue": "msg.sorting_farm_plan",
+    "sort-queue-by-trophies": "msg.sorting_farm_plan",
+    "import-queue": "msg.importing_farm_plan",
+    "calibrate-performance": "msg.calibrating_performance",
+    "check-updates": "msg.checking_updates",
+    "export-history": "msg.exporting_history",
+    "refresh-history": "msg.refreshing_history",
+    "start-pyla": "msg.checking_preflight",
 }
 
 
@@ -43,7 +43,10 @@ def is_blocking_hub_action(action: str) -> bool:
 
 
 def pending_action_message(action: str) -> str:
-    return PENDING_ACTION_MESSAGES.get(str(action or "").strip().lower(), "Working...")
+    from gui.i18n import t
+
+    key = PENDING_ACTION_MESSAGE_KEYS.get(str(action or "").strip().lower())
+    return t(key) if key else t("msg.working")
 
 
 class HubActionWorker(QObject):

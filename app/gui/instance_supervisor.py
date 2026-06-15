@@ -25,24 +25,33 @@ class InstanceSupervisor:
         return [sys.executable, str(self.project_root / "main.py"), "--instance", instance_id]
 
     def validate_start(self, instance_id: str) -> tuple[bool, str, dict]:
+        from gui.i18n import t
+
         meta: dict = {}
         if not is_multi_instance_enabled():
-            return False, "Multi-instance mode is disabled.", {"action": "enable_multi_instance", "actionLabel": "Enable Multi-Instance"}
+            return False, t("instances.multi_instance_disabled_msg"), {
+                "action": "enable_multi_instance",
+                "actionLabel": t("instances.enable_multi_instance"),
+            }
         profile = get_instance_profile(instance_id)
         if not profile:
-            return False, f"Unknown instance '{instance_id}'.", meta
+            return False, t("instances.readiness_unknown", id=instance_id), meta
         if not profile.get("enabled", True):
-            return False, f"Instance '{instance_id}' is disabled.", meta
+            return False, t("instances.instance_disabled", id=instance_id), meta
         collision = find_port_collision(instance_id, profile["emulator_port"])
         if collision:
-            return False, f"Port {profile['emulator_port']} is already used by instance '{collision}'.", {
+            return False, t(
+                "instances.port_in_use",
+                port=profile["emulator_port"],
+                collision=collision,
+            ), {
                 "action": "fix_port",
-                "actionLabel": "Fix Port",
+                "actionLabel": t("instances.fix_port"),
                 "instanceId": instance_id,
             }
         live = resolve_instance(instance_id)
         if live and live.get("running"):
-            return False, f"Instance '{instance_id}' is already running.", meta
+            return False, t("instances.already_running", id=instance_id), meta
 
         queue_path = self.project_root / str(profile.get("queue_path", ""))
         if not queue_path.exists() or not queue_has_data(queue_path):
@@ -55,17 +64,16 @@ class InstanceSupervisor:
                 queue_path.parent.mkdir(parents=True, exist_ok=True)
                 queue_path.write_text(default_queue.read_text(encoding="utf-8"), encoding="utf-8")
             else:
-                return False, (
-                    f"Instance '{instance_id}' has no brawler queue yet. "
-                    "Pick brawlers or use Push All once, then start the instance."
-                ), {
+                return False, t("instances.no_queue_yet", id=instance_id), {
                     "action": "edit_farm_plan",
-                    "actionLabel": "Edit Farm Plan",
+                    "actionLabel": t("instances.edit_farm_plan"),
                     "instanceId": instance_id,
                 }
         return True, "OK", meta
 
     def start_instance(self, instance_id: str) -> tuple[bool, str, dict]:
+        from gui.i18n import t
+
         ok, message, meta = self.validate_start(instance_id)
         if not ok:
             return False, message, meta
@@ -76,19 +84,23 @@ class InstanceSupervisor:
         )
         self._processes[instance_id] = process
         self.align_windows(wait_seconds=2.0)
-        return True, f"Started instance '{instance_id}' (PID {process.pid}).", meta
+        return True, t("instances.started_instance", id=instance_id, pid=process.pid), meta
 
     def align_windows(self, wait_seconds: float = 0.0) -> tuple[bool, str]:
+        from gui.i18n import t
+
         try:
             configured = len(list_instances())
             count = arrange_emulator_windows(max_windows=configured or None, wait_seconds=wait_seconds)
         except Exception as exc:
-            return False, f"Could not align emulator windows: {exc}"
+            return False, t("instances.align_failed", error=exc)
         if count <= 0:
-            return False, "No emulator windows found to align."
-        return True, f"Aligned {count} emulator window{'s' if count != 1 else ''}."
+            return False, t("instances.no_windows_to_align")
+        return True, t("instances.aligned_windows", count=count)
 
     def stop_instance(self, instance_id: str, *, timeout: float = 20.0) -> tuple[bool, str, dict]:
+        from gui.i18n import t
+
         live = resolve_instance(instance_id)
         state_path = live.get("state_path") if live else ""
         if state_path:
@@ -107,8 +119,8 @@ class InstanceSupervisor:
                 time.sleep(0.5)
         self._processes.pop(instance_id, None)
         if live and live.get("pid") and process_is_alive(int(live["pid"])):
-            return False, f"Instance '{instance_id}' did not stop in time.", {}
-        return True, f"Stop requested for instance '{instance_id}'.", {}
+            return False, t("instances.stop_timeout", id=instance_id), {}
+        return True, t("instances.stop_requested", id=instance_id), {}
 
     def restart_instance(self, instance_id: str) -> tuple[bool, str, dict]:
         ok, message, meta = self.stop_instance(instance_id)
@@ -117,6 +129,7 @@ class InstanceSupervisor:
         return self.start_instance(instance_id)
 
     def start_all_ready(self) -> tuple[list[dict], str]:
+        from gui.i18n import t
         from gui.instance_config import compute_instance_readiness
 
         results = []
@@ -127,28 +140,30 @@ class InstanceSupervisor:
                 results.append({
                     "id": instance_id,
                     "ok": False,
-                    "message": readiness.get("message", "Not ready."),
+                    "message": readiness.get("message", t("common.unknown")),
                     **{k: readiness[k] for k in ("action", "actionLabel") if k in readiness},
                 })
                 continue
             if profile.get("running"):
-                results.append({"id": instance_id, "ok": True, "message": "Already running."})
+                results.append({"id": instance_id, "ok": True, "message": t("instances.already_running_short")})
                 continue
             ok, message, meta = self.start_instance(instance_id)
             results.append({"id": instance_id, "ok": ok, "message": message, **meta})
         started = sum(1 for item in results if item.get("ok"))
-        return results, f"Started {started} of {len(results)} instance(s)."
+        return results, t("instances.started_summary", started=started, total=len(results))
 
     def stop_all(self) -> tuple[list[dict], str]:
+        from gui.i18n import t
+
         results = []
         for profile in list_instances():
             if not profile.get("running"):
-                results.append({"id": profile["id"], "ok": True, "message": "Already stopped."})
+                results.append({"id": profile["id"], "ok": True, "message": t("instances.already_stopped")})
                 continue
             ok, message, meta = self.stop_instance(profile["id"])
             results.append({"id": profile["id"], "ok": ok, "message": message, **meta})
         stopped = sum(1 for item in results if item.get("ok"))
-        return results, f"Stop requested for {stopped} instance(s)."
+        return results, t("instances.stop_summary", stopped=stopped)
 
     def list_status(self) -> list[dict]:
         statuses = []

@@ -11,7 +11,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 480
     visible: true
-    title: settingsOnly ? "Pyla-RL Settings" : "Pyla-RL Hub"
+    title: settingsOnly ? root.t("app.settings_title") : root.t("app.hub_title")
     color: theme.bg
     flags: Qt.FramelessWindowHint | Qt.Window
 
@@ -46,17 +46,48 @@ ApplicationWindow {
     readonly property int durMed: animationsEnabled ? 210 : 0
     readonly property int durSlow: animationsEnabled ? 320 : 0
     readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
+    property string language: (hubState.language !== undefined) ? hubState.language : "en"
     readonly property var queueSortOptions: [
-        { id: "cups_desc", label: "Cups high \u2192 low" },
-        { id: "cups_asc", label: "Cups low \u2192 high" },
-        { id: "gap_asc", label: "Closest to target" },
-        { id: "gap_desc", label: "Furthest from target" },
-        { id: "target_desc", label: "Target high \u2192 low" },
-        { id: "target_asc", label: "Target low \u2192 high" },
-        { id: "name_asc", label: "Name A \u2192 Z" },
-        { id: "name_desc", label: "Name Z \u2192 A" },
-        { id: "efficiency", label: "Best trophies/hour" }
+        { id: "cups_desc", label: root.t("sort.cups_desc") },
+        { id: "cups_asc", label: root.t("sort.cups_asc") },
+        { id: "gap_asc", label: root.t("sort.gap_asc") },
+        { id: "gap_desc", label: root.t("sort.gap_desc") },
+        { id: "target_desc", label: root.t("sort.target_desc") },
+        { id: "target_asc", label: root.t("sort.target_asc") },
+        { id: "name_asc", label: root.t("sort.name_asc") },
+        { id: "name_desc", label: root.t("sort.name_desc") },
+        { id: "efficiency", label: root.t("sort.efficiency") }
     ]
+
+    function t(key, replacements) {
+        var strings = hubState.strings || {}
+        var template = strings[key]
+        if (template === undefined || template === null || template === "") {
+            template = key
+        }
+        if (!replacements) {
+            return template
+        }
+        var text = String(template)
+        for (var name in replacements) {
+            text = text.replace("{" + name + "}", replacements[name])
+        }
+        return text
+    }
+
+    function tabKey(tab) {
+        if (tab === "Overview") return "nav.overview"
+        if (tab === "Instances") return "nav.instances"
+        if (tab === "Farm Plan") return "nav.farm_plan"
+        if (tab === "Settings") return "nav.settings"
+        if (tab === "Discord") return "nav.discord"
+        if (tab === "Telegram") return "nav.telegram"
+        if (tab === "API") return "nav.api"
+        if (tab === "Timers") return "nav.timers"
+        if (tab === "Match History") return "nav.match_history"
+        if (tab === "Help") return "nav.help"
+        return tab
+    }
 
     function healthColor(status) {
         if (status === "good") return theme.ok
@@ -173,6 +204,12 @@ ApplicationWindow {
         }
     }
 
+    function setLanguage(code) {
+        root.saveValue("settings", "ui_language", code)
+        root.reloadState()
+        root.applyTheme()
+    }
+
     function setThemeMode(mode) {
         root.saveValue("settings", "ui_theme", mode)
         root.applyTheme()
@@ -198,9 +235,9 @@ ApplicationWindow {
     function navLabel(tab) {
         if (tab === "Farm Plan") {
             var count = (hubState.queue || []).length
-            return count > 0 ? ("Farm Plan (" + count + ")") : "Farm Plan"
+            return count > 0 ? root.t("nav.farm_plan_count", { count: count }) : root.t("nav.farm_plan")
         }
-        return tab
+        return root.t(root.tabKey(tab))
     }
 
     function closeHubWindow() {
@@ -275,12 +312,12 @@ ApplicationWindow {
     }
 
     function readinessLabel(item) {
-        if (!item || !item.readiness) return "Unknown"
+        if (!item || !item.readiness) return root.t("common.unknown")
         const status = item.readiness.status || ""
-        if (status === "ready") return "Ready"
-        if (status === "needs_farm_plan") return "Needs farm plan"
-        if (status === "port_conflict") return "Port conflict"
-        if (status === "no_emulator") return "No emulator"
+        if (status === "ready") return root.t("common.ready")
+        if (status === "needs_farm_plan") return root.t("instances.needs_farm_plan")
+        if (status === "port_conflict") return root.t("instances.port_conflict")
+        if (status === "no_emulator") return root.t("instances.no_emulator")
         return item.readiness.message || status
     }
 
@@ -422,7 +459,7 @@ ApplicationWindow {
             statusText = result.message
             statusOk = false
         } else if (result.ok) {
-            statusText = "Saved"
+            statusText = root.t("common.saved")
             statusOk = true
             statusToastTimer.restart()
         }
@@ -443,11 +480,11 @@ ApplicationWindow {
 
     function runAction(action) {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.t("msg.hub_action_busy")
             statusOk = false
             return
         }
-        statusText = "Working..."
+        statusText = root.t("msg.working")
         statusOk = true
         const result = applyBridgeResult(hubBridge.runAction(action))
         if (result.ok && !result.pending) {
@@ -457,11 +494,11 @@ ApplicationWindow {
 
     function runActionWithPayload(action, payload) {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.t("msg.hub_action_busy")
             statusOk = false
             return
         }
-        statusText = "Working..."
+        statusText = root.t("msg.working")
         statusOk = true
         const result = applyBridgeResult(hubBridge.runActionWithPayload(action, JSON.stringify(payload || {})))
         if (result.ok && !result.pending) {
@@ -471,17 +508,17 @@ ApplicationWindow {
 
     function startBot() {
         if (root.hubBusy) {
-            statusText = "Please wait for the current hub action to finish."
+            statusText = root.t("msg.hub_action_busy")
             statusOk = false
             return
         }
         if (!(hubState.preflight && hubState.preflight.ready)) {
             root.activeTab = "Overview"
-            statusText = "Run pre-flight checks first, then press START."
+            statusText = root.t("msg.run_preflight_before_start")
             statusOk = false
             return
         }
-        statusText = "Checking pre-flight..."
+        statusText = root.t("msg.checking_preflight")
         statusOk = true
         applyBridgeResult(hubBridge.startPyla())
     }
@@ -986,7 +1023,7 @@ ApplicationWindow {
 
             Text {
                 anchors.centerIn: parent
-                text: inputBox.revealed ? "hide" : "show"
+                text: inputBox.revealed ? root.t("common.hide") : root.t("common.show")
                 color: theme.muted
                 font.pixelSize: 10
                 font.weight: Font.DemiBold
@@ -1499,7 +1536,7 @@ ApplicationWindow {
                 spacing: 12
 
                 Text {
-                    text: topic ? topic.title : "Guide"
+                    text: topic ? topic.title : root.t("common.guide")
                     color: theme.text
                     font.pixelSize: 16
                     font.weight: Font.Bold
@@ -1516,7 +1553,7 @@ ApplicationWindow {
                     spacing: 8
                     Item { Layout.fillWidth: true }
                     HubButton {
-                        label: "Open full guide"
+                        label: root.t("common.open_full_guide")
                         secondary: true
                         visible: !!(topic && topic.doc)
                         onClicked: {
@@ -1525,7 +1562,7 @@ ApplicationWindow {
                         }
                     }
                     HubButton {
-                        label: "Close"
+                        label: root.t("common.close_panel")
                         secondary: true
                         onClicked: root.closeTutorial()
                     }
@@ -1798,7 +1835,7 @@ ApplicationWindow {
                 Text {
                     id: activePill
                     anchors.centerIn: parent
-                    text: "ACTIVE"
+                    text: root.t("common.active")
                     color: theme.accent
                     font.pixelSize: 8
                     font.weight: Font.Bold
@@ -1926,7 +1963,7 @@ ApplicationWindow {
                                 }
                             }
                             Text {
-                                text: "Custom"
+                                text: root.t("common.custom")
                                 color: theme.faint
                                 font.pixelSize: 10
                             }
@@ -1979,7 +2016,7 @@ ApplicationWindow {
                     anchors.margins: 10
                     spacing: 8
                     Text {
-                        text: "EDITING FARM PLAN FOR"
+                        text: root.t("common.editing_farm_plan_for")
                         color: theme.text
                         font.pixelSize: 12
                         font.bold: true
@@ -1999,7 +2036,7 @@ ApplicationWindow {
                     Text {
                         Layout.fillWidth: true
                         visible: String(hubState.multiInstance.editingInstanceId || "") === String(hubState.multiInstance.defaultInstance || "default")
-                        text: "Other instances have their own farm plans — switch instance above."
+                        text: root.t("common.other_instances_hint")
                         color: theme.faint
                         font.pixelSize: 11
                         wrapMode: Text.WordWrap
@@ -2025,7 +2062,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 8
                         Text {
-                            text: "PUSH ALL"
+                            text: root.t("common.push_all")
                             color: theme.text
                             font.pixelSize: 12
                             font.weight: Font.Bold
@@ -2033,7 +2070,7 @@ ApplicationWindow {
                         Item { Layout.fillWidth: true }
                         TutorialHelpButton { tutorialId: "farm-plan" }
                         HubButton {
-                            label: "Tutorial"
+                            label: root.t("common.tutorial")
                             secondary: true
                             compact: true
                             onClicked: root.openTutorial("farm-plan")
@@ -2052,7 +2089,7 @@ ApplicationWindow {
                         }
                     }
                     FieldRow {
-                        label: "Custom target"
+                        label: root.t("common.custom_target")
                         Layout.fillWidth: true
                         ConfigInput {
                             id: pushAllTargetInput
@@ -2065,27 +2102,27 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 8
                         HubButton {
-                            label: "Build Queue"
+                            label: root.t("common.build_queue")
                             compact: true
                             enabled: !root.hubBusy
                             onClicked: {
                                 var target = root.trophyTargetFromUi(pushAllTargetInput.editText, root.pushAllTarget)
                                 if (target <= 0) {
-                                    root.statusText = "Enter a valid trophy target."
+                                    root.statusText = root.t("common.enter_valid_target")
                                     root.statusOk = false
                                     return
                                 }
                                 root.runActionWithPayload("build-push-all", { target: target })
                             }
                         }
-                        HubButton { label: "Import"; secondary: true; compact: true; onClicked: importQueueDialog.open() }
+                        HubButton { label: root.t("common.import"); secondary: true; compact: true; onClicked: importQueueDialog.open() }
                         HubButton {
-                            label: "Export"
+                            label: root.t("common.export")
                             secondary: true
                             compact: true
                             onClicked: {
                                 if (!(root.hubState.queue && root.hubState.queue.length)) {
-                                    root.statusText = "Farm plan is empty."
+                                    root.statusText = root.t("common.farm_plan_empty")
                                     root.statusOk = false
                                     return
                                 }
@@ -2094,12 +2131,12 @@ ApplicationWindow {
                         }
                         HubButton {
                             id: queueSortButton
-                            label: "Sort"
+                            label: root.t("common.sort")
                             secondary: true
                             compact: true
                             onClicked: {
                                 if (!(root.hubState.queue && root.hubState.queue.length)) {
-                                    root.statusText = "Farm plan is empty."
+                                    root.statusText = root.t("common.farm_plan_empty")
                                     root.statusOk = false
                                     return
                                 }
@@ -2157,7 +2194,7 @@ ApplicationWindow {
                                 spacing: 8
 
                                 Text {
-                                    text: "Sort farm plan"
+                                    text: root.t("common.sort_farm_plan")
                                     color: theme.text
                                     font.pixelSize: 11
                                     font.weight: Font.Bold
@@ -2179,7 +2216,7 @@ ApplicationWindow {
                                 }
                             }
                         }
-                        HubButton { label: "Clear"; secondary: true; compact: true; onClicked: root.runAction("clear-queue") }
+                        HubButton { label: root.t("common.clear"); secondary: true; compact: true; onClicked: root.runAction("clear-queue") }
                         Item { Layout.fillWidth: true }
                     }
                 }
@@ -2202,7 +2239,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 8
                         Text {
-                            text: "QUEUE"
+                            text: root.t("common.queue")
                             color: theme.text
                             font.pixelSize: 12
                             font.weight: Font.Bold
@@ -2214,13 +2251,13 @@ ApplicationWindow {
                         }
                         Item { Layout.fillWidth: true }
                         HubButton {
-                            label: "Refresh"
+                            label: root.t("common.refresh")
                             secondary: true
                             compact: true
                             onClicked: root.reloadState()
                         }
                         HubButton {
-                            label: "Add"
+                            label: root.t("common.add")
                             compact: true
                             onClicked: {
                                 const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions : []
@@ -2268,20 +2305,20 @@ ApplicationWindow {
                             visible: !(root.hubState.queue && root.hubState.queue.length)
                             Text {
                                 Layout.alignment: Qt.AlignHCenter
-                                text: "No brawlers in the farm plan yet"
+                                text: root.t("common.no_brawlers_in_plan")
                                 color: theme.muted
                                 font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
                             Text {
                                 Layout.alignment: Qt.AlignHCenter
-                                text: "Build a queue from API trophies or add brawlers manually"
+                                text: root.t("common.build_queue_hint")
                                 color: theme.faint
                                 font.pixelSize: 11
                             }
                             HubButton {
                                 Layout.alignment: Qt.AlignHCenter
-                                label: "Add Brawler"
+                                label: root.t("common.add_brawler")
                                 compact: true
                                 onClicked: {
                                     const options = (hubState.meta && hubState.meta.brawlerOptions) ? hubState.meta.brawlerOptions : []
@@ -2499,7 +2536,7 @@ ApplicationWindow {
                         font.weight: Font.Bold
                     }
                     Text {
-                        text: settingsOnly ? "Pyla-RL Settings (bot running)" : "Pyla-RL Hub"
+                        text: settingsOnly ? root.t("app.settings_running") : root.t("app.hub_title")
                         color: theme.muted
                         font.pixelSize: 13
                         font.weight: Font.DemiBold
@@ -2512,6 +2549,40 @@ ApplicationWindow {
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: 4
+                    Row {
+                        spacing: 2
+                        Repeater {
+                            model: ["en", "ru"]
+                            delegate: Rectangle {
+                                width: 28
+                                height: 28
+                                radius: 8
+                                color: langMouse.containsMouse ? theme.hover : (root.language === modelData ? theme.accentSoft : "transparent")
+                                border.width: root.language === modelData ? 1 : 0
+                                border.color: theme.accentBorder
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.toUpperCase()
+                                    color: root.language === modelData ? theme.text : theme.muted
+                                    font.pixelSize: 10
+                                    font.weight: Font.Bold
+                                }
+
+                                MouseArea {
+                                    id: langMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.setLanguage(modelData)
+                                }
+
+                                ToolTip.visible: langMouse.containsMouse
+                                ToolTip.delay: 500
+                                ToolTip.text: root.t("language.tooltip")
+                            }
+                        }
+                    }
                     Rectangle {
                         id: themeToggleButton
                         width: 28
@@ -2525,7 +2596,7 @@ ApplicationWindow {
 
                         ToolTip.visible: themeToggleMouse.containsMouse
                         ToolTip.delay: 500
-                        ToolTip.text: "Theme: " + root.themeMode + " (click to switch)"
+                        ToolTip.text: root.t("common.theme_tooltip", { mode: root.themeMode })
 
                         Text {
                             anchors.centerIn: parent
@@ -2570,10 +2641,10 @@ ApplicationWindow {
                     text: {
                         var parts = []
                         if (latestVersion && latestVersion !== "" && latestVersion !== hubVersion) {
-                            parts.push("Update available: v" + latestVersion)
+                            parts.push(root.t("common.update_available", { version: latestVersion }))
                         }
                         if (correctZoom === false) {
-                            parts.push("Display scaling is not 100% — bot may misclick")
+                            parts.push(root.t("common.scaling_warning"))
                         }
                         return parts.join(" · ")
                     }
@@ -2691,17 +2762,17 @@ ApplicationWindow {
                     visible: root.activeTab === "Instances"
 
                     FormPanel {
-                        title: "MULTI-INSTANCE MODE"
+                        title: root.t("instances.multi_instance_title")
                         tutorialId: "multi-instance"
                         Text {
                             Layout.fillWidth: true
-                            text: "Run multiple LDPlayer or MuMu bots in parallel. Discord/Telegram control uses one bot on those tabs; match alerts can be set per instance below."
+                            text: root.t("instances.multi_instance_hint")
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         FieldRow {
-                            label: "Enable Multi-Instance"
+                            label: root.t("instances.enable_multi_instance")
                             CenterRow {
                                 ToggleSwitch {
                                     checked: !!(hubState.multiInstance && hubState.multiInstance.enabled)
@@ -2716,7 +2787,7 @@ ApplicationWindow {
                             }
                         }
                         FieldRow {
-                            label: "Auto-Restart Crashed"
+                            label: root.t("instances.auto_restart_crashed")
                             visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
                             CenterRow {
                                 ToggleSwitch {
@@ -2730,7 +2801,7 @@ ApplicationWindow {
                         Text {
                             Layout.fillWidth: true
                             visible: !(hubState.multiInstance && hubState.multiInstance.enabled)
-                            text: "Single-instance mode uses START on Overview. Enable this to run multiple bots from this tab."
+                            text: root.t("instances.single_instance_hint")
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
@@ -2738,17 +2809,17 @@ ApplicationWindow {
                         Text {
                             Layout.fillWidth: true
                             visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
-                            text: "Multi-instance is active. Use Start all ready below instead of Overview START."
+                            text: root.t("instances.multi_instance_active_hint")
                             color: theme.ok
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         ActionRow {
-                            HubButton { label: "Scan Emulators"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.listAvailableEmulators()) }
-                            HubButton { label: "Refresh"; secondary: true; onClicked: applyBridgeResult(hubBridge.refreshInstances()) }
-                            HubButton { label: "Start All Ready"; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.startAllReadyInstances()) }
-                            HubButton { label: "Stop All"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.stopAllInstances()) }
-                            HubButton { label: "Align Windows"; secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.alignWindows()) }
+                            HubButton { label: root.t("instances.scan_emulators"); secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.listAvailableEmulators()) }
+                            HubButton { label: root.t("common.refresh"); secondary: true; onClicked: applyBridgeResult(hubBridge.refreshInstances()) }
+                            HubButton { label: root.t("instances.start_all_ready"); visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.startAllReadyInstances()) }
+                            HubButton { label: root.t("instances.stop_all"); secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.stopAllInstances()) }
+                            HubButton { label: root.t("instances.align_windows"); secondary: true; visible: !!(hubState.multiInstance && hubState.multiInstance.enabled); onClicked: applyBridgeResult(hubBridge.alignWindows()) }
                         }
                         ActionRow {
                             visible: root.pendingInstanceActionLabel !== ""
@@ -2760,36 +2831,36 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "QUICK SETUP"
+                        title: root.t("instances.quick_setup_title")
                         visible: !!(hubState.multiInstance && hubState.multiInstance.enabled) && root.showMultiInstanceSetup && !hubState.multiInstance.setupWizardDismissed
                         Text {
                             Layout.fillWidth: true
-                            text: "Step 1: Default instance created from your current settings.\nStep 2: Scan detected emulators.\nStep 3: Quick add unassigned emulators (copies Default farm plan)."
+                            text: root.t("instances.quick_setup_steps")
                             color: theme.muted
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: "Unassigned emulators: " + String((hubState.multiInstance.unassignedEmulators || []).length)
+                            text: root.t("instances.unassigned_emulators", { count: String((hubState.multiInstance.unassignedEmulators || []).length) })
                             color: theme.faint
                             font.pixelSize: 11
                         }
                         ActionRow {
-                            HubButton { label: "Quick Add All Unassigned"; onClicked: root.quickAddUnassignedInstances() }
-                            HubButton { label: "Done"; secondary: true; onClicked: root.dismissMultiInstanceSetup() }
+                            HubButton { label: root.t("instances.quick_add_all_unassigned"); onClicked: root.quickAddUnassignedInstances() }
+                            HubButton { label: root.t("common.done"); secondary: true; onClicked: root.dismissMultiInstanceSetup() }
                         }
                     }
 
                     FormPanel {
-                        title: "ADD INSTANCE"
+                        title: root.t("instances.add_instance_title")
                         visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 10
                             ActionRow {
-                                HubButton { label: "Quick Add All Unassigned"; onClicked: root.quickAddUnassignedInstances() }
-                                HubButton { label: showAddInstanceForm ? "Hide Manual Form" : "Manual Add"; secondary: true; onClicked: showAddInstanceForm = !showAddInstanceForm }
+                                HubButton { label: root.t("instances.quick_add_all_unassigned"); onClicked: root.quickAddUnassignedInstances() }
+                                HubButton { label: showAddInstanceForm ? root.t("instances.hide_manual_form") : root.t("instances.manual_add"); secondary: true; onClicked: showAddInstanceForm = !showAddInstanceForm }
                             }
                             Repeater {
                                 model: (hubState.multiInstance && hubState.multiInstance.unassignedEmulators) ? hubState.multiInstance.unassignedEmulators : []
@@ -2804,7 +2875,7 @@ ApplicationWindow {
                                         wrapMode: Text.WordWrap
                                     }
                                     HubButton {
-                                        label: "Use"
+                                        label: root.t("common.use")
                                         secondary: true
                                         compact: true
                                         onClicked: {
@@ -2819,7 +2890,7 @@ ApplicationWindow {
                                 spacing: 8
                                 visible: showAddInstanceForm
                                 FieldRow {
-                                    label: "Detected Emulator"
+                                    label: root.t("instances.detected_emulator")
                                     visible: root.instanceFormEmulatorName !== ""
                                     Text {
                                         text: root.instanceFormEmulatorName + " · port " + root.instanceFormPort
@@ -2828,19 +2899,19 @@ ApplicationWindow {
                                     }
                                 }
                                 FieldRow {
-                                    label: "Instance ID"
+                                    label: root.t("instances.instance_id")
                                     ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormId; onSaved: function(value) { root.instanceFormId = value } }
                                 }
                                 FieldRow {
-                                    label: "Display Name"
+                                    label: root.t("instances.display_name")
                                     ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormName; onSaved: function(value) { root.instanceFormName = value } }
                                 }
                                 FieldRow {
-                                    label: "Player Tag"
+                                    label: root.t("instances.player_tag")
                                     ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormPlayerTag; onSaved: function(value) { root.instanceFormPlayerTag = value } }
                                 }
                                 HubButton {
-                                    label: showAdvancedInstanceForm ? "Hide Advanced" : "Advanced"
+                                    label: showAdvancedInstanceForm ? root.t("instances.hide_advanced") : root.t("instances.advanced")
                                     secondary: true
                                     onClicked: showAdvancedInstanceForm = !showAdvancedInstanceForm
                                 }
@@ -2848,28 +2919,28 @@ ApplicationWindow {
                                     visible: showAdvancedInstanceForm
                                     spacing: 8
                                     FieldRow {
-                                        label: "Emulator"
+                                        label: root.t("overview.emulator_title")
                                         RowLayout {
                                             anchors.fill: parent
                                             spacing: 8
-                                            HubButton { label: "LDPlayer"; secondary: root.instanceFormEmulator !== "ldplayer"; onClicked: root.setInstanceFormEmulator("ldplayer") }
-                                            HubButton { label: "MuMu"; secondary: root.instanceFormEmulator !== "mumu"; onClicked: root.setInstanceFormEmulator("mumu") }
+                                            HubButton { label: root.t("game.ldplayer"); secondary: root.instanceFormEmulator !== "ldplayer"; onClicked: root.setInstanceFormEmulator("ldplayer") }
+                                            HubButton { label: root.t("game.mumu"); secondary: root.instanceFormEmulator !== "mumu"; onClicked: root.setInstanceFormEmulator("mumu") }
                                         }
                                     }
                                     FieldRow {
-                                        label: "ADB Port"
+                                        label: root.t("instances.adb_port")
                                         ConfigInput { anchors.fill: parent; live: true; value: root.instanceFormPort; onSaved: function(value) { root.instanceFormPort = value } }
                                     }
                                 }
                                 ActionRow {
-                                    HubButton { label: "Save Instance"; onClicked: root.saveNewInstance() }
+                                    HubButton { label: root.t("instances.save_instance"); onClicked: root.saveNewInstance() }
                                 }
                             }
                         }
                     }
 
                     FormPanel {
-                        title: "CONFIGURED INSTANCES"
+                        title: root.t("instances.configured_instances_title")
                         visible: !!(hubState.multiInstance && hubState.multiInstance.enabled)
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -2895,7 +2966,7 @@ ApplicationWindow {
                                                 radius: 5
                                                 color: root.healthColor((modelData.health && modelData.health.status) ? modelData.health.status : "good")
                                                 ToolTip.visible: healthTipHover.containsMouse
-                                                ToolTip.text: (modelData.health && modelData.health.message) ? modelData.health.message : "Health unknown"
+                                                ToolTip.text: (modelData.health && modelData.health.message) ? modelData.health.message : root.t("common.health_unknown")
                                                 MouseArea {
                                                     id: healthTipHover
                                                     anchors.fill: parent
@@ -2934,7 +3005,7 @@ ApplicationWindow {
                                             spacing: 4
                                             visible: !!(modelData.health && modelData.health.recent_recoveries && modelData.health.recent_recoveries.length)
                                             Text {
-                                                text: "Recent recoveries"
+                                                text: root.t("common.recent_recoveries")
                                                 color: theme.faint
                                                 font.pixelSize: 10
                                             }
@@ -2951,31 +3022,31 @@ ApplicationWindow {
                                         }
                                         RowLayout {
                                             spacing: 8
-                                            HubButton { label: "Start"; visible: !modelData.running; onClicked: applyBridgeResult(hubBridge.startInstance(modelData.id)) }
-                                            HubButton { label: "Stop"; secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id)) }
-                                            HubButton { label: "Restart"; secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.restartInstance(modelData.id)) }
-                                            HubButton { label: "Edit Farm Plan"; secondary: true; onClicked: root.editInstanceFarmPlan(modelData.id) }
+                                            HubButton { label: root.t("common.start_instance"); visible: !modelData.running; onClicked: applyBridgeResult(hubBridge.startInstance(modelData.id)) }
+                                            HubButton { label: root.t("common.stop"); secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.stopInstance(modelData.id)) }
+                                            HubButton { label: root.t("common.restart"); secondary: true; visible: !!modelData.running; onClicked: applyBridgeResult(hubBridge.restartInstance(modelData.id)) }
+                                            HubButton { label: root.t("instances.edit_farm_plan"); secondary: true; onClicked: root.editInstanceFarmPlan(modelData.id) }
                                             HubButton {
-                                                label: "Copy Default Plan"
+                                                label: root.t("instances.copy_default_plan")
                                                 secondary: true
                                                 visible: !!(modelData.readiness && modelData.readiness.status === "needs_farm_plan" && modelData.readiness.can_copy_default)
                                                 onClicked: root.copyInstanceFarmPlan(modelData.id)
                                             }
                                             HubButton {
-                                                label: "Delete"
+                                                label: root.t("common.delete")
                                                 secondary: true
                                                 visible: modelData.id !== String((hubState.multiInstance && hubState.multiInstance.defaultInstance) || "default")
                                                 onClicked: applyBridgeResult(hubBridge.deleteInstanceProfile(modelData.id))
                                             }
                                         }
                                         Text {
-                                            text: "Match notifications (optional)"
+                                            text: root.t("instances.match_notifications")
                                             color: theme.faint
                                             font.pixelSize: 10
                                             font.bold: true
                                         }
                                         FieldRow {
-                                            label: "Webhook URL"
+                                            label: root.t("instances.webhook_url")
                                             ConfigInput {
                                                 anchors.fill: parent
                                                 live: true
@@ -2988,7 +3059,7 @@ ApplicationWindow {
                                             }
                                         }
                                         FieldRow {
-                                            label: "Ping Discord ID"
+                                            label: root.t("instances.ping_discord_id")
                                             ConfigInput {
                                                 anchors.fill: parent
                                                 live: true
@@ -3002,7 +3073,7 @@ ApplicationWindow {
                                         }
                                         ActionRow {
                                             HubButton {
-                                                label: "Test Webhook"
+                                                label: root.t("instances.test_webhook")
                                                 secondary: true
                                                 onClicked: applyBridgeResult(hubBridge.testInstanceWebhook(modelData.id))
                                             }
@@ -3019,35 +3090,35 @@ ApplicationWindow {
 
                     FormPanel {
                         visible: root.unofficialCopy
-                        title: "UNOFFICIAL COPY"
+                        title: root.t("common.unofficial_copy")
                         Text {
                             Layout.fillWidth: true
-                            text: (hubBrand ? hubBrand.freeNotice : "Pyla-RL is free.") + " Download only from GitHub or Pyla Discord."
+                            text: (hubBrand ? hubBrand.freeNotice : root.t("settings.license_line", { notice: "Pyla-RL is free.", license: "CC BY-NC 4.0" })) + " " + root.t("common.download_official")
                             color: theme.accent
                             font.pixelSize: 12
                             wrapMode: Text.WordWrap
                         }
                         ActionRow {
-                            HubButton { label: "Official GitHub"; secondary: true; onClicked: hubBridge.openOfficialRepo() }
-                            HubButton { label: "Pyla Discord"; secondary: true; onClicked: hubBridge.openDiscord() }
+                            HubButton { label: root.t("common.official_github"); secondary: true; onClicked: hubBridge.openOfficialRepo() }
+                            HubButton { label: root.t("common.pyla_discord"); secondary: true; onClicked: hubBridge.openDiscord() }
                         }
                     }
 
                     FormPanel {
-                        title: "PRE-FLIGHT CHECKS"
+                        title: root.t("overview.preflight_title")
                         tutorialId: "overview"
                         Text {
                             Layout.fillWidth: true
-                            text: "Verify emulator and ADB before START. Use 1920x1080 and 100% Windows scaling."
+                            text: root.t("overview.preflight_hint")
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         RowLayout {
                             spacing: 10
-                            HubButton { label: "Run Checks"; secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("preflight-check") }
-                            HubButton { label: "Test Connection"; secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("test-emulator") }
-                            HubButton { label: "Recovery Log"; secondary: true; onClicked: root.runAction("read-recovery-log") }
+                            HubButton { label: root.t("common.run_checks"); secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("preflight-check") }
+                            HubButton { label: root.t("common.test_connection"); secondary: true; enabled: !root.hubBusy; onClicked: root.runAction("test-emulator") }
+                            HubButton { label: root.t("common.recovery_log"); secondary: true; onClicked: root.runAction("read-recovery-log") }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -3101,7 +3172,7 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "PERFORMANCE PROFILE"
+                        title: root.t("overview.performance_title")
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 12
@@ -3131,7 +3202,7 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "GAME MODE"
+                        title: root.t("overview.game_mode_title")
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 2
@@ -3139,13 +3210,13 @@ ApplicationWindow {
                             rowSpacing: 12
                             OptionCard {
                                 Layout.fillWidth: true
-                                label: "Brawl Ball"
+                                label: root.t("game.brawl_ball")
                                 selected: root.mode === "brawl-ball"
                                 onClicked: hubBridge.updateSetting("mode", "brawl-ball")
                             }
                             OptionCard {
                                 Layout.fillWidth: true
-                                label: "Showdown Trio"
+                                label: root.t("game.showdown_trio")
                                 selected: root.mode === "showdown-trio"
                                 onClicked: hubBridge.updateSetting("mode", "showdown-trio")
                             }
@@ -3153,13 +3224,13 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "EMULATOR"
+                        title: root.t("overview.emulator_title")
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 12
                             OptionCard {
                                 Layout.fillWidth: true
-                                label: "LDPlayer"
+                                label: root.t("game.ldplayer")
                                 selected: root.emulator === "ldplayer"
                                 statusChecked: {
                                     var status = root.emulatorPreflightStatus("ldplayer")
@@ -3180,7 +3251,7 @@ ApplicationWindow {
                             }
                             OptionCard {
                                 Layout.fillWidth: true
-                                label: "MuMu"
+                                label: root.t("game.mumu")
                                 selected: root.emulator === "mumu"
                                 statusChecked: {
                                     var status = root.emulatorPreflightStatus("mumu")
@@ -3212,10 +3283,10 @@ ApplicationWindow {
                     visible: root.activeTab === "Settings"
 
                     FormPanel {
-                        title: "HUB"
+                        title: root.t("settings.hub_title")
                         tutorialId: "settings"
                         FieldRow {
-                            label: "Search Settings"
+                            label: root.t("settings.search_settings")
                             pinnedInSettingsSearch: true
                             ConfigInput {
                                 anchors.fill: parent
@@ -3225,9 +3296,9 @@ ApplicationWindow {
                             }
                         }
                         ActionRow {
-                            HubButton { label: "Open cfg Folder"; secondary: true; onClicked: root.runAction("open-config-folder") }
+                            HubButton { label: root.t("common.open_cfg_folder"); secondary: true; onClicked: root.runAction("open-config-folder") }
                             HubButton {
-                                label: "Show Setup Wizard Again"
+                                label: root.t("common.show_setup_wizard_again")
                                 secondary: true
                                 onClicked: root.runAction("reset-setup-wizard")
                             }
@@ -3235,16 +3306,31 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "APPEARANCE"
+                        title: root.t("settings.appearance_title")
                         FieldRow {
-                            label: "Theme"
-                            hint: "Liquid glass in light or dark. System follows your Windows app theme."
+                            label: root.t("language.label")
+                            hint: root.t("language.restart_hint")
+                            Row {
+                                spacing: 8
+                                Repeater {
+                                    model: ["en", "ru"]
+                                    delegate: ChoicePill {
+                                        label: modelData.toUpperCase()
+                                        selected: root.language === modelData
+                                        onClicked: root.setLanguage(modelData)
+                                    }
+                                }
+                            }
+                        }
+                        FieldRow {
+                            label: root.t("theme.label")
+                            hint: root.t("theme.hint")
                             Row {
                                 spacing: 8
                                 Repeater {
                                     model: ["light", "dark", "system"]
                                     delegate: ChoicePill {
-                                        label: modelData
+                                        label: root.t("theme." + modelData)
                                         selected: root.themeMode === modelData
                                         onClicked: root.setThemeMode(modelData)
                                     }
@@ -3252,25 +3338,30 @@ ApplicationWindow {
                             }
                         }
                         FieldRow {
-                            label: "UI Animations"
-                            hint: "Smooth transitions and hover effects. Turn off for minimum UI overhead."
+                            label: root.t("settings.ui_animations")
+                            hint: root.t("settings.ui_animations_hint")
                             CenterRow { ToggleSwitch { checked: root.animationsEnabled; onToggled: function(value) { root.setAnimationsEnabled(value) } } }
                         }
                     }
 
                     FormPanel {
-                        title: "ABOUT"
+                        title: root.t("settings.about_title")
                         Text {
                             Layout.fillWidth: true
-                            text: (hubBrand ? hubBrand.productName : "Pyla-RL") + " v" + hubVersion
-                                + " · " + ((hubState.meta && hubState.meta.buildInfo && hubState.meta.buildInfo.commit) ? hubState.meta.buildInfo.commit : "unknown")
+                            text: root.t("settings.version_line", {
+                                product: (hubBrand ? hubBrand.productName : "Pyla-RL"),
+                                version: hubVersion,
+                                commit: ((hubState.meta && hubState.meta.buildInfo && hubState.meta.buildInfo.commit) ? hubState.meta.buildInfo.commit : root.t("common.unknown"))
+                            })
                             color: theme.text
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: (hubBrand ? hubBrand.freeNotice : "Pyla-RL is free.") + " Licensed under " + (hubBrand ? hubBrand.licenseName : "CC BY-NC 4.0") + "."
+                            text: hubBrand
+                                ? ((hubBrand.freeNotice) + " Licensed under " + hubBrand.licenseName + ".")
+                                : root.t("settings.license_line", { notice: "Pyla-RL is free.", license: "CC BY-NC 4.0" })
                             color: theme.muted
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
@@ -3278,16 +3369,16 @@ ApplicationWindow {
                         Text {
                             visible: root.unofficialCopy
                             Layout.fillWidth: true
-                            text: (hubState.meta && hubState.meta.sourceStatus) ? hubState.meta.sourceStatus.reason : "Unofficial copy detected."
+                            text: (hubState.meta && hubState.meta.sourceStatus) ? hubState.meta.sourceStatus.reason : root.t("settings.unofficial_detected")
                             color: theme.accent
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         ActionRow {
-                            HubButton { label: "Official GitHub"; secondary: true; onClicked: hubBridge.openOfficialRepo() }
-                            HubButton { label: "Pyla Discord"; secondary: true; onClicked: hubBridge.openDiscord() }
-                            HubButton { label: "Check Updates"; secondary: true; onClicked: root.runAction("check-updates") }
-                            HubButton { label: "Report Reseller"; secondary: true; onClicked: root.runAction("report-reseller") }
+                            HubButton { label: root.t("common.official_github"); secondary: true; onClicked: hubBridge.openOfficialRepo() }
+                            HubButton { label: root.t("common.pyla_discord"); secondary: true; onClicked: hubBridge.openDiscord() }
+                            HubButton { label: root.t("common.check_updates"); secondary: true; onClicked: root.runAction("check-updates") }
+                            HubButton { label: root.t("common.report_reseller"); secondary: true; onClicked: root.runAction("report-reseller") }
                         }
                         RowLayout {
                             visible: !root.licenseAccepted
@@ -3316,20 +3407,20 @@ ApplicationWindow {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: "I understand Pyla-RL is free and I will not sell it."
+                                text: root.t("wizard.license_checkbox")
                                 color: theme.muted
                                 font.pixelSize: 11
                                 wrapMode: Text.WordWrap
                             }
                             HubButton {
-                                label: "Accept"
+                                label: root.t("common.accept")
                                 clickable: root.licenseTermsAccepted
                                 onClicked: root.runAction("accept-license")
                             }
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: "Optional Patreon support helps development. It is not required and is not a purchase."
+                            text: root.t("settings.patreon_hint")
                             color: theme.faint
                             font.pixelSize: 10
                             wrapMode: Text.WordWrap
@@ -3337,146 +3428,146 @@ ApplicationWindow {
                     }
 
                     FormPanel {
-                        title: "DETECTION"
+                        title: root.t("settings.detection_title")
                         FieldRow {
-                            label: "Close Tile Detector"
-                            hint: "Player-centered 640x640 crop via models/closeTileDetector.onnx."
+                            label: root.t("settings.close_tile_detector")
+                            hint: root.t("settings.close_tile_detector_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "close_tile_detector_enabled"); onToggled: function(value) { root.saveValue("settings", "close_tile_detector_enabled", value) } } }
                         }
                         FieldRow {
-                            label: "Wall Confidence"
+                            label: root.t("settings.wall_confidence")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "wall_detection_confidence")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "wall_detection_confidence", value) } }
                         }
                         FieldRow {
-                            label: "Player Confidence"
+                            label: root.t("settings.player_confidence")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "entity_detection_confidence")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "entity_detection_confidence", value) } }
                         }
                         FieldRow {
-                            label: "Super Pixels"
+                            label: root.t("settings.super_pixels")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "super_pixels_minimum")); onSaved: function(value) { root.saveValue("settings", "super_pixels_minimum", value) } }
                         }
                         FieldRow {
-                            label: "Gadget Pixels"
+                            label: root.t("settings.gadget_pixels")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "gadget_pixels_minimum")); onSaved: function(value) { root.saveValue("settings", "gadget_pixels_minimum", value) } }
                         }
                         FieldRow {
-                            label: "Hypercharge Pixels"
+                            label: root.t("settings.hypercharge_pixels")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "hypercharge_pixels_minimum")); onSaved: function(value) { root.saveValue("settings", "hypercharge_pixels_minimum", value) } }
                         }
                     }
 
                     FormPanel {
-                        title: "BEHAVIOR"
+                        title: root.t("settings.behavior_title")
                         FieldRow {
-                            label: "Minimum Movement Delay"
+                            label: root.t("settings.minimum_movement_delay")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "minimum_movement_delay")); from: 0.05; to: 3.0; onSaved: function(value) { root.saveValue("settings", "minimum_movement_delay", value) } }
                         }
                         FieldRow {
-                            label: "Unstuck Delay"
+                            label: root.t("settings.unstuck_delay")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "unstuck_movement_delay")); from: 0.5; to: 10.0; onSaved: function(value) { root.saveValue("settings", "unstuck_movement_delay", value) } }
                         }
                         FieldRow {
-                            label: "Unstuck Duration"
+                            label: root.t("settings.unstuck_duration")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "unstuck_movement_hold_time")); from: 0.2; to: 5.0; onSaved: function(value) { root.saveValue("settings", "unstuck_movement_hold_time", value) } }
                         }
                         FieldRow {
-                            label: "After Round"
-                            Row { spacing: 8; ChoicePill { label: "Return to lobby"; selected: root.value("settings", "post_match_action") === "lobby"; onClicked: root.saveValue("settings", "post_match_action", "lobby") } ChoicePill { label: "Play again"; selected: root.value("settings", "post_match_action") === "play_again"; onClicked: root.saveValue("settings", "post_match_action", "play_again") } }
+                            label: root.t("settings.after_round")
+                            Row { spacing: 8; ChoicePill { label: root.t("common.return_to_lobby"); selected: root.value("settings", "post_match_action") === "lobby"; onClicked: root.saveValue("settings", "post_match_action", "lobby") } ChoicePill { label: root.t("common.play_again"); selected: root.value("settings", "post_match_action") === "play_again"; onClicked: root.saveValue("settings", "post_match_action", "play_again") } }
                         }
                         FieldRow {
-                            label: "Play Again On Win"
-                            hint: "Press Play Again after wins when available."
+                            label: root.t("settings.play_again_on_win")
+                            hint: root.t("settings.play_again_on_win_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "play_again_on_win"); onToggled: function(value) { root.saveValue("settings", "play_again_on_win", value) } } }
                         }
                         FieldRow {
-                            label: "Use Gadgets"
+                            label: root.t("settings.use_gadgets")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "bot_uses_gadgets"); onToggled: function(value) { root.saveValue("settings", "bot_uses_gadgets", value) } } }
                         }
                         FieldRow {
-                            label: "Enemy Spacing"
-                            hint: "Maintain distance based on each brawler's safe and attack ranges."
+                            label: root.t("settings.enemy_spacing")
+                            hint: root.t("settings.enemy_spacing_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_enabled"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_enabled", value) } } }
                         }
                         FieldRow {
-                            label: "Spacing Aggression"
-                            hint: "0 = kite at safe range, 1 = hug max attack range. Purple debug circle shows this target distance."
+                            label: root.t("settings.spacing_aggression")
+                            hint: root.t("settings.spacing_aggression_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "enemy_spacing_blend")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "enemy_spacing_blend", value) } }
                         }
                         FieldRow {
-                            label: "Spacing Tolerance (px)"
-                            hint: "Dead zone around the target distance to reduce oscillation."
+                            label: root.t("settings.spacing_tolerance")
+                            hint: root.t("settings.spacing_tolerance_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "enemy_spacing_tolerance")); from: 10.0; to: 120.0; onSaved: function(value) { root.saveValue("settings", "enemy_spacing_tolerance", value) } }
                         }
                         FieldRow {
-                            label: "Strafe In Range"
-                            hint: "Sideways drift while holding the ideal spacing band."
+                            label: root.t("settings.strafe_in_range")
+                            hint: root.t("settings.strafe_in_range_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "enemy_spacing_hold_strafe"); onToggled: function(value) { root.saveValue("settings", "enemy_spacing_hold_strafe", value) } } }
                         }
                         FieldRow {
-                            label: "Multi-Enemy Threat Weight"
-                            hint: "Higher values flee harder from extra close enemies while kiting everyone at max range."
+                            label: root.t("settings.multi_enemy_threat")
+                            hint: root.t("settings.multi_enemy_threat_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "multi_enemy_flee_weight")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "multi_enemy_flee_weight", value) } }
                         }
                         FieldRow {
-                            label: "Dodge Under Fire"
-                            hint: "Random sideways jitter when an enemy has clear line of sight."
+                            label: root.t("settings.dodge_under_fire")
+                            hint: root.t("settings.dodge_under_fire_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "combat_los_dodge_enabled"); onToggled: function(value) { root.saveValue("settings", "combat_los_dodge_enabled", value) } } }
                         }
                         FieldRow {
-                            label: "Dodge Blend"
-                            hint: "How much random dodge mixes into movement (0 = off, 1 = full dodge)."
+                            label: root.t("settings.dodge_blend")
+                            hint: root.t("settings.dodge_blend_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_blend")); from: 0.0; to: 1.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_blend", value) } }
                         }
                         FieldRow {
-                            label: "Dodge Jitter (deg)"
-                            hint: "Random angle wobble added to sideways dodge."
+                            label: root.t("settings.dodge_jitter")
+                            hint: root.t("settings.dodge_jitter_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_jitter_degrees")); from: 5.0; to: 45.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_jitter_degrees", value) } }
                         }
                         FieldRow {
-                            label: "Dodge Commit (sec)"
-                            hint: "Hold each dodge direction before switching sides."
+                            label: root.t("settings.dodge_commit")
+                            hint: root.t("settings.dodge_commit_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "combat_dodge_commit_seconds")); from: 0.2; to: 2.0; onSaved: function(value) { root.saveValue("settings", "combat_dodge_commit_seconds", value) } }
                         }
                         FieldRow {
-                            label: "Smart Aim"
-                            hint: "Lead shots at moving enemies instead of auto-aim taps."
+                            label: root.t("settings.smart_aim")
+                            hint: root.t("settings.smart_aim_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "smart_aim_enabled"); onToggled: function(value) { root.saveValue("settings", "smart_aim_enabled", value) } } }
                         }
                         FieldRow {
-                            label: "Attack Interval (sec)"
-                            hint: "Minimum time between full attack taps."
+                            label: root.t("settings.attack_interval")
+                            hint: root.t("settings.attack_interval_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "attack_min_interval")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "attack_min_interval", value) } }
                         }
                         FieldRow {
-                            label: "Projectile Speed (px/s)"
-                            hint: "Used for lead-aim travel-time estimate."
+                            label: root.t("settings.projectile_speed")
+                            hint: root.t("settings.projectile_speed_hint")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "projectile_speed_px_s")); from: 400.0; to: 2400.0; onSaved: function(value) { root.saveValue("settings", "projectile_speed_px_s", value) } }
                         }
                         FieldRow {
-                            label: "Run For Minutes"
-                            hint: "0 disables the session timer."
+                            label: root.t("settings.run_for_minutes")
+                            hint: root.t("settings.run_for_minutes_hint")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "run_for_minutes")); onSaved: function(value) { root.saveValue("settings", "run_for_minutes", value) } }
                         }
                         FieldRow {
-                            label: "Emulator Auto Restart"
+                            label: root.t("settings.emulator_auto_restart")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "emulator_autorestart"); onToggled: function(value) { root.saveValue("settings", "emulator_autorestart", value) } } }
                         }
                         FieldRow {
-                            label: "Trio Movement"
-                            Row { spacing: 8; ChoicePill { label: "Follow"; selected: root.value("settings", "showdown_playstyle_mode") === "follow"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "follow") } ChoicePill { label: "Hide"; selected: root.value("settings", "showdown_playstyle_mode") === "hide"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "hide") } }
+                            label: root.t("settings.trio_movement")
+                            Row { spacing: 8; ChoicePill { label: root.t("common.follow"); selected: root.value("settings", "showdown_playstyle_mode") === "follow"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "follow") } ChoicePill { label: root.t("common.hide_mode"); selected: root.value("settings", "showdown_playstyle_mode") === "hide"; onClicked: root.saveValue("settings", "showdown_playstyle_mode", "hide") } }
                         }
                         FieldRow {
-                            label: "Longpress Star Drop"
+                            label: root.t("settings.longpress_star_drop")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "long_press_star_drop"); onToggled: function(value) { root.saveValue("settings", "long_press_star_drop", value) } } }
                         }
                         FieldRow {
-                            label: "Save Terminal Log"
-                            hint: "Writes timestamped logs to logs/."
+                            label: root.t("settings.save_terminal_log")
+                            hint: root.t("settings.save_terminal_log_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "terminal_logging"); onToggled: function(value) { root.saveValue("settings", "terminal_logging", value) } } }
                         }
                         FieldRow {
-                            label: "Terminal Verbosity"
-                            hint: "Restart bot to apply."
+                            label: root.t("settings.terminal_verbosity")
+                            hint: root.t("settings.terminal_verbosity_hint")
                             Row {
                                 spacing: 8
                                 Repeater {
@@ -3490,108 +3581,108 @@ ApplicationWindow {
                             }
                         }
                         FieldRow {
-                            label: "Movement Debug"
-                            hint: "Rate-limited movement trace. Independent of Debug Screen."
+                            label: root.t("settings.movement_debug")
+                            hint: root.t("settings.movement_debug_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "movement_debug"); onToggled: function(value) { root.saveValue("settings", "movement_debug", value) } } }
                         }
                         FieldRow {
-                            label: "Debug Screen"
-                            hint: "Overlay only. Does not flood the terminal."
-                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: function(value) { root.saveValue("settings", "visual_debug", value); statusText = "Restart bot to apply Debug Screen changes."; statusOk = true; statusToastTimer.restart() } } }
+                            label: root.t("settings.debug_screen")
+                            hint: root.t("settings.debug_screen_hint")
+                            CenterRow { ToggleSwitch { checked: root.boolValue("settings", "visual_debug"); onToggled: function(value) { root.saveValue("settings", "visual_debug", value); statusText = root.t("settings.debug_screen_restart"); statusOk = true; statusToastTimer.restart() } } }
                         }
                         FieldRow {
-                            label: "Advanced Visuals"
+                            label: root.t("settings.advanced_visuals")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "advanced_visuals"); onToggled: function(value) { root.saveValue("settings", "advanced_visuals", value) } } }
                         }
                         FieldRow {
-                            label: "Pause Menu IPS Graph"
+                            label: root.t("settings.pause_ips_graph")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_ips_graph"); onToggled: function(value) { root.saveValue("settings", "pause_menu_ips_graph", value) } } }
                         }
                         FieldRow {
-                            label: "Pause Session Strip"
+                            label: root.t("settings.pause_session_strip")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_session_strip"); onToggled: function(value) { root.saveValue("settings", "pause_menu_session_strip", value) } } }
                         }
                         FieldRow {
-                            label: "Auto-Reopen Pause Menu"
+                            label: root.t("settings.auto_reopen_pause")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "pause_menu_auto_reopen"); onToggled: function(value) { root.saveValue("settings", "pause_menu_auto_reopen", value) } } }
                         }
                         FieldRow {
-                            label: "Console Status Line"
-                            hint: "In-place IPS summary instead of scrolling lines."
+                            label: root.t("settings.console_status_line")
+                            hint: root.t("settings.console_status_line_hint")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "console_ips"); onToggled: function(value) { root.saveValue("settings", "console_ips", value) } } }
                         }
                         FieldRow {
-                            label: "Status Summary Seconds"
+                            label: root.t("settings.status_summary_seconds")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "terminal_summary_seconds")); onSaved: function(value) { root.saveValue("settings", "terminal_summary_seconds", value) } }
                         }
                         FieldRow {
-                            label: "Pause Graph Samples"
+                            label: root.t("settings.pause_graph_samples")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "pause_menu_graph_samples")); from: 30; to: 120; integer: true; onSaved: function(value) { root.saveValue("settings", "pause_menu_graph_samples", value) } }
                         }
                         FieldRow {
-                            label: "Capture Vision Frames"
+                            label: root.t("settings.capture_vision_frames")
                             CenterRow { ToggleSwitch { checked: root.boolValue("settings", "capture_bad_vision_frames"); onToggled: function(value) { root.saveValue("settings", "capture_bad_vision_frames", value) } } }
                         }
                     }
 
                     FormPanel {
-                        title: "CAPTURE / DEBUG"
-                        FieldRow { label: "Scrcpy Width"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_max_width")); onSaved: function(value) { root.saveValue("settings", "scrcpy_max_width", value) } } }
-                        FieldRow { label: "Scrcpy Bitrate"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_bitrate")); onSaved: function(value) { root.saveValue("settings", "scrcpy_bitrate", value) } } }
-                        FieldRow { label: "Debug Scale"; NumericSlider { anchors.fill: parent; value: String(root.value("settings", "visual_debug_scale")); from: 0.5; to: 2.0; onSaved: function(value) { root.saveValue("settings", "visual_debug_scale", value) } } }
-                        FieldRow { label: "Debug Max FPS"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_fps")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_fps", value) } } }
-                        FieldRow { label: "Debug Max Boxes"; ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_boxes")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_boxes", value) } } }
-                        FieldRow { label: "Super Debug"; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "super_debug"); onToggled: function(value) { root.saveValue("settings", "super_debug", value) } } } }
-                        FieldRow { label: "Wall Stuck Debug"; hint: "Movement escape trace."; CenterRow { ToggleSwitch { checked: root.boolValue("settings", "wall_stuck_debug"); onToggled: function(value) { root.saveValue("settings", "wall_stuck_debug", value) } } } }
+                        title: root.t("settings.capture_debug_title")
+                        FieldRow { label: root.t("settings.scrcpy_width"); ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_max_width")); onSaved: function(value) { root.saveValue("settings", "scrcpy_max_width", value) } } }
+                        FieldRow { label: root.t("settings.scrcpy_bitrate"); ConfigInput { anchors.fill: parent; value: String(root.value("settings", "scrcpy_bitrate")); onSaved: function(value) { root.saveValue("settings", "scrcpy_bitrate", value) } } }
+                        FieldRow { label: root.t("settings.debug_scale"); NumericSlider { anchors.fill: parent; value: String(root.value("settings", "visual_debug_scale")); from: 0.5; to: 2.0; onSaved: function(value) { root.saveValue("settings", "visual_debug_scale", value) } } }
+                        FieldRow { label: root.t("settings.debug_max_fps"); ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_fps")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_fps", value) } } }
+                        FieldRow { label: root.t("settings.debug_max_boxes"); ConfigInput { anchors.fill: parent; value: String(root.value("settings", "visual_debug_max_boxes")); onSaved: function(value) { root.saveValue("settings", "visual_debug_max_boxes", value) } } }
+                        FieldRow { label: root.t("settings.super_debug"); CenterRow { ToggleSwitch { checked: root.boolValue("settings", "super_debug"); onToggled: function(value) { root.saveValue("settings", "super_debug", value) } } } }
+                        FieldRow { label: root.t("settings.wall_stuck_debug"); hint: root.t("settings.wall_stuck_debug_hint"); CenterRow { ToggleSwitch { checked: root.boolValue("settings", "wall_stuck_debug"); onToggled: function(value) { root.saveValue("settings", "wall_stuck_debug", value) } } } }
                     }
 
                     FormPanel {
-                        title: "PERFORMANCE"
+                        title: root.t("settings.performance_title")
                         FieldRow {
-                            label: "Inference Device"
+                            label: root.t("settings.inference_device")
                             Row { spacing: 8; Repeater { model: ["auto", "directml", "amd", "cuda", "openvino", "cpu"]; delegate: ChoicePill { label: modelData; selected: root.value("settings", "cpu_or_gpu") === modelData; onClicked: root.saveValue("settings", "cpu_or_gpu", modelData) } } }
                         }
                         FieldRow {
-                            label: "DirectML GPU ID"
+                            label: root.t("settings.directml_gpu_id")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "directml_device_id")); onSaved: function(value) { root.saveValue("settings", "directml_device_id", value) } }
                         }
                         FieldRow {
-                            label: "Max IPS"
+                            label: root.t("settings.max_ips")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "max_ips")); from: 0; to: 120; integer: true; onSaved: function(value) { root.saveValue("settings", "max_ips", value) } }
                         }
                         FieldRow {
-                            label: "Scrcpy Max FPS"
+                            label: root.t("settings.scrcpy_max_fps")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "scrcpy_max_fps")); from: 5; to: 120; integer: true; onSaved: function(value) { root.saveValue("settings", "scrcpy_max_fps", value) } }
                         }
                         FieldRow {
-                            label: "Used Threads"
+                            label: root.t("settings.used_threads")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "used_threads")); onSaved: function(value) { root.saveValue("settings", "used_threads", value) } }
                         }
                         FieldRow {
-                            label: "Trophy Multiplier"
+                            label: root.t("settings.trophy_multiplier")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "trophies_multiplier")); from: 1; to: 10; integer: true; onSaved: function(value) { root.saveValue("settings", "trophies_multiplier", value) } }
                         }
                         FieldRow {
-                            label: "OCR Scale"
+                            label: root.t("settings.ocr_scale")
                             NumericSlider { anchors.fill: parent; value: String(root.value("settings", "ocr_scale_down_factor")); from: 0.1; to: 1.0; onSaved: function(value) { root.saveValue("settings", "ocr_scale_down_factor", value) } }
                         }
                         FieldRow {
-                            label: "Current Playstyle"
+                            label: root.t("settings.current_playstyle")
                             ConfigInput { anchors.fill: parent; value: String(root.value("settings", "current_playstyle")); onSaved: function(value) { root.saveValue("settings", "current_playstyle", value) } }
                         }
                         FieldRow {
-                            label: "Performance Profile"
+                            label: root.t("settings.performance_profile")
                             Row {
                                 spacing: 8
-                                ChoicePill { label: "balanced"; selected: root.performanceProfile === "balanced"; onClicked: root.performanceProfile = "balanced" }
-                                ChoicePill { label: "low-end"; selected: root.performanceProfile === "low-end"; onClicked: root.performanceProfile = "low-end" }
-                                ChoicePill { label: "quality"; selected: root.performanceProfile === "quality"; onClicked: root.performanceProfile = "quality" }
-                                ChoicePill { label: "high-ips"; selected: root.performanceProfile === "high_ips"; onClicked: root.performanceProfile = "high_ips" }
+                                ChoicePill { label: root.t("profile.balanced"); selected: root.performanceProfile === "balanced"; onClicked: root.performanceProfile = "balanced" }
+                                ChoicePill { label: root.t("profile.low_end"); selected: root.performanceProfile === "low-end"; onClicked: root.performanceProfile = "low-end" }
+                                ChoicePill { label: root.t("profile.quality"); selected: root.performanceProfile === "quality"; onClicked: root.performanceProfile = "quality" }
+                                ChoicePill { label: root.t("profile.high_ips"); selected: root.performanceProfile === "high_ips"; onClicked: root.performanceProfile = "high_ips" }
                             }
                         }
                         FieldRow {
-                            label: "Auto-Tune IPS"
-                            hint: "Step capture settings between matches when IPS stays below target."
+                            label: root.t("settings.auto_tune_ips")
+                            hint: root.t("settings.auto_tune_ips_hint")
                             CenterRow {
                                 ToggleSwitch {
                                     checked: root.boolValue("settings", "performance_autotune")
@@ -3601,11 +3692,11 @@ ApplicationWindow {
                         }
                         ActionRow {
                             HubButton {
-                                label: "Apply Performance Mode"
+                                label: root.t("common.apply_performance_mode")
                                 onClicked: root.runAction("profile-" + root.performanceProfile)
                             }
                             HubButton {
-                                label: "Calibrate"
+                                label: root.t("common.calibrate")
                                 secondary: true
                                 onClicked: applyBridgeResult(hubBridge.calibratePerformance())
                             }
@@ -3617,34 +3708,34 @@ ApplicationWindow {
                 TabPage {
                     visible: root.activeTab === "Discord"
                     FormPanel {
-                        title: "DISCORD NOTIFICATIONS"
+                        title: root.t("discord.notifications_title")
                         tutorialId: "discord"
-                        FieldRow { label: "Webhook URL"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "webhook_url")); secret: true; onSaved: function(value) { root.saveValue("discord", "webhook_url", value) } } }
-                        FieldRow { label: "Discord ID"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_id")); onSaved: function(value) { root.saveValue("discord", "discord_id", value) } } }
-                        FieldRow { label: "Webhook Name"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "username")); onSaved: function(value) { root.saveValue("discord", "username", value) } } }
-                        FieldRow { label: "Send Match Summary"; hint: "Post a match report embed after every finished game."; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "send_match_summary"); onToggled: function(value) { root.saveValue("discord", "send_match_summary", value) } } } }
-                        FieldRow { label: "Include Screenshots"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "include_screenshot"); onToggled: function(value) { root.saveValue("discord", "include_screenshot", value) } } } }
-                        FieldRow { label: "Ping When Stuck"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_stuck"); onToggled: function(value) { root.saveValue("discord", "ping_when_stuck", value) } } } }
-                        FieldRow { label: "Notify On Recovery"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "notify_on_recovery"); onToggled: function(value) { root.saveValue("discord", "notify_on_recovery", value) } } } }
-                        FieldRow { label: "Recovery Alert Threshold"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "recovery_alert_threshold")); onSaved: function(value) { root.saveValue("discord", "recovery_alert_threshold", value) } } }
-                        FieldRow { label: "Ping On Target"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_target_is_reached"); onToggled: function(value) { root.saveValue("discord", "ping_when_target_is_reached", value) } } } }
-                        FieldRow { label: "Ping Every X Matches"; hint: "Mention your Discord ID on every Nth match summary (0 = no mention)."; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_match")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_match", value) } } }
-                        FieldRow { label: "Heartbeat Every X Minutes"; hint: "Optional still-running ping (0 = off). Does not replace match summaries."; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_minutes")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_minutes", value) } } }
-                        FieldRow { label: "Daily Digest"; hint: "One summary message per day instead of noisy recovery pings."; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "daily_digest_enabled"); onToggled: function(value) { root.saveValue("discord", "daily_digest_enabled", value) } } } }
-                        FieldRow { label: "Digest Hour (0-23)"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "daily_digest_hour")); onSaved: function(value) { root.saveValue("discord", "daily_digest_hour", value) } } }
+                        FieldRow { label: root.t("instances.webhook_url"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "webhook_url")); secret: true; onSaved: function(value) { root.saveValue("discord", "webhook_url", value) } } }
+                        FieldRow { label: root.t("discord.discord_id"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_id")); onSaved: function(value) { root.saveValue("discord", "discord_id", value) } } }
+                        FieldRow { label: root.t("discord.webhook_name"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "username")); onSaved: function(value) { root.saveValue("discord", "username", value) } } }
+                        FieldRow { label: root.t("discord.send_match_summary"); hint: root.t("discord.send_match_summary_hint"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "send_match_summary"); onToggled: function(value) { root.saveValue("discord", "send_match_summary", value) } } } }
+                        FieldRow { label: root.t("discord.include_screenshots"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "include_screenshot"); onToggled: function(value) { root.saveValue("discord", "include_screenshot", value) } } } }
+                        FieldRow { label: root.t("discord.ping_when_stuck"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_stuck"); onToggled: function(value) { root.saveValue("discord", "ping_when_stuck", value) } } } }
+                        FieldRow { label: root.t("discord.notify_on_recovery"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "notify_on_recovery"); onToggled: function(value) { root.saveValue("discord", "notify_on_recovery", value) } } } }
+                        FieldRow { label: root.t("discord.recovery_alert_threshold"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "recovery_alert_threshold")); onSaved: function(value) { root.saveValue("discord", "recovery_alert_threshold", value) } } }
+                        FieldRow { label: root.t("discord.ping_on_target"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "ping_when_target_is_reached"); onToggled: function(value) { root.saveValue("discord", "ping_when_target_is_reached", value) } } } }
+                        FieldRow { label: root.t("discord.ping_every_x_matches"); hint: root.t("discord.ping_every_x_matches_hint"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_match")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_match", value) } } }
+                        FieldRow { label: root.t("discord.heartbeat_every_x_minutes"); hint: root.t("discord.heartbeat_every_x_minutes_hint"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "ping_every_x_minutes")); onSaved: function(value) { root.saveValue("discord", "ping_every_x_minutes", value) } } }
+                        FieldRow { label: root.t("discord.daily_digest"); hint: root.t("discord.daily_digest_hint"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "daily_digest_enabled"); onToggled: function(value) { root.saveValue("discord", "daily_digest_enabled", value) } } } }
+                        FieldRow { label: root.t("discord.digest_hour"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "daily_digest_hour")); onSaved: function(value) { root.saveValue("discord", "daily_digest_hour", value) } } }
                     }
                     FormPanel {
-                        title: "REMOTE CONTROL"
-                        FieldRow { label: "Enable Discord Control"; CenterRow { ToggleSwitch { checked: root.boolValue("discord", "discord_control_enabled"); onToggled: function(value) { root.saveValue("discord", "discord_control_enabled", value) } } } }
-                        FieldRow { label: "Bot Token"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_bot_token")); secret: true; onSaved: function(value) { root.saveValue("discord", "discord_bot_token", value) } } }
-                        FieldRow { label: "Allowed User ID"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_user_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_user_id", value) } } }
-                        FieldRow { label: "Allowed Channel ID"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_channel_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_channel_id", value) } } }
-                        FieldRow { label: "Guild ID"; ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_guild_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_guild_id", value) } } }
+                        title: root.t("discord.remote_control_title")
+                        FieldRow { label: root.t("discord.enable_discord_control"); CenterRow { ToggleSwitch { checked: root.boolValue("discord", "discord_control_enabled"); onToggled: function(value) { root.saveValue("discord", "discord_control_enabled", value) } } } }
+                        FieldRow { label: root.t("discord.bot_token"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_bot_token")); secret: true; onSaved: function(value) { root.saveValue("discord", "discord_bot_token", value) } } }
+                        FieldRow { label: root.t("discord.allowed_user_id"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_user_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_user_id", value) } } }
+                        FieldRow { label: root.t("discord.allowed_channel_id"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_channel_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_channel_id", value) } } }
+                        FieldRow { label: root.t("discord.guild_id"); ConfigInput { anchors.fill: parent; value: String(root.value("discord", "discord_control_guild_id")); onSaved: function(value) { root.saveValue("discord", "discord_control_guild_id", value) } } }
                     }
                     ActionRow {
-                        HubButton { label: "Send Discord Test"; onClicked: root.runAction("discord-test") }
-                        HubButton { label: "Webhook Guide"; secondary: true; onClicked: root.runAction("discord-webhook-guide") }
-                        HubButton { label: "Developer Portal"; secondary: true; onClicked: root.runAction("discord-developer-portal") }
+                        HubButton { label: root.t("discord.send_discord_test"); onClicked: root.runAction("discord-test") }
+                        HubButton { label: root.t("discord.webhook_guide"); secondary: true; onClicked: root.runAction("discord-webhook-guide") }
+                        HubButton { label: root.t("discord.developer_portal"); secondary: true; onClicked: root.runAction("discord-developer-portal") }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
@@ -3652,23 +3743,23 @@ ApplicationWindow {
                 TabPage {
                     visible: root.activeTab === "Telegram"
                     FormPanel {
-                        title: "TELEGRAM BOT"
+                        title: root.t("telegram.bot_title")
                         tutorialId: "telegram"
-                        FieldRow { label: "Enable Telegram"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "enabled"); onToggled: function(value) { root.saveValue("telegram", "enabled", value) } } } }
-                        FieldRow { label: "Bot Token"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "bot_token")); secret: true; onSaved: function(value) { root.saveValue("telegram", "bot_token", value) } } }
-                        FieldRow { label: "Notification Chat IDs"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "notification_chat_ids")); onSaved: function(value) { root.saveValue("telegram", "notification_chat_ids", value) } } }
-                        FieldRow { label: "Send Match Summary"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "send_match_summary"); onToggled: function(value) { root.saveValue("telegram", "send_match_summary", value) } } } }
-                        FieldRow { label: "Include Screenshots"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "include_screenshot"); onToggled: function(value) { root.saveValue("telegram", "include_screenshot", value) } } } }
-                        FieldRow { label: "Multiple Chats"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "allow_multiple_notification_chat_ids"); onToggled: function(value) { root.saveValue("telegram", "allow_multiple_notification_chat_ids", value) } } } }
-                        FieldRow { label: "Remote Control"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "remote_control_enabled"); onToggled: function(value) { root.saveValue("telegram", "remote_control_enabled", value) } } } }
-                        FieldRow { label: "Notify On Recovery"; CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "notify_on_recovery"); onToggled: function(value) { root.saveValue("telegram", "notify_on_recovery", value) } } } }
-                        FieldRow { label: "Recovery Alert Threshold"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "recovery_alert_threshold")); onSaved: function(value) { root.saveValue("telegram", "recovery_alert_threshold", value) } } }
-                        FieldRow { label: "Poll Timeout"; ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "poll_timeout_seconds")); onSaved: function(value) { root.saveValue("telegram", "poll_timeout_seconds", value) } } }
+                        FieldRow { label: root.t("telegram.enable_telegram"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "enabled"); onToggled: function(value) { root.saveValue("telegram", "enabled", value) } } } }
+                        FieldRow { label: root.t("discord.bot_token"); ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "bot_token")); secret: true; onSaved: function(value) { root.saveValue("telegram", "bot_token", value) } } }
+                        FieldRow { label: root.t("telegram.notification_chat_ids"); ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "notification_chat_ids")); onSaved: function(value) { root.saveValue("telegram", "notification_chat_ids", value) } } }
+                        FieldRow { label: root.t("discord.send_match_summary"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "send_match_summary"); onToggled: function(value) { root.saveValue("telegram", "send_match_summary", value) } } } }
+                        FieldRow { label: root.t("discord.include_screenshots"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "include_screenshot"); onToggled: function(value) { root.saveValue("telegram", "include_screenshot", value) } } } }
+                        FieldRow { label: root.t("telegram.multiple_chats"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "allow_multiple_notification_chat_ids"); onToggled: function(value) { root.saveValue("telegram", "allow_multiple_notification_chat_ids", value) } } } }
+                        FieldRow { label: root.t("telegram.remote_control"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "remote_control_enabled"); onToggled: function(value) { root.saveValue("telegram", "remote_control_enabled", value) } } } }
+                        FieldRow { label: root.t("discord.notify_on_recovery"); CenterRow { ToggleSwitch { checked: root.boolValue("telegram", "notify_on_recovery"); onToggled: function(value) { root.saveValue("telegram", "notify_on_recovery", value) } } } }
+                        FieldRow { label: root.t("discord.recovery_alert_threshold"); ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "recovery_alert_threshold")); onSaved: function(value) { root.saveValue("telegram", "recovery_alert_threshold", value) } } }
+                        FieldRow { label: root.t("telegram.poll_timeout"); ConfigInput { anchors.fill: parent; value: String(root.value("telegram", "poll_timeout_seconds")); onSaved: function(value) { root.saveValue("telegram", "poll_timeout_seconds", value) } } }
                     }
                     ActionRow {
-                        HubButton { label: "Find Chats"; onClicked: root.runAction("telegram-find-chats") }
-                        HubButton { label: "Send Telegram Test"; onClicked: root.runAction("telegram-test") }
-                        HubButton { label: "Open @BotFather"; secondary: true; onClicked: root.runAction("telegram-botfather") }
+                        HubButton { label: root.t("telegram.find_chats"); onClicked: root.runAction("telegram-find-chats") }
+                        HubButton { label: root.t("telegram.send_telegram_test"); onClicked: root.runAction("telegram-test") }
+                        HubButton { label: root.t("telegram.open_botfather"); secondary: true; onClicked: root.runAction("telegram-botfather") }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
@@ -3677,28 +3768,28 @@ ApplicationWindow {
                     visible: root.activeTab === "API"
                     FormPanel {
                         id: apiConfigPanel
-                        title: "BRAWL STARS API"
+                        title: root.t("api.title")
                         tutorialId: "api"
-                        FieldRow { label: "Player Tag"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "player_tag")); onSaved: function(value) { root.saveValue("api", "player_tag", value) } } }
-                        FieldRow { label: "Auto Refresh Token"; CenterRow { ToggleSwitch { checked: root.boolValue("api", "auto_refresh_token"); onToggled: function(value) { root.saveValue("api", "auto_refresh_token", value) } } } }
-                        FieldRow { label: "Developer Email"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "developer_email")); onSaved: function(value) { root.saveValue("api", "developer_email", value) } } }
-                        FieldRow { label: "Developer Password"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "developer_password")); secret: true; onSaved: function(value) { root.saveValue("api", "developer_password", value) } } }
-                        FieldRow { label: "API Token"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "api_token")); secret: true; onSaved: function(value) { root.saveValue("api", "api_token", value) } } }
-                        FieldRow { label: "Timeout Seconds"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "timeout_seconds")); onSaved: function(value) { root.saveValue("api", "timeout_seconds", value) } } }
-                        FieldRow { label: "Public IP Service"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "public_ip_service")); onSaved: function(value) { root.saveValue("api", "public_ip_service", value) } } }
-                        FieldRow { label: "Key Name Prefix"; ConfigInput { anchors.fill: parent; value: String(root.value("api", "key_name_prefix")); onSaved: function(value) { root.saveValue("api", "key_name_prefix", value) } } }
-                        FieldRow { label: "Delete Old Tokens"; CenterRow { ToggleSwitch { checked: root.boolValue("api", "delete_old_auto_tokens"); onToggled: function(value) { root.saveValue("api", "delete_old_auto_tokens", value) } } } }
-                        FieldRow { label: "Sync Trophies After Match"; CenterRow { ToggleSwitch { checked: root.boolValue("api", "sync_trophies_after_match"); onToggled: function(value) { root.saveValue("api", "sync_trophies_after_match", value) } } } }
+                        FieldRow { label: root.t("instances.player_tag"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "player_tag")); onSaved: function(value) { root.saveValue("api", "player_tag", value) } } }
+                        FieldRow { label: root.t("api.auto_refresh_token"); CenterRow { ToggleSwitch { checked: root.boolValue("api", "auto_refresh_token"); onToggled: function(value) { root.saveValue("api", "auto_refresh_token", value) } } } }
+                        FieldRow { label: root.t("api.developer_email"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "developer_email")); onSaved: function(value) { root.saveValue("api", "developer_email", value) } } }
+                        FieldRow { label: root.t("api.developer_password"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "developer_password")); secret: true; onSaved: function(value) { root.saveValue("api", "developer_password", value) } } }
+                        FieldRow { label: root.t("api.api_token"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "api_token")); secret: true; onSaved: function(value) { root.saveValue("api", "api_token", value) } } }
+                        FieldRow { label: root.t("api.timeout_seconds"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "timeout_seconds")); onSaved: function(value) { root.saveValue("api", "timeout_seconds", value) } } }
+                        FieldRow { label: root.t("api.public_ip_service"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "public_ip_service")); onSaved: function(value) { root.saveValue("api", "public_ip_service", value) } } }
+                        FieldRow { label: root.t("api.key_name_prefix"); ConfigInput { anchors.fill: parent; value: String(root.value("api", "key_name_prefix")); onSaved: function(value) { root.saveValue("api", "key_name_prefix", value) } } }
+                        FieldRow { label: root.t("api.delete_old_tokens"); CenterRow { ToggleSwitch { checked: root.boolValue("api", "delete_old_auto_tokens"); onToggled: function(value) { root.saveValue("api", "delete_old_auto_tokens", value) } } } }
+                        FieldRow { label: root.t("api.sync_trophies_after_match"); CenterRow { ToggleSwitch { checked: root.boolValue("api", "sync_trophies_after_match"); onToggled: function(value) { root.saveValue("api", "sync_trophies_after_match", value) } } } }
                     }
                     ActionRow {
                         HubButton {
-                            label: "Test API Config"
+                            label: root.t("api.test_api_config")
                             onClicked: {
                                 apiConfigPanel.forceActiveFocus()
                                 Qt.callLater(function() { root.runAction("api-test") })
                             }
                         }
-                        HubButton { label: "Developer Portal"; secondary: true; onClicked: root.runAction("brawl-stars-developer") }
+                        HubButton { label: root.t("discord.developer_portal"); secondary: true; onClicked: root.runAction("brawl-stars-developer") }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 }
@@ -3706,24 +3797,24 @@ ApplicationWindow {
                 TabPage {
                     visible: root.activeTab === "Timers"
                     FormPanel {
-                        title: "TIMERS"
+                        title: root.t("timers.title")
                         tutorialId: "timers"
-                        FieldRow { label: "Super Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "super")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "super", value) } } }
-                        FieldRow { label: "Hypercharge Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "hypercharge")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "hypercharge", value) } } }
-                        FieldRow { label: "Gadget Delay"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "gadget")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "gadget", value) } } }
-                        FieldRow { label: "Wall Detection"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "wall_detection")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "wall_detection", value) } } }
-                        FieldRow { label: "No Detection Proceed"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "no_detection_proceed")); from: 0.1; to: 20; onSaved: function(value) { root.saveValue("timers", "no_detection_proceed", value) } } }
-                        FieldRow { label: "Low IPS Recovery"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_seconds")); from: 5; to: 90; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_seconds", value) } } }
-                        FieldRow { label: "Low IPS Cooldown"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_cooldown")); from: 5; to: 90; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_cooldown", value) } } }
-                        FieldRow { label: "App Restart Attempt"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_app_restart_after")); from: 1; to: 6; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_app_restart_after", value) } } }
-                        FieldRow { label: "Emulator Restart Attempt"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_emulator_restart_after")); from: 1; to: 10; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_emulator_restart_after", value) } } }
-                        FieldRow { label: "Lobby Stuck Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "lobby_stuck_restart")); from: 30; to: 300; onSaved: function(value) { root.saveValue("timers", "lobby_stuck_restart", value) } } }
-                        FieldRow { label: "Visual Freeze Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "visual_freeze_restart")); from: 10; to: 120; onSaved: function(value) { root.saveValue("timers", "visual_freeze_restart", value) } } }
-                        FieldRow { label: "Global Freeze Restart"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "global_freeze_restart")); from: 10; to: 180; onSaved: function(value) { root.saveValue("timers", "global_freeze_restart", value) } } }
-                        FieldRow { label: "Emulator Restart Cooldown"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "emulator_restart_cooldown")); from: 30; to: 600; onSaved: function(value) { root.saveValue("timers", "emulator_restart_cooldown", value) } } }
-                        FieldRow { label: "State Check"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "state_check")); from: 0.1; to: 5; onSaved: function(value) { root.saveValue("timers", "state_check", value) } } }
-                        FieldRow { label: "Idle Timeout"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "idle")); from: 5; to: 120; onSaved: function(value) { root.saveValue("timers", "idle", value) } } }
-                        FieldRow { label: "Low IPS Threshold"; NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_threshold")); from: 1; to: 10; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_threshold", value) } } }
+                        FieldRow { label: root.t("timers.super_delay"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "super")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "super", value) } } }
+                        FieldRow { label: root.t("timers.hypercharge_delay"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "hypercharge")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "hypercharge", value) } } }
+                        FieldRow { label: root.t("timers.gadget_delay"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "gadget")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "gadget", value) } } }
+                        FieldRow { label: root.t("timers.wall_detection"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "wall_detection")); from: 0.05; to: 10; onSaved: function(value) { root.saveValue("timers", "wall_detection", value) } } }
+                        FieldRow { label: root.t("timers.no_detection_proceed"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "no_detection_proceed")); from: 0.1; to: 20; onSaved: function(value) { root.saveValue("timers", "no_detection_proceed", value) } } }
+                        FieldRow { label: root.t("timers.low_ips_recovery"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_seconds")); from: 5; to: 90; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_seconds", value) } } }
+                        FieldRow { label: root.t("timers.low_ips_cooldown"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_cooldown")); from: 5; to: 90; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_cooldown", value) } } }
+                        FieldRow { label: root.t("timers.app_restart_attempt"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_app_restart_after")); from: 1; to: 6; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_app_restart_after", value) } } }
+                        FieldRow { label: root.t("timers.emulator_restart_attempt"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_emulator_restart_after")); from: 1; to: 10; integer: true; onSaved: function(value) { root.saveValue("timers", "low_ips_emulator_restart_after", value) } } }
+                        FieldRow { label: root.t("timers.lobby_stuck_restart"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "lobby_stuck_restart")); from: 30; to: 300; onSaved: function(value) { root.saveValue("timers", "lobby_stuck_restart", value) } } }
+                        FieldRow { label: root.t("timers.visual_freeze_restart"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "visual_freeze_restart")); from: 10; to: 120; onSaved: function(value) { root.saveValue("timers", "visual_freeze_restart", value) } } }
+                        FieldRow { label: root.t("timers.global_freeze_restart"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "global_freeze_restart")); from: 10; to: 180; onSaved: function(value) { root.saveValue("timers", "global_freeze_restart", value) } } }
+                        FieldRow { label: root.t("timers.emulator_restart_cooldown"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "emulator_restart_cooldown")); from: 30; to: 600; onSaved: function(value) { root.saveValue("timers", "emulator_restart_cooldown", value) } } }
+                        FieldRow { label: root.t("timers.state_check"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "state_check")); from: 0.1; to: 5; onSaved: function(value) { root.saveValue("timers", "state_check", value) } } }
+                        FieldRow { label: root.t("timers.idle_timeout"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "idle")); from: 5; to: 120; onSaved: function(value) { root.saveValue("timers", "idle", value) } } }
+                        FieldRow { label: root.t("timers.low_ips_threshold"); NumericSlider { anchors.fill: parent; value: String(root.value("timers", "low_ips_recovery_threshold")); from: 1; to: 10; onSaved: function(value) { root.saveValue("timers", "low_ips_recovery_threshold", value) } } }
                     }
                 }
 
@@ -3731,12 +3822,12 @@ ApplicationWindow {
                     visible: root.activeTab === "Match History"
 
                     FormPanel {
-                        title: "MATCH HISTORY"
+                        title: root.t("history.title")
                         tutorialId: "match-history"
                         ActionRow {
-                            HubButton { label: "Export CSV"; secondary: true; onClicked: root.runAction("export-history") }
-                            HubButton { label: "Reset Stats"; secondary: true; onClicked: root.runAction("reset-history") }
-                            HubButton { label: "Refresh"; secondary: true; onClicked: root.runAction("refresh-history") }
+                            HubButton { label: root.t("common.export_csv"); secondary: true; onClicked: root.runAction("export-history") }
+                            HubButton { label: root.t("common.reset_stats"); secondary: true; onClicked: root.runAction("reset-history") }
+                            HubButton { label: root.t("common.refresh"); secondary: true; onClicked: root.runAction("refresh-history") }
                         }
                     }
                     Rectangle {
@@ -3751,16 +3842,18 @@ ApplicationWindow {
                             anchors.margins: 12
                             spacing: 4
                             Text {
-                                text: "Lifetime: " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.games : 0) + " games"
+                                text: root.t("common.lifetime", { count: (hubState.history && hubState.history.summary) ? hubState.history.summary.games : 0 })
                                 color: theme.text
                                 font.pixelSize: 13
                                 font.weight: Font.DemiBold
                             }
                             Text {
-                                text: "W " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.victory : 0)
-                                    + " / L " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.defeat : 0)
-                                    + " / D " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.draw : 0)
-                                    + " | " + ((hubState.history && hubState.history.summary) ? hubState.history.summary.winRate : 0) + "% win"
+                                text: root.t("common.win_loss_draw", {
+                                    wins: (hubState.history && hubState.history.summary) ? hubState.history.summary.victory : 0,
+                                    losses: (hubState.history && hubState.history.summary) ? hubState.history.summary.defeat : 0,
+                                    draws: (hubState.history && hubState.history.summary) ? hubState.history.summary.draw : 0,
+                                    winRate: (hubState.history && hubState.history.summary) ? hubState.history.summary.winRate : 0
+                                })
                                 color: theme.muted
                                 font.pixelSize: 11
                             }
@@ -3771,16 +3864,16 @@ ApplicationWindow {
                         Repeater {
                             model: ["games", "winRate", "name"]
                             delegate: ChoicePill {
-                                label: modelData
+                                label: root.t("history.sort_" + (modelData === "winRate" ? "win_rate" : modelData))
                                 selected: root.historySort === modelData
                                 onClicked: root.historySort = modelData
                             }
                         }
                     }
                     Text { text: root.statusText; color: root.statusOk ? theme.muted : theme.danger; font.pixelSize: 11; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-                    Text { text: "Recent Matches"; color: theme.faint; font.pixelSize: 11 }
+                    Text { text: root.t("common.recent_matches"); color: theme.faint; font.pixelSize: 11 }
                     FormPanel {
-                        title: "EFFICIENCY (LAST 7 DAYS)"
+                        title: root.t("history.efficiency_title")
                         visible: !!(hubState.history && hubState.history.efficiency && hubState.history.efficiency.length)
                         Flow {
                             Layout.fillWidth: true
@@ -3807,7 +3900,7 @@ ApplicationWindow {
                                             elide: Text.ElideRight
                                         }
                                         Text {
-                                            text: modelData.trophiesPerHour + " trophies/hr"
+                                            text: root.t("common.trophies_per_hour", { rate: modelData.trophiesPerHour })
                                             color: theme.ok
                                             font.pixelSize: 11
                                         }
@@ -3818,7 +3911,7 @@ ApplicationWindow {
                                         }
                                         Text {
                                             visible: !!modelData.stuck
-                                            text: "Stuck"
+                                            text: root.t("common.stuck")
                                             color: theme.danger
                                             font.pixelSize: 10
                                             font.bold: true
@@ -3906,7 +3999,7 @@ ApplicationWindow {
                     }
                     Text {
                         visible: !root.hubState.history || !root.hubState.history.items || root.hubState.history.items.length === 0
-                        text: "No match history yet."
+                        text: root.t("common.no_match_history")
                         color: theme.faint
                         font.pixelSize: 12
                     }
@@ -3916,16 +4009,16 @@ ApplicationWindow {
                     visible: root.activeTab === "Help"
 
                     FormPanel {
-                        title: "FEATURE GUIDES"
+                        title: root.t("help.feature_guides_title")
                         Text {
                             Layout.fillWidth: true
-                            text: "Quick guides for every Hub tab. Click Open guide for a summary, or Open full guide for the markdown tutorial."
+                            text: root.t("help.feature_guides_hint")
                             color: theme.faint
                             font.pixelSize: 11
                             wrapMode: Text.WordWrap
                         }
                         FieldRow {
-                            label: "Search Guides"
+                            label: root.t("help.search_guides")
                             ConfigInput {
                                 anchors.fill: parent
                                 live: true
@@ -3935,12 +4028,12 @@ ApplicationWindow {
                         }
                         ActionRow {
                             HubButton {
-                                label: "Open Tutorial Index"
+                                label: root.t("help.open_tutorial_index")
                                 secondary: true
                                 onClicked: root.openTutorialDoc("docs/TUTORIAL.md")
                             }
                             HubButton {
-                                label: "Show Setup Wizard Again"
+                                label: root.t("common.show_setup_wizard_again")
                                 secondary: true
                                 onClicked: root.runAction("reset-setup-wizard")
                             }
@@ -3995,12 +4088,12 @@ ApplicationWindow {
                                 RowLayout {
                                     spacing: 8
                                     HubButton {
-                                        label: "Open guide"
+                                        label: root.t("common.open_guide")
                                         compact: true
                                         onClicked: root.openTutorial(modelData.id)
                                     }
                                     HubButton {
-                                        label: "Full doc"
+                                        label: root.t("common.full_doc")
                                         secondary: true
                                         compact: true
                                         visible: !!modelData.doc
@@ -4031,7 +4124,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         spacing: 2
                         Text {
-                            text: (hubState.preflight && hubState.preflight.ready) ? "Ready to start" : "Run pre-flight checks on Overview"
+                            text: (hubState.preflight && hubState.preflight.ready) ? root.t("footer.ready_to_start") : root.t("footer.run_preflight")
                             color: (hubState.preflight && hubState.preflight.ready) ? theme.ok : theme.muted
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
@@ -4066,7 +4159,7 @@ ApplicationWindow {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "START"
+                            text: root.t("common.start")
                             color: "#ffffff"
                             font.pixelSize: 15
                             font.weight: Font.Bold
@@ -4098,7 +4191,7 @@ ApplicationWindow {
 
                         Text {
                             anchors.centerIn: parent
-                            text: "CLOSE"
+                            text: root.t("common.close")
                             color: theme.text
                             font.pixelSize: 15
                             font.weight: Font.Bold
@@ -4114,7 +4207,7 @@ ApplicationWindow {
                     }
 
                     HubButton {
-                        label: "Checks"
+                        label: root.t("common.checks")
                         secondary: true
                         compact: true
                         enabled: !root.hubBusy
@@ -4136,15 +4229,15 @@ ApplicationWindow {
                 Row {
                     anchors.centerIn: parent
                     spacing: 16
-                    Text { text: hubBrand ? hubBrand.footerNotice : "Pyla is free, public, and open-source."; color: theme.faint; font.pixelSize: 11 }
+                    Text { text: hubBrand ? hubBrand.footerNotice : root.t("footer.notice"); color: theme.faint; font.pixelSize: 11 }
                     Text { text: "\u00b7"; color: theme.muted; font.pixelSize: 13; font.weight: Font.Bold }
                     FooterLink {
-                        label: "Join Discord"
+                        label: root.t("common.join_discord")
                         onClicked: hubBridge.openDiscord()
                     }
                     Text { text: "\u00b7"; color: theme.muted; font.pixelSize: 13; font.weight: Font.Bold }
                     FooterLink {
-                        label: "Support on Patreon"
+                        label: root.t("common.support_patreon")
                         onClicked: hubBridge.openPatreon()
                     }
                     Text { text: "\u00b7"; color: theme.muted; font.pixelSize: 13; font.weight: Font.Bold }
@@ -4183,9 +4276,9 @@ ApplicationWindow {
                 anchors.margins: 16
                 spacing: 12
                 Text {
-                    text: root.wizardStep === 0 ? "Step 1: Free Use License"
-                        : (root.wizardStep === 1 ? "Step 2: Environment"
-                        : (root.wizardStep === 2 ? "Step 3: Optional Setup" : "Step 4: Farm Plan"))
+                    text: root.wizardStep === 0 ? root.t("wizard.step1_title")
+                        : (root.wizardStep === 1 ? root.t("wizard.step2_title")
+                        : (root.wizardStep === 2 ? root.t("wizard.step3_title") : root.t("wizard.step4_title")))
                     color: theme.text
                     font.pixelSize: 16
                     font.weight: Font.Bold
@@ -4193,12 +4286,12 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     text: root.wizardStep === 0
-                        ? ((hubBrand ? hubBrand.productName : "Pyla-RL") + " is free and open source under CC BY-NC 4.0. You may use and modify it, but you must not sell or resell it.")
+                        ? root.t("wizard.step1_body", { product: (hubBrand ? hubBrand.productName : "Pyla-RL") })
                         : (root.wizardStep === 1
-                            ? "Start your emulator, open Brawl Stars, then run pre-flight checks on Overview. Full guides for every feature are in the Help tab."
+                            ? root.t("wizard.step2_body")
                             : (root.wizardStep === 2
-                                ? "Optional: configure Discord, Telegram, or API tabs for notifications and remote control. See the Help tab for setup tutorials."
-                                : "Build a farm plan on the Farm Plan tab, or use the legacy brawler picker after START if the queue is empty. Open Help anytime for full guides."))
+                                ? root.t("wizard.step3_body")
+                                : root.t("wizard.step4_body")))
                     color: theme.muted
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -4238,7 +4331,7 @@ ApplicationWindow {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: "I understand Pyla-RL is free and I will not sell it."
+                                text: root.t("wizard.license_checkbox")
                                 color: theme.muted
                                 font.pixelSize: 11
                                 wrapMode: Text.WordWrap
@@ -4257,27 +4350,27 @@ ApplicationWindow {
                 Text {
                     visible: root.wizardStep === 0 && !root.licenseTermsAccepted
                     Layout.fillWidth: true
-                    text: "Select the agreement above to enable Next."
+                    text: root.t("wizard.license_enable_next")
                     color: theme.faint
                     font.pixelSize: 10
                 }
                 RowLayout {
                     spacing: 8
                     HubButton {
-                        label: "Back"
+                        label: root.t("common.back")
                         secondary: true
                         visible: root.wizardStep > 0
                         onClicked: root.wizardStep -= 1
                     }
                     HubButton {
-                        label: "Run Checks"
+                        label: root.t("common.run_checks")
                         secondary: true
                         visible: root.wizardStep === 1
                         enabled: !root.hubBusy
                         onClicked: root.runAction("preflight-check")
                     }
                     HubButton {
-                        label: "Open Help"
+                        label: root.t("common.open_help")
                         secondary: true
                         visible: root.wizardStep >= 2
                         onClicked: {
@@ -4287,7 +4380,7 @@ ApplicationWindow {
                     }
                     Item { Layout.fillWidth: true }
                     HubButton {
-                        label: root.wizardStep < 3 ? "Next" : "Finish"
+                        label: root.wizardStep < 3 ? root.t("common.next") : root.t("common.finish")
                         clickable: root.wizardStep !== 0 || root.licenseTermsAccepted
                         onClicked: {
                             if (root.wizardStep === 0) {
@@ -4351,20 +4444,20 @@ ApplicationWindow {
                 spacing: 10
 
                 Text {
-                    text: "Add Brawler"
+                    text: root.t("common.add_brawler")
                     color: theme.text
                     font.pixelSize: 15
                     font.weight: Font.Bold
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: "Search and click a brawler, then set the trophy target before adding."
+                    text: root.t("picker.hint")
                     color: theme.faint
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
                 }
                 FieldRow {
-                    label: "Search"
+                    label: root.t("common.search")
                     Layout.fillWidth: true
                     ConfigInput {
                         anchors.fill: parent
@@ -4399,7 +4492,7 @@ ApplicationWindow {
                 Text {
                     visible: root.filteredPickerOptions.length === 0
                     Layout.fillWidth: true
-                    text: "No brawlers match your search."
+                    text: root.t("picker.no_match")
                     color: theme.faint
                     font.pixelSize: 11
                 }
@@ -4407,7 +4500,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     spacing: 8
                     Text {
-                        text: "Target"
+                        text: root.t("common.target")
                         color: theme.muted
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
@@ -4434,13 +4527,13 @@ ApplicationWindow {
                 RowLayout {
                     spacing: 8
                     HubButton {
-                        label: "Cancel"
+                        label: root.t("common.cancel")
                         secondary: true
                         onClicked: root.showBrawlerPicker = false
                     }
                     Item { Layout.fillWidth: true }
                     HubButton {
-                        label: "Add"
+                        label: root.t("common.add")
                         clickable: root.pickerBrawler !== ""
                         onClicked: {
                             var target = root.trophyTargetFromUi(pickerTargetInput.editText, root.pickerTarget)
@@ -4469,8 +4562,8 @@ ApplicationWindow {
 
     FileDialog {
         id: importQueueDialog
-        title: "Import Farm Plan"
-        nameFilters: ["JSON files (*.json)", "All files (*)"]
+        title: root.t("common.import_farm_plan")
+        nameFilters: [root.t("common.json_filter"), root.t("common.all_files_filter")]
         fileMode: FileDialog.OpenFile
         onAccepted: {
             if (selectedFile) {
@@ -4481,8 +4574,8 @@ ApplicationWindow {
 
     FileDialog {
         id: exportQueueDialog
-        title: "Export Farm Plan"
-        nameFilters: ["JSON files (*.json)", "All files (*)"]
+        title: root.t("common.export_farm_plan")
+        nameFilters: [root.t("common.json_filter"), root.t("common.all_files_filter")]
         fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         onAccepted: {

@@ -422,10 +422,11 @@ class Play:
         }
 
     def _try_aim_attack(self, release=True) -> bool:
-        aimed = config_bool(getattr(self, "aimed_attacks_enabled", "yes"), True)
         smart = config_bool(getattr(self, "smart_aim_enabled", "yes"), True)
-        if not aimed and not smart:
+        if not smart:
             return False
+
+        aimed = config_bool(getattr(self, "aimed_attacks_enabled", "yes"), True)
 
         target = getattr(self, "_combat_target", None) or {}
         player_pos = target.get("player_pos")

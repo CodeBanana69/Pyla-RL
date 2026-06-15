@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from core.toml_merge import merge_toml_text
+from core.toml_merge import merge_toml_text, repair_unquoted_windows_paths
 from tools.updater import (
     apply_pending_launcher_updates,
     backup_preserved_files,
@@ -203,6 +203,14 @@ class UpdaterTest(unittest.TestCase):
 
         self.assertEqual(merged.count("performance_autotune"), 1)
         self.assertIn('performance_autotune = "yes"', merged)
+
+    def test_repair_unquoted_windows_paths_quotes_bare_paths(self):
+        text = (
+            "current_emulator = \"MuMu\"\n"
+            "ldplayer_console_path = C:\\LDPlayer\\ldconsole.exe\n"
+        )
+        repaired = repair_unquoted_windows_paths(text)
+        self.assertIn('ldplayer_console_path = "C:\\\\LDPlayer\\\\ldconsole.exe"', repaired)
 
     def test_update_info_marker_round_trips_latest_sha(self):
         with tempfile.TemporaryDirectory() as tmp:

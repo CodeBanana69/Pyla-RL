@@ -170,10 +170,7 @@ class QmlHub:
                     thread.wait(3000)
                 self.actionFinished.emit(json.dumps({
                     "ok": False,
-                    "message": (
-                        "Hub action timed out. If checks never finish, restart the Hub "
-                        "and confirm the emulator is running."
-                    ),
+                    "message": __import__("gui.i18n", fromlist=["t"]).t("msg.action_timeout"),
                     "state": self._ui_state(),
                 }))
 
@@ -191,7 +188,7 @@ class QmlHub:
                     if self._action_thread.isRunning():
                         return json.dumps({
                             "ok": False,
-                            "message": "Another hub action is still running.",
+                            "message": __import__("gui.i18n", fromlist=["t"]).t("msg.another_action_running"),
                             "state": self._ui_state(),
                         })
                     self._clear_action_state()
@@ -260,16 +257,13 @@ class QmlHub:
                     if enabled and not was_enabled:
                         if self._on_multi_instance_enabled:
                             self._on_multi_instance_enabled()
-                        message = (
-                            "Multi-instance enabled. Start bots from this tab. "
-                            "Restart the Hub if Discord/Telegram remote control does not pick up instances."
-                        )
+                        message = __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_enabled")
                     elif not enabled and was_enabled:
                         if self._on_multi_instance_disabled:
                             self._on_multi_instance_disabled()
-                        message = "Multi-instance disabled. Use START on Overview for single-instance mode."
+                        message = __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_disabled")
                     else:
-                        message = "Multi-instance setting saved."
+                        message = __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_saved")
                     self.instancesUpdated.emit()
                     return json.dumps({"ok": True, "message": message, "state": self._ui_state()})
                 except Exception as exc:
@@ -283,6 +277,7 @@ class QmlHub:
             @Slot(result=str)
             def calibratePerformance(self):
                 try:
+                    from gui.i18n import t
                     from performance_autotuner import calibrate_performance_profile
 
                     result = calibrate_performance_profile(seconds=2.0)
@@ -295,9 +290,10 @@ class QmlHub:
                     profile = result.get("recommended_profile", "balanced")
                     return json.dumps({
                         "ok": True,
-                        "message": (
-                            f"Calibration complete. Recommended profile: {profile} "
-                            f"(best capture: {result.get('best_capture', '?')}). Restart bots to apply."
+                        "message": t(
+                            "msg.calibration_complete",
+                            profile=profile,
+                            capture=result.get("best_capture", "?"),
                         ),
                         "state": self._ui_state(),
                     })
@@ -307,12 +303,14 @@ class QmlHub:
             @Slot(bool, result=str)
             def setAutoRestartCrashed(self, enabled):
                 try:
+                    from gui.i18n import t
+
                     self._store.set_auto_restart_crashed(bool(enabled))
                     self.instancesUpdated.emit()
-                    label = "enabled" if enabled else "disabled"
+                    message = t("msg.auto_restart_enabled") if enabled else t("msg.auto_restart_disabled")
                     return json.dumps({
                         "ok": True,
-                        "message": f"Auto-restart on crash {label}.",
+                        "message": message,
                         "state": self._ui_state(),
                     })
                 except Exception as exc:
@@ -331,35 +329,35 @@ class QmlHub:
             @Slot(str, result=str)
             def startInstance(self, instance_id):
                 if self._multi_instance_service is None:
-                    return self._instance_response(False, "Multi-instance service is not running.")
+                    return self._instance_response(False, __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down"))
                 ok, message, meta = self._multi_instance_service.start_instance(instance_id)
                 return self._instance_response(ok, message, meta)
 
             @Slot(str, result=str)
             def stopInstance(self, instance_id):
                 if self._multi_instance_service is None:
-                    return self._instance_response(False, "Multi-instance service is not running.")
+                    return self._instance_response(False, __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down"))
                 ok, message, meta = self._multi_instance_service.stop_instance(instance_id)
                 return self._instance_response(ok, message, meta)
 
             @Slot(str, result=str)
             def restartInstance(self, instance_id):
                 if self._multi_instance_service is None:
-                    return self._instance_response(False, "Multi-instance service is not running.")
+                    return self._instance_response(False, __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down"))
                 ok, message, meta = self._multi_instance_service.restart_instance(instance_id)
                 return self._instance_response(ok, message, meta)
 
             @Slot(result=str)
             def alignWindows(self):
                 if self._multi_instance_service is None:
-                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                    return json.dumps({"ok": False, "message": __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down")})
                 ok, message = self._multi_instance_service.align_windows()
                 return json.dumps({"ok": ok, "message": message, "state": self._ui_state()})
 
             @Slot(result=str)
             def startAllReadyInstances(self):
                 if self._multi_instance_service is None:
-                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                    return json.dumps({"ok": False, "message": __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down")})
                 results, message = self._multi_instance_service.start_all_ready()
                 self.instancesUpdated.emit()
                 return json.dumps({"ok": True, "message": message, "results": results, "state": self._ui_state()})
@@ -367,7 +365,7 @@ class QmlHub:
             @Slot(result=str)
             def stopAllInstances(self):
                 if self._multi_instance_service is None:
-                    return json.dumps({"ok": False, "message": "Multi-instance service is not running."})
+                    return json.dumps({"ok": False, "message": __import__("gui.i18n", fromlist=["t"]).t("msg.multi_instance_service_down")})
                 results, message = self._multi_instance_service.stop_all()
                 self.instancesUpdated.emit()
                 return json.dumps({"ok": True, "message": message, "results": results, "state": self._ui_state()})
@@ -388,6 +386,8 @@ class QmlHub:
             @Slot(str, result=str)
             def quickAddInstances(self, payload_json):
                 try:
+                    from gui.i18n import t
+
                     payload = json.loads(payload_json or "{}")
                     if self._multi_instance_service is None:
                         from gui.instance_config import quick_add_emulator_instances
@@ -400,7 +400,7 @@ class QmlHub:
                         created = self._multi_instance_service.quick_add_instances(payload)
                     return json.dumps({
                         "ok": True,
-                        "message": f"Added {len(created)} instance(s).",
+                        "message": t("msg.instances_added", count=len(created)),
                         "created": created,
                         "state": self._ui_state(),
                     })
@@ -420,23 +420,27 @@ class QmlHub:
             @Slot(str, result=str)
             def saveInstanceLocalSettings(self, payload_json):
                 try:
+                    from gui.i18n import t
+
                     payload = json.loads(payload_json or "{}")
                     instance_id = payload.get("id", "")
                     self._store.save_instance_local_settings(instance_id, payload)
-                    return json.dumps({"ok": True, "message": "Instance settings saved.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": t("msg.instance_settings_saved"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
             @Slot(str, result=str)
             def copyInstanceFarmPlan(self, payload_json):
                 try:
+                    from gui.i18n import t
+
                     payload = json.loads(payload_json or "{}")
                     self._store.copy_instance_farm_plan(
                         payload.get("id", ""),
                         payload.get("from_id", "default"),
                     )
                     self.queueChanged.emit()
-                    return json.dumps({"ok": True, "message": "Farm plan copied.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": t("msg.farm_plan_copied"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -450,6 +454,7 @@ class QmlHub:
             @Slot(str, result=str)
             def testInstanceWebhook(self, instance_id):
                 try:
+                    from gui.i18n import t
                     import asyncio
 
                     from discord_notifier import async_send_test_notification, load_instance_discord_settings
@@ -472,26 +477,30 @@ class QmlHub:
                         from discord_notifier import last_discord_error
 
                         raise ValueError(last_discord_error() or "Webhook test failed.")
-                    return json.dumps({"ok": True, "message": "Webhook test sent.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": t("msg.webhook_test_sent"), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
             @Slot(str, result=str)
             def saveInstanceProfile(self, payload_json):
                 try:
+                    from gui.i18n import t
+
                     payload = json.loads(payload_json or "{}")
                     profile = self._store.save_instance_profile(payload.get("id", ""), payload)
-                    return json.dumps({"ok": True, "message": f"Saved instance '{profile['id']}'.", "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": t("msg.instance_saved", id=profile["id"]), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
             @Slot(str, result=str)
             def deleteInstanceProfile(self, instance_id):
                 try:
+                    from gui.i18n import t
+
                     deleted = self._store.delete_instance_profile(instance_id)
                     if not deleted:
-                        return json.dumps({"ok": False, "message": f"Unknown instance '{instance_id}'.", "state": self._ui_state()})
-                    return json.dumps({"ok": True, "message": f"Deleted instance '{instance_id}'.", "state": self._ui_state()})
+                        return json.dumps({"ok": False, "message": t("msg.unknown_instance", id=instance_id), "state": self._ui_state()})
+                    return json.dumps({"ok": True, "message": t("msg.instance_deleted", id=instance_id), "state": self._ui_state()})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc), "state": self._ui_state()})
 
@@ -503,8 +512,15 @@ class QmlHub:
                 return json.dumps({"ok": True, "state": self._ui_state()})
 
             def _ui_state(self, preflight=None):
+                from gui.i18n import translate_preflight_checks
+
                 if preflight is None:
                     preflight = self._preflight_cache
+                if isinstance(preflight, dict) and preflight.get("checks"):
+                    preflight = {
+                        **preflight,
+                        "checks": translate_preflight_checks(preflight["checks"]),
+                    }
                 return self._store.ui_state(preflight=preflight, correct_zoom=self._correct_zoom)
 
             def _invalidate_preflight_cache(self):
@@ -654,22 +670,24 @@ class QmlHub:
                 import asyncio
                 import webbrowser
 
+                from gui.i18n import t, tutorial_doc_path
+
                 payload = {}
                 if payload_json:
                     payload = json.loads(payload_json)
 
                 if action == "discord-webhook-guide":
                     webbrowser.open("https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks")
-                    return "Opened Discord webhook guide."
+                    return t("msg.discord_webhook_guide")
                 if action == "discord-developer-portal":
                     webbrowser.open("https://discord.com/developers/applications")
-                    return "Opened Discord Developer Portal."
+                    return t("msg.discord_portal_opened")
                 if action == "telegram-botfather":
                     webbrowser.open("https://t.me/BotFather")
-                    return "Opened @BotFather."
+                    return t("msg.telegram_botfather_opened")
                 if action == "brawl-stars-developer":
                     webbrowser.open("https://developer.brawlstars.com/")
-                    return "Opened Brawl Stars Developer Portal."
+                    return t("msg.brawl_api_portal_opened")
                 if action == "discord-test":
                     from discord_notifier import (
                         async_send_test_notification,
@@ -682,14 +700,14 @@ class QmlHub:
                         raise ValueError(message)
                     ok = asyncio.run(async_send_test_notification())
                     if ok:
-                        return "Discord test sent."
+                        return t("msg.discord_test_sent")
                     reason = last_discord_error() or "Discord rejected the request."
-                    raise ValueError(f"Discord test failed. URL format is valid, but Discord rejected or blocked it: {reason}")
+                    raise ValueError(t("msg.discord_test_failed", reason=reason))
                 if action == "telegram-test":
                     from telegram_notifier import async_send_test_notification
 
                     ok = asyncio.run(async_send_test_notification())
-                    return "Telegram test sent." if ok else "Telegram test failed. Send /start once and check the token."
+                    return t("msg.telegram_test_sent") if ok else t("msg.telegram_test_failed")
                 if action == "telegram-find-chats":
                     from telegram_notifier import async_fetch_recent_chat_ids
 
@@ -705,10 +723,10 @@ class QmlHub:
                         from gui.hub_state import save_dict_as_toml
 
                         save_dict_as_toml(self._store.telegram_config, self._store.telegram_config_path)
-                        return f"Saved Telegram chat ID: {chat_ids[0]}"
+                        return t("msg.telegram_chat_saved", id=chat_ids[0])
                     if chat_ids:
-                        return "Found multiple chat IDs: " + ", ".join(chat_ids)
-                    return "No chats found. Send /start to the bot, then try again."
+                        return t("msg.telegram_chats_found", ids=", ".join(chat_ids))
+                    return t("msg.telegram_no_chats")
                 if action == "api-test":
                     from utils import (
                         brawl_stars_api_config_status,
@@ -744,7 +762,7 @@ class QmlHub:
                         self._store.brawl_stars_api_config,
                         self._store.brawl_stars_api_config_path,
                     )
-                    return f"API test passed for {name}. {status}"
+                    return t("msg.api_test_passed", name=name, status=status)
                 if action.startswith("profile-"):
                     from performance_profile import apply_performance_profile
 
@@ -758,7 +776,7 @@ class QmlHub:
                     self._store.general_config.update(result["general_config"])
                     self._store.bot_config.clear()
                     self._store.bot_config.update(result["bot_config"])
-                    return f"Applied {result['profile']} profile. Restart the bot to use it."
+                    return t("msg.profile_applied", profile=result["profile"])
                 if action == "calibrate-performance":
                     from performance_autotuner import calibrate_performance_profile
 
@@ -768,9 +786,10 @@ class QmlHub:
 
                     self._store.general_config.update(load_toml_as_dict(self._store.general_config_path))
                     profile = result.get("recommended_profile", "balanced")
-                    return (
-                        f"Calibration complete. Recommended profile: {profile} "
-                        f"(best capture: {result.get('best_capture', '?')}). Restart bots to apply."
+                    return t(
+                        "msg.calibration_complete",
+                        profile=profile,
+                        capture=result.get("best_capture", "?"),
                     )
                 if action == "preflight-check":
                     result = self._run_preflight()
@@ -778,14 +797,14 @@ class QmlHub:
                     for check in result["checks"]:
                         prefix = "OK" if check["ok"] else "WARN"
                         lines.append(f"{prefix}: {check['label']} - {check['detail']}")
-                    summary = "Ready to start." if result["ready"] else "Fix required checks before START."
+                    summary = t("msg.preflight_ready") if result["ready"] else t("msg.preflight_fix_required")
                     return summary + "\n" + "\n".join(lines)
                 if action == "preflight-fix":
                     from gui.preflight_fixes import run_preflight_fix
 
                     fix_action = str(payload.get("action", "") or "").strip()
                     if not fix_action:
-                        raise ValueError("Missing pre-flight fix action.")
+                        raise ValueError(t("msg.missing_fix_action"))
                     emulator, port = self._preflight_emulator_args()
                     ok, message = run_preflight_fix(fix_action, emulator=emulator, port=port)
                     self._run_preflight()
@@ -799,72 +818,72 @@ class QmlHub:
                     emulator, port = self._preflight_emulator_args()
                     ok, message = test_emulator_connection(emulator=emulator, port=port)
                     if ok:
-                        return f"Emulator connection OK: {message}"
-                    return f"Emulator connection failed: {message}"
+                        return t("msg.emulator_ok", detail=message)
+                    return t("msg.emulator_failed", detail=message)
                 if action == "export-history":
                     path = self._store.export_match_history_csv()
-                    return f"Match history exported to {path}"
+                    return t("msg.history_exported", path=path)
                 if action == "reset-history":
                     self._store.reset_match_history()
-                    return "Match history reset."
+                    return t("msg.history_reset")
                 if action == "refresh-history":
                     self._store.refresh_match_history()
-                    return "Match history refreshed."
+                    return t("msg.history_refreshed")
                 if action == "read-recovery-log":
                     from recovery_events import read_recent_events
 
                     events = read_recent_events(limit=10)
                     if not events:
-                        return "No recovery events logged yet."
+                        return t("msg.no_recovery_events")
                     lines = []
                     for event in events:
                         lines.append(
                             f"{event.get('ts', '')} {event.get('event_type', '')}: {event.get('detail', '')}"
                         )
-                    return "Recent recovery events:\n" + "\n".join(lines)
+                    return t("msg.recovery_events_header") + "\n" + "\n".join(lines)
                 if action == "import-queue":
                     path = _normalize_dialog_path(payload.get("path", ""))
                     if not path:
-                        return "Import cancelled."
+                        return t("msg.import_cancelled")
                     from gui.brawler_queue import load_queue, save_queue
 
                     queue = load_queue(path)
                     if not queue:
-                        raise ValueError("Selected file did not contain a brawler queue.")
+                        raise ValueError(t("msg.import_invalid"))
                     save_queue(queue)
-                    return f"Imported {len(queue)} brawler(s) from {Path(path).name}."
+                    return t("msg.imported_queue", count=len(queue), name=Path(path).name)
                 if action == "export-queue":
                     path = _normalize_dialog_path(payload.get("path", ""))
                     queue = self._store.load_queue()
                     if not queue:
-                        raise ValueError("Farm plan is empty.")
+                        raise ValueError(t("common.farm_plan_empty"))
                     if not path:
-                        return "Export cancelled."
+                        return t("msg.export_cancelled")
                     if not path.lower().endswith(".json"):
                         path = f"{path}.json"
                     from gui.brawler_queue import save_queue
 
                     save_queue(queue, path)
-                    return f"Exported {len(queue)} brawler(s) to {Path(path).name}."
+                    return t("msg.exported_queue", count=len(queue), name=Path(path).name)
                 if action == "clear-queue":
                     self._store.save_queue([])
-                    return "Farm plan cleared."
+                    return t("msg.farm_plan_cleared")
                 if action == "build-push-all":
                     target = int(payload.get("target", 1000) or 1000)
                     queue = self._store.build_push_all(target)
-                    return f"Built Push All queue with {len(queue)} brawler(s) to {target} trophies."
+                    return t("msg.push_all_built", count=len(queue), target=target)
                 if action == "sort-queue-by-trophies":
                     descending = str(payload.get("order", "desc")).strip().lower() != "asc"
                     queue = self._store.sort_queue_by_trophies(descending=descending)
-                    direction = "highest to lowest" if descending else "lowest to highest"
-                    return f"Sorted {len(queue)} brawler(s) by cups ({direction})."
+                    direction = t("msg.cups_high_to_low") if descending else t("msg.cups_low_to_high")
+                    return t("msg.sorted_by_cups", count=len(queue), direction=direction)
                 if action == "sort-queue":
                     from gui.brawler_queue import QUEUE_SORT_MODES
 
                     mode = str(payload.get("mode", "cups_desc") or "cups_desc").strip().lower()
                     queue, mode = self._store.sort_queue(mode=mode)
-                    label = QUEUE_SORT_MODES.get(mode, "sorted")
-                    return f"Sorted {len(queue)} brawler(s): {label}."
+                    label = t(f"sort.{mode}") if mode in QUEUE_SORT_MODES else t("common.sort")
+                    return t("msg.sorted_queue", count=len(queue), label=label)
                 if action == "add-to-queue":
                     from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 
@@ -872,7 +891,7 @@ class QmlHub:
                     queue = load_queue(queue_path)
                     queue.append(normalize_queue_row(payload))
                     persist_queue(queue, queue_path)
-                    return f"Added {payload.get('brawler', 'brawler')} to farm plan."
+                    return t("msg.added_to_queue", brawler=payload.get("brawler", t("common.brawler")))
                 if action == "remove-from-queue":
                     from gui.brawler_queue import load_queue, persist_queue
 
@@ -880,10 +899,10 @@ class QmlHub:
                     index = int(payload.get("index", -1))
                     queue = load_queue(queue_path)
                     if index < 0 or index >= len(queue):
-                        raise ValueError("Invalid queue index.")
+                        raise ValueError(t("msg.invalid_queue_index"))
                     removed = queue.pop(index)
                     persist_queue(queue, queue_path)
-                    return f"Removed {removed.get('brawler', 'brawler')} from farm plan."
+                    return t("msg.removed_from_queue", brawler=removed.get("brawler", t("common.brawler")))
                 if action == "move-queue-item":
                     from gui.brawler_queue import load_queue, persist_queue
 
@@ -897,7 +916,7 @@ class QmlHub:
                     item = queue.pop(index)
                     queue.insert(target, item)
                     persist_queue(queue, queue_path)
-                    return "Queue order updated."
+                    return t("msg.queue_order_updated")
                 if action == "reorder-queue":
                     from gui.brawler_queue import load_queue, persist_queue
 
@@ -910,11 +929,11 @@ class QmlHub:
                     if to_index < 0 or to_index >= len(queue):
                         raise ValueError("Invalid target queue index.")
                     if from_index == to_index:
-                        return "Queue order unchanged."
+                        return t("msg.queue_order_unchanged")
                     item = queue.pop(from_index)
                     queue.insert(to_index, item)
                     persist_queue(queue, queue_path)
-                    return "Queue order updated."
+                    return t("msg.queue_order_updated")
                 if action == "update-queue-item":
                     from gui.brawler_queue import load_queue, normalize_queue_row, persist_queue
 
@@ -922,7 +941,7 @@ class QmlHub:
                     index = int(payload.get("index", -1))
                     queue = load_queue(queue_path)
                     if index < 0 or index >= len(queue):
-                        raise ValueError("Invalid queue index.")
+                        raise ValueError(t("msg.invalid_queue_index"))
                     row = dict(queue[index])
                     if "push_until" in payload:
                         row["push_until"] = int(payload.get("push_until", row.get("push_until", 1000)) or 1000)
@@ -930,10 +949,10 @@ class QmlHub:
                         row["automatically_pick"] = bool(payload.get("automatically_pick"))
                     queue[index] = normalize_queue_row(row)
                     persist_queue(queue, queue_path)
-                    brawler = queue[index].get("brawler", "brawler")
-                    return f"Updated {brawler} target to {queue[index]['push_until']} trophies."
+                    brawler = queue[index].get("brawler", t("common.brawler"))
+                    return t("msg.updated_target", brawler=brawler, target=queue[index]["push_until"])
                 if action == "open-brawler-picker":
-                    return "Use Add Brawler in the farm plan tab."
+                    return t("msg.use_add_brawler")
                 if action == "open-config-folder":
                     import os
 
@@ -941,19 +960,19 @@ class QmlHub:
 
                     config_dir = Path(resolve_project_path("cfg")).resolve()
                     os.startfile(str(config_dir))
-                    return f"Opened {config_dir}"
+                    return t("msg.opened_folder", path=config_dir)
                 if action == "complete-wizard":
                     self._store.update_config("settings", "first_run_wizard", "no")
-                    return "First-run wizard dismissed."
+                    return t("msg.wizard_dismissed")
                 if action == "show-wizard":
                     return {
-                        "message": "Setup wizard reopened.",
+                        "message": t("msg.wizard_reopened"),
                         "showWizard": True,
                     }
                 if action == "reset-setup-wizard":
                     self._store.update_config("settings", "first_run_wizard", "yes")
                     return {
-                        "message": "Setup wizard will show again on next launch. Opening it now.",
+                        "message": t("msg.wizard_reset"),
                         "showWizard": True,
                     }
                 if action == "accept-license":
@@ -962,7 +981,7 @@ class QmlHub:
                     from utils import project_root
 
                     mark_hub_license_acknowledged(project_root())
-                    return "License accepted. Pyla-RL is free and must not be sold."
+                    return t("msg.license_accepted")
                 if action == "check-updates":
                     import webbrowser
 
@@ -971,22 +990,22 @@ class QmlHub:
                     webbrowser.open(f"{OFFICIAL_GITHUB}/releases")
                     updater_exe = Path("updater.exe")
                     if updater_exe.exists():
-                        return "Opened official GitHub releases. Run updater.exe in this folder to install updates."
-                    return "Opened official GitHub releases."
+                        return t("msg.updates_with_updater")
+                    return t("msg.updates_opened")
                 if action == "report-reseller":
                     import webbrowser
 
                     from gui.brand import RESELLER_REPORT_URL
 
                     webbrowser.open(RESELLER_REPORT_URL)
-                    return "Opened the official reseller report form."
+                    return t("msg.reseller_report_opened")
                 if action == "ensure-brawler-icons":
                     if self._icon_download_started:
-                        return "Downloading brawler icons..."
+                        return t("msg.icons_downloading")
                     self._icon_download_started = True
 
                     def download_icons():
-                        message = "Brawler icons ready."
+                        message = t("msg.icons_ready")
                         try:
                             from utils import resolve_project_path
 
@@ -998,9 +1017,9 @@ class QmlHub:
                             if brawlers:
                                 update_missing_brawlers_info(brawlers)
                             else:
-                                message = "Could not fetch brawler list for icon download."
+                                message = t("msg.icons_list_failed")
                         except Exception as exc:
-                            message = f"Brawler icon download failed: {exc}"
+                            message = t("msg.icons_download_failed", error=exc)
                         finally:
                             self._icon_download_started = False
                             self._store.invalidate_static_ui_cache()
@@ -1009,16 +1028,18 @@ class QmlHub:
                     import threading
 
                     threading.Thread(target=download_icons, daemon=True).start()
-                    return "Downloading brawler icons..."
-                raise ValueError(f"Unknown action: {action}")
+                    return t("msg.icons_downloading")
+                raise ValueError(t("msg.unknown_action", action=action))
 
             def _start_pyla_sync(self):
+                from gui.i18n import t
+
                 if not self._has_fresh_ready_preflight():
                     self._preflight_cache = self._run_preflight()
                 if not self._preflight_cache.get("ready"):
                     return json.dumps({
                         "ok": False,
-                        "message": "Pre-flight checks failed. Run checks on Overview and fix required items.",
+                        "message": t("msg.preflight_failed"),
                         "state": self._ui_state(),
                     })
                 self._store.apply_state({
@@ -1032,17 +1053,19 @@ class QmlHub:
                     persist_queue(queue)
                 return json.dumps({
                     "ok": True,
-                    "message": "Starting Pyla-RL...",
+                    "message": t("msg.starting_pyla"),
                     "state": self._ui_state(),
                     "closeHub": True,
                 })
 
             @Slot(result=str)
             def startPyla(self):
+                from gui.i18n import t
+
                 if self._settings_only:
                     return json.dumps({
                         "ok": False,
-                        "message": "START is disabled while the bot is running. Close this window when finished editing settings.",
+                        "message": t("msg.start_disabled_running"),
                         "state": self._ui_state(),
                     })
                 from gui.instance_config import is_multi_instance_enabled
@@ -1050,7 +1073,7 @@ class QmlHub:
                 if is_multi_instance_enabled():
                     return json.dumps({
                         "ok": True,
-                        "message": "Multi-instance mode is enabled. Start bots from the Instances tab.",
+                        "message": t("msg.start_multi_instance"),
                         "state": self._ui_state(),
                         "multiInstance": True,
                     })
@@ -1059,7 +1082,7 @@ class QmlHub:
                 if not _to_bool(self._store.general_config.get("license_accepted", "no")):
                     return json.dumps({
                         "ok": False,
-                        "message": "Accept the free-use license in the hub wizard or Settings → About before START.",
+                        "message": t("msg.license_required"),
                         "state": self._ui_state(),
                     })
                 return self._start_background_action("start-pyla", start_pyla=True)
@@ -1074,9 +1097,10 @@ class QmlHub:
             def openTutorialDoc(self, doc_path):
                 try:
                     from gui.hub_tutorials import open_tutorial_doc
+                    from gui.i18n import t, tutorial_doc_path
 
-                    path = open_tutorial_doc(doc_path)
-                    return json.dumps({"ok": True, "message": f"Opened {Path(path).name}"})
+                    path = open_tutorial_doc(tutorial_doc_path(doc_path))
+                    return json.dumps({"ok": True, "message": t("msg.opened_doc", name=Path(path).name)})
                 except Exception as exc:
                     return json.dumps({"ok": False, "message": str(exc)})
 

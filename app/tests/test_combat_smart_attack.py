@@ -102,10 +102,10 @@ class CombatSmartAttackTests(unittest.TestCase):
         play.attack(touch_up=False, touch_down=True)
         play.window_controller.press.assert_called_once_with("attack", touch_up=False, touch_down=True)
 
-    def test_smart_aim_disabled_falls_back_to_tap_without_aimed_attacks(self):
+    def test_smart_aim_disabled_falls_back_to_center_tap(self):
         play = self._make_play()
         play.smart_aim_enabled = "no"
-        play.aimed_attacks_enabled = "no"
+        play.aimed_attacks_enabled = "yes"
         play._combat_target = {
             "player_pos": (50, 50),
             "pos": (300, 50),

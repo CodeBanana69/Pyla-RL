@@ -58,6 +58,7 @@ class HubStateStore:
         "cpu_or_gpu": ("general", "str"),
         "directml_device_id": ("general", "str"),
         "ui_theme": ("general", "str"),
+        "ui_language": ("general", "str"),
         "ui_animations": ("general", "yesno"),
         "long_press_star_drop": ("general", "yesno"),
         "terminal_logging": ("general", "yesno"),
@@ -215,7 +216,7 @@ class HubStateStore:
             return self._cached_static_meta
 
         from gui.brawler_queue import brawler_icon_uri, load_push_order
-        from gui.hub_tutorials import tutorial_topics
+        from gui.i18n import localized_tutorial_topics
         from gui.official_source import read_build_info, verify_official_source
         from performance_profile import PERFORMANCE_PROFILES
         from utils import get_brawler_list, get_playstyles_list
@@ -240,7 +241,7 @@ class HubStateStore:
                 {"name": name, "icon": brawler_icon_uri(name)}
                 for name in brawler_names
             ],
-            "tutorials": tutorial_topics(),
+            "tutorials": localized_tutorial_topics(),
             "playstyles": [
                 {
                     "filename": item.get("filename", ""),
@@ -315,6 +316,7 @@ class HubStateStore:
         self.general_config.setdefault("cpu_or_gpu", "auto")
         self.general_config.setdefault("directml_device_id", "auto")
         self.general_config.setdefault("ui_theme", "system")
+        self.general_config.setdefault("ui_language", "en")
         self.general_config.setdefault("ui_animations", "yes")
         self.general_config.setdefault("long_press_star_drop", "no")
         self.general_config.setdefault("terminal_logging", "no")
@@ -426,11 +428,15 @@ class HubStateStore:
 
     def ui_state(self, preflight=None, correct_zoom=True):
         from gui.brawler_queue import load_queue, queue_state_items
+        from gui.i18n import get_language, qml_strings
 
         state = self.initial_state()
         if preflight is None:
             preflight = {"ready": False, "checks": []}
+        language = get_language()
         state.update({
+            "language": language,
+            "strings": qml_strings(language),
             "settings": self._settings_state(),
             "discord": dict(self.discord_config),
             "telegram": self._telegram_state(),
@@ -692,6 +698,11 @@ class HubStateStore:
             save_dict_as_toml(self.time_tresholds, self.time_tresholds_path)
         else:
             raise KeyError(section)
+        if section == "settings" and key == "ui_language":
+            from gui.i18n import clear_catalog_cache
+
+            clear_catalog_cache()
+            self.invalidate_static_ui_cache()
         return self.ui_state()
 
     def export_match_history_csv(self):

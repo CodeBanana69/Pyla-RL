@@ -650,38 +650,44 @@ def quick_add_emulator_instances(
 
 
 def compute_instance_readiness(instance_id: str) -> dict[str, Any]:
+    from gui.i18n import t
+
     profile = get_instance_profile(instance_id)
     if not profile:
-        return {"status": "unknown", "message": f"Unknown instance '{instance_id}'."}
+        return {"status": "unknown", "message": t("instances.readiness_unknown", id=instance_id)}
 
     collision = find_port_collision(instance_id, profile["emulator_port"])
     if collision:
         return {
             "status": "port_conflict",
-            "message": f"Port {profile['emulator_port']} is used by '{collision}'.",
+            "message": t(
+                "instances.readiness_port_conflict",
+                port=profile["emulator_port"],
+                collision=collision,
+            ),
             "collision_with": collision,
         }
 
     if not int(profile.get("emulator_port", 0) or 0):
-        return {"status": "no_emulator", "message": "No emulator port assigned."}
+        return {"status": "no_emulator", "message": t("instances.readiness_no_port")}
 
     if not queue_has_data(instance_id=instance_id):
         default_queue = Path(default_queue_path())
         if default_queue.exists() and queue_has_data(default_queue):
             return {
                 "status": "needs_farm_plan",
-                "message": "No farm plan yet. Copy from Default or edit the farm plan.",
+                "message": t("instances.readiness_no_plan_copy"),
                 "can_copy_default": True,
             }
         return {
             "status": "needs_farm_plan",
-            "message": "No farm plan yet. Add brawlers on the Farm Plan tab.",
+            "message": t("instances.readiness_no_plan_add"),
             "can_copy_default": False,
         }
 
     return {
         "status": "ready",
-        "message": "Ready to start.",
+        "message": t("instances.readiness_ready"),
         "queue_count": queue_brawler_count(instance_id),
     }
 

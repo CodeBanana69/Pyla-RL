@@ -206,9 +206,26 @@ def python_info(command):
     return None
 
 
+def _venv_pip_usable(venv_python: Path) -> bool:
+    try:
+        result = subprocess.run(
+            [str(venv_python), "-m", "pip", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def ensure_project_venv(project_dir: Path, python_command: list[str]) -> tuple[list[str], str]:
     venv_dir = project_dir / ".venv"
     venv_python = venv_dir / "Scripts" / "python.exe"
+    if venv_python.exists() and not _venv_pip_usable(venv_python):
+        print("Project .venv has a broken pip install. Recreating it...")
+        shutil.rmtree(venv_dir, ignore_errors=True)
+        venv_python = venv_dir / "Scripts" / "python.exe"
     if not venv_python.exists():
         print(f"Creating project virtual environment at {venv_dir}...")
         run(python_command + ["-m", "venv", str(venv_dir)])
@@ -336,8 +353,8 @@ def main():
     install_vc_redist()
     if progress_window:
         progress_window.update("Upgrading pip and setuptools...")
-    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip", "wheel"])
-    run(venv_command + ["-m", "pip", "install", "setuptools>=70,<82"])
+    run(venv_command + ["-m", "pip", "install", "setuptools>=70,<82", "wheel"])
+    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip"])
     run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"])
     subprocess.run(venv_command + ["-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
     run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-python==4.8.0.76"])

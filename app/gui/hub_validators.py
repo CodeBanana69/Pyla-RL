@@ -70,3 +70,7 @@ def validate_config_value(section, key, value):
     if section == "settings" and key == "ui_theme" and text:
         if text.lower() not in {"light", "dark", "system"}:
             raise ValueError("Theme must be light, dark, or system.")
+
+    if section == "settings" and key == "ui_language" and text:
+        if text.lower() not in {"en", "ru"}:
+            raise ValueError("Language must be en or ru.")

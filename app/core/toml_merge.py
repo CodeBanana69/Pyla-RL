@@ -126,5 +126,38 @@ def merge_toml_text(new_text: str, old_text: str) -> str:
     return dedupe_toml_text("\n".join(merged_lines).rstrip() + "\n")
 
 
+def repair_unquoted_windows_paths(text: str) -> str:
+    """Quote bare Windows paths so TOML parsers do not treat backslashes as escapes."""
+    output: list[str] = []
+    changed = False
+    for line in text.splitlines():
+        match = _TOML_KEY_PATTERN.match(line)
+        if not match:
+            output.append(line)
+            continue
+        prefix, raw_key, equals, raw_value = match.groups()
+        value, comment = split_toml_value_and_comment(raw_value.strip())
+        if not value or value[0] in ('"', "'"):
+            output.append(line)
+            continue
+        needs_quotes = "\\" in value or (
+            len(value) >= 2 and value[1] == ":" and value[0].isalpha()
+        )
+        if not needs_quotes:
+            output.append(line)
+            continue
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        suffix = f" {comment}" if comment and not comment.startswith(" ") else comment
+        key = normalize_toml_key(raw_key)
+        output.append(f"{prefix}{key}{equals}\"{escaped}\"{suffix}")
+        changed = True
+    if not changed:
+        return text
+    result = "\n".join(output)
+    if text.endswith("\n"):
+        result += "\n"
+    return result
+
+
 def repair_toml_text(text: str) -> str:
-    return dedupe_toml_text(text)
+    return repair_unquoted_windows_paths(dedupe_toml_text(text))

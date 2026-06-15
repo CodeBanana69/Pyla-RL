@@ -347,16 +347,16 @@ cached_toml = {}
 
 
 def _load_toml_file(resolved_file_path: str):
-    from core.toml_merge import dedupe_toml_text, parse_simple_toml
+    from core.toml_merge import dedupe_toml_text, parse_simple_toml, repair_unquoted_windows_paths
 
     with open(resolved_file_path, "r", encoding="utf-8-sig") as handle:
         text = handle.read()
     try:
         return toml.loads(text)
     except toml.decoder.TomlDecodeError as exc:
-        if "Duplicate" not in str(exc):
-            raise
         repaired = dedupe_toml_text(text)
+        if repaired == text:
+            repaired = repair_unquoted_windows_paths(text)
         if repaired != text:
             with open(resolved_file_path, "w", encoding="utf-8") as handle:
                 handle.write(repaired)
@@ -367,7 +367,11 @@ def _load_toml_file(resolved_file_path: str):
             flat = parse_simple_toml(text)
             if flat:
                 return flat
-            raise exc
+            raise toml.decoder.TomlDecodeError(
+                f"{resolved_file_path}: {exc}. "
+                "If you edited a config path, use double quotes, e.g. "
+                'ldplayer_console_path = "C:\\\\Users\\\\name\\\\LDPlayer\\\\ldconsole.exe".',
+            ) from exc
 
 
 def load_toml_as_dict(file_path):
