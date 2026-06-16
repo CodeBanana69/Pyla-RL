@@ -13,6 +13,7 @@ from tools.setup_bootstrap import (
     run,
     _venv_pip_usable,
 )
+from tools.easyocr_runtime import EASYOCR_REPAIR_HINT, probe_easyocr_runtime, verify_easyocr_runtime
 from tools.python_runtime import probe_runtime_imports, verify_runtime_imports, write_setup_status
 
 
@@ -53,6 +54,9 @@ def needs_full_setup(project_dir: Path) -> tuple[bool, str]:
         return True, runtime.get("error") or "required runtime imports failed"
     if not _probe_pyside6(venv_command):
         return True, "PySide6 is not installed in project .venv"
+    easyocr = probe_easyocr_runtime(venv_command, smoke_test=False)
+    if not easyocr.get("ok"):
+        return True, easyocr.get("error") or "easyocr runtime imports failed"
     return False, ""
 
 
@@ -99,13 +103,14 @@ def run_full_project_setup(
     run(venv_command + ["setup.py", "--pyla-install"], cwd=app_bundle, env=env)
 
     if progress_callback:
-        progress_callback("Verifying EasyOCR runtime...")
+        progress_callback("Verifying EasyOCR runtime (may download models)...")
     try:
-        run(venv_command + ["-c", "import skimage; import easyocr"], cwd=app_bundle)
-    except SystemExit:
+        verify_easyocr_runtime(venv_command)
+    except RuntimeError as exc:
         print("")
-        print("EasyOCR verification failed. Re-run setup or install missing packages with:")
-        print(f'  "{venv_executable}" -m pip install scikit-image ninja pyclipper python-bidi Shapely')
+        print(str(exc))
+        print("")
+        print(EASYOCR_REPAIR_HINT)
         return False
 
     from tools.hub_first_run import ensure_hub_first_run_wizard
@@ -127,10 +132,13 @@ def run_full_project_setup(
         return False
 
     versions = runtime_info.get("versions") or {}
+    easyocr_versions = (probe_easyocr_runtime(venv_command, smoke_test=False).get("versions") or {})
     write_setup_status(
         app_bundle,
         python_executable=venv_executable,
         cv2_version=str(versions.get("cv2", "")),
+        easyocr_verified=True,
+        torch_version=str(easyocr_versions.get("torch", "")),
     )
     ensure_hub_first_run_wizard(app_bundle)
     create_run_file(project_dir, python_executable=venv_executable)

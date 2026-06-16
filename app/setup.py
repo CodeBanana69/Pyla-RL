@@ -96,8 +96,6 @@ def setup_pyla():
         [sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
         check=False,
     )
-    if not auto_setup:
-        force_install(["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cpu"])
     base_reqs = [
         "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
@@ -105,11 +103,9 @@ def setup_pyla():
         "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0",
     ]
     force_install(base_reqs)
-    force_install(["easyocr"], no_deps=True)
-    # EasyOCR is installed without pip deps to avoid opencv-python-headless conflicts.
-    force_install([
-        "scikit-image", "ninja", "pyclipper", "python-bidi", "Shapely",
-    ])
+    from tools.easyocr_runtime import install_easyocr_stack
+
+    install_easyocr_stack([sys.executable])
 
     target, ver, name = get_gpu_data()
     status_pytorch, status_accel = "CPU Edition", "N/A"
@@ -213,6 +209,10 @@ def setup_pyla():
     print(f"OpenCV verified: {cv2.__version__} ({sys.executable})")
     print(f"Pandas verified: {pd.__version__} ({sys.executable})")
     print(f"ONNX Runtime verified: {ort.__version__} providers={ort.get_available_providers()}")
+    from tools.easyocr_runtime import verify_easyocr_runtime
+
+    verify_easyocr_runtime([sys.executable])
+    print(f"EasyOCR verified: Reader initialized (CPU) ({sys.executable})")
     # the setup completes
     os.system('cls')
     print("="*50)

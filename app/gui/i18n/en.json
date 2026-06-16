@@ -156,7 +156,9 @@
     "release_version": "Latest release: v{version}",
     "run_updater": "Run updater",
     "refresh_status": "Refresh",
-    "no_updater": "updater.exe not found — use update.cmd or download from GitHub"
+    "launcher_hint": "Launcher: {launcher}",
+    "no_launcher_hint": "No updater found in the install folder. Download Pyla-RL from GitHub or run update.cmd.",
+    "no_updater": "No updater found — place updater.exe or update.cmd in the install folder"
   },
   "theme": {
     "light": "light",
@@ -553,6 +555,8 @@
     "updates_with_updater": "Opened official GitHub releases. Run updater.exe in this folder to install updates.",
     "updates_opened": "Opened official GitHub releases.",
     "updater_launched": "Updater started. Follow the prompts in the updater window.",
+    "updater_launched_cmd": "Started update.cmd. Follow the prompts in the console window.",
+    "updater_launched_dev": "Started the built-in updater script.",
     "update_status_refreshed": "Update status refreshed.",
     "reseller_report_opened": "Opened the official reseller report form.",
     "icons_downloading": "Downloading brawler icons...",
@@ -609,6 +613,11 @@
     "gpu_inference": {
       "label": "GPU ONNX inference",
       "detail_ok": "Inference provider: {provider}"
+    },
+    "easyocr": {
+      "label": "EasyOCR (brawler selection)",
+      "detail_ok": "EasyOCR ready (torch {torch})",
+      "detail_fail": "EasyOCR is missing or broken — re-run setup.exe in the project folder. {error}"
     },
     "fix": {
       "reconnect_adb": "Reconnect ADB",

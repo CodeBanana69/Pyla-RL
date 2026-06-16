@@ -12,6 +12,7 @@ for path in (APP, ROOT):
         sys.path.insert(0, str(path))
 
 from tools.launcher_bat import candidate_python_commands
+from tools.easyocr_runtime import probe_easyocr_runtime
 from tools.python_runtime import probe_cv2, probe_runtime_imports, read_python_pin, setup_status_path
 
 
@@ -25,6 +26,7 @@ def main() -> int:
         print(f"Pinned Python (cfg/pyla_python.txt): {pin}")
         print(f"  cv2: {probe_cv2([pin])}")
         print(f"  runtime: {probe_runtime_imports([pin])}")
+        print(f"  easyocr: {probe_easyocr_runtime([pin], smoke_test=True)}")
         print()
 
     status_path = setup_status_path(ROOT)
@@ -38,6 +40,7 @@ def main() -> int:
         print(f".venv Python: {venv_python}")
         print(f"  cv2: {probe_cv2([str(venv_python)])}")
         print(f"  runtime: {probe_runtime_imports([str(venv_python)])}")
+        print(f"  easyocr: {probe_easyocr_runtime([str(venv_python)], smoke_test=True)}")
         print()
 
     print("Launcher candidates:")
@@ -45,10 +48,12 @@ def main() -> int:
         print(f"  [{label}] {' '.join(command)}")
         print(f"    cv2: {probe_cv2(command)}")
         print(f"    runtime: {probe_runtime_imports(command)}")
+        print(f"    easyocr: {probe_easyocr_runtime(command, smoke_test=True)}")
     print()
     print(f"Current interpreter: {sys.executable}")
     print(f"  cv2: {probe_cv2([sys.executable])}")
     print(f"  runtime: {probe_runtime_imports([sys.executable])}")
+    print(f"  easyocr: {probe_easyocr_runtime([sys.executable], smoke_test=True)}")
     return 0
 
 

@@ -448,6 +448,8 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("updateStatusRefreshed", hub_py)
         self.assertIn("refresh-update-status", hub_py)
         self.assertIn("launch-updater", hub_py)
+        self.assertIn("resolve_install_dir", hub_py)
+        self.assertNotIn("check_update_status(project_root())", hub_py)
 
     def test_qml_anti_reseller_ui_contract(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")

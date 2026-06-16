@@ -20,7 +20,7 @@ echo.
 
 if exist "app\cfg\pyla_python.txt" (
     set /p PYLA_PY=<app\cfg\pyla_python.txt
-    "%PYLA_PY%" -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()" >nul 2>&1
+    "%PYLA_PY%" -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers(); import easyocr, scipy, skimage, torch" >nul 2>&1
     if not errorlevel 1 (
         set "PY=%PYLA_PY%"
         goto :run
@@ -30,7 +30,7 @@ if exist "app\cfg\pyla_python.txt" (
 )
 
 if exist "app\.venv\Scripts\python.exe" (
-    "app\.venv\Scripts\python.exe" -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()" >nul 2>&1
+    "app\.venv\Scripts\python.exe" -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers(); import easyocr, scipy, skimage, torch" >nul 2>&1
     if not errorlevel 1 (
         set "PY=app\.venv\Scripts\python.exe"
         goto :run
@@ -69,14 +69,14 @@ pause
 exit /b 1
 
 :precheck
-%PY% -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()" >nul 2>&1
+%PY% -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers(); import easyocr, scipy, skimage, torch" >nul 2>&1
 if not errorlevel 1 goto :run
 
 :run
 echo Using: %PY%
 echo.
 
-%PY% -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()" >nul 2>&1
+%PY% -c "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers(); import easyocr, scipy, skimage, torch" >nul 2>&1
 if errorlevel 1 (
     echo Dependencies are not installed for this Python.
     echo.

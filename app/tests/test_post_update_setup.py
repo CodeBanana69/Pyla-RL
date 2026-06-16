@@ -34,6 +34,24 @@ class PostUpdateSetupTest(unittest.TestCase):
             self.assertTrue(needs)
             self.assertIn("cv2", reason)
 
+    def test_needs_full_setup_when_easyocr_probe_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            bundle = project / "app"
+            venv_scripts = bundle / ".venv" / "Scripts"
+            venv_scripts.mkdir(parents=True)
+            (venv_scripts / "python.exe").write_text("", encoding="utf-8")
+            with patch("tools.post_update_setup._venv_pip_usable", return_value=True), patch(
+                "tools.post_update_setup.probe_runtime_imports",
+                return_value={"ok": True},
+            ), patch("tools.post_update_setup._probe_pyside6", return_value=True), patch(
+                "tools.post_update_setup.probe_easyocr_runtime",
+                return_value={"ok": False, "error": "easyocr: missing"},
+            ):
+                needs, reason = needs_full_setup(project)
+            self.assertTrue(needs)
+            self.assertIn("easyocr", reason)
+
     def test_needs_full_setup_skips_when_healthy(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
@@ -44,7 +62,10 @@ class PostUpdateSetupTest(unittest.TestCase):
             with patch("tools.post_update_setup._venv_pip_usable", return_value=True), patch(
                 "tools.post_update_setup.probe_runtime_imports",
                 return_value={"ok": True},
-            ), patch("tools.post_update_setup._probe_pyside6", return_value=True):
+            ), patch("tools.post_update_setup._probe_pyside6", return_value=True), patch(
+                "tools.post_update_setup.probe_easyocr_runtime",
+                return_value={"ok": True},
+            ):
                 needs, reason = needs_full_setup(project)
             self.assertFalse(needs)
             self.assertEqual(reason, "")

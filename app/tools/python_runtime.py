@@ -183,12 +183,21 @@ def verify_runtime_imports(python_command: list[str]) -> dict:
     return result
 
 
-def write_setup_status(project_dir: Path, *, python_executable: str, cv2_version: str) -> Path:
+def write_setup_status(
+    project_dir: Path,
+    *,
+    python_executable: str,
+    cv2_version: str,
+    easyocr_verified: bool = False,
+    torch_version: str = "",
+) -> Path:
     status_path = setup_status_path(project_dir)
     status_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "python_executable": python_executable,
         "cv2_version": cv2_version,
+        "easyocr_verified": bool(easyocr_verified),
+        "torch_version": torch_version,
         "verified_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     status_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")

@@ -2688,42 +2688,39 @@ ApplicationWindow {
                     Rectangle {
                         id: updatePill
                         z: 2
-                        width: Math.max(updatePillRow.implicitWidth + 16, 62)
+                        width: Math.max(updatePillRow.implicitWidth + 10, 28)
                         height: 28
                         radius: 8
                         color: {
                             if (root.updatePillStatus === "available") {
-                                return updateMouse.containsMouse ? theme.accentSoft : theme.warnSoft
+                                return updateMouse.containsMouse ? theme.accentSoft : theme.accentSoft
                             }
-                            if (updateMouse.containsMouse) {
-                                return theme.hover
-                            }
-                            return theme.panel2
+                            return updateMouse.containsMouse ? theme.hover : "transparent"
                         }
-                        border.width: 1
-                        border.color: root.updatePillStatus === "available" ? theme.accentBorder : theme.borderSoft
+                        border.width: root.updatePillStatus === "available" ? 1 : 0
+                        border.color: theme.accentBorder
 
                         Row {
                             id: updatePillRow
                             anchors.centerIn: parent
-                            spacing: 5
+                            spacing: 4
                             Rectangle {
-                                width: 6
-                                height: 6
-                                radius: 3
+                                width: 5
+                                height: 5
+                                radius: 2.5
                                 color: root.updatePillDotColor()
                             }
                             Text {
                                 text: root.updatePillGlyph()
                                 color: root.updatePillStatus === "available" ? theme.accent : theme.muted
-                                font.pixelSize: 11
+                                font.pixelSize: 10
                                 font.weight: Font.Bold
                             }
                             Text {
                                 text: root.updatePillLabel()
-                                color: root.updatePillStatus === "available" ? theme.accent : theme.text
+                                color: root.updatePillStatus === "available" ? theme.text : theme.muted
                                 font.pixelSize: 10
-                                font.weight: Font.DemiBold
+                                font.weight: Font.Bold
                             }
                         }
 
@@ -4835,11 +4832,30 @@ ApplicationWindow {
                 font.pixelSize: 10
             }
 
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.updaterLauncher)
+                text: root.t("update.launcher_hint", { launcher: hubState.updateStatus.updaterLauncher })
+                color: theme.faint
+                font.pixelSize: 10
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && !hubState.updateStatus.hasUpdater)
+                text: root.t("update.no_launcher_hint")
+                color: theme.accent
+                font.pixelSize: 10
+            }
+
             Flow {
                 spacing: 8
                 width: parent.width
                 HubButton {
                     label: root.t("update.run_updater")
+                    visible: !!(hubState.updateStatus && hubState.updateStatus.hasUpdater)
                     onClicked: {
                         root.runAction("launch-updater")
                         updatePopover.close()

@@ -140,10 +140,9 @@ class QmlHub:
 
                 def work():
                     try:
-                        from gui.hub_update_status import check_update_status
-                        from utils import project_root
+                        from gui.hub_update_status import check_update_status, resolve_install_dir
 
-                        status = check_update_status(project_root())
+                        status = check_update_status(resolve_install_dir())
                     except Exception:
                         return
 
@@ -1017,23 +1016,17 @@ class QmlHub:
                         return t("msg.updates_with_updater")
                     return t("msg.updates_opened")
                 if action == "refresh-update-status":
-                    from gui.hub_update_status import check_update_status
-                    from utils import project_root
+                    from gui.hub_update_status import check_update_status, resolve_install_dir
 
-                    self._store.set_update_status(check_update_status(project_root()))
+                    self._store.set_update_status(check_update_status(resolve_install_dir()))
                     return t("msg.update_status_refreshed")
                 if action == "launch-updater":
-                    from utils import project_root
+                    from gui.hub_update_status import launch_updater
 
-                    updater_exe = Path(project_root()) / "updater.exe"
-                    if updater_exe.is_file():
-                        subprocess.Popen(
-                            [str(updater_exe)],
-                            cwd=str(project_root()),
-                            close_fds=True,
-                        )
-                        return t("msg.updater_launched")
-                    return t("update.no_updater")
+                    ok, message = launch_updater()
+                    if ok:
+                        return message
+                    return message
                 if action == "report-reseller":
                     import webbrowser
 

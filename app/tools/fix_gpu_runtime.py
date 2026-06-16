@@ -32,7 +32,6 @@ BASE_REQUIREMENTS = [
     "requests",
     "ultralytics",
     "aiohttp>=3.9.0,<3.14",
-    "easyocr",
     "google-play-scraper",
     "pyautogui>=0.9.54",
     "packaging>=23.0",
@@ -64,6 +63,10 @@ def install_base_requirements():
         "https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip",
         "--no-deps",
     ])
+    from tools.easyocr_runtime import install_easyocr_stack, verify_easyocr_runtime
+
+    install_easyocr_stack([sys.executable])
+    verify_easyocr_runtime([sys.executable])
 
 
 def detect_graphics_cards():

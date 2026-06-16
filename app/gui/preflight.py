@@ -286,6 +286,36 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
         "recommended",
     ))
 
+    easyocr_ok = False
+    easyocr_detail = "EasyOCR not checked"
+    try:
+        from tools.python_runtime import resolve_project_python_executable
+        from tools.easyocr_runtime import probe_easyocr_runtime
+
+        python_executable = resolve_project_python_executable()
+        if python_executable:
+            probe = probe_easyocr_runtime([python_executable], smoke_test=False)
+            easyocr_ok = bool(probe.get("ok"))
+            if easyocr_ok:
+                versions = probe.get("versions") or {}
+                easyocr_detail = (
+                    f"EasyOCR ready (torch {versions.get('torch', 'unknown')})"
+                )
+            else:
+                easyocr_detail = str(probe.get("error") or "EasyOCR imports failed")
+        else:
+            easyocr_detail = "Project Python not found — run setup.exe first"
+    except Exception as exc:
+        easyocr_detail = f"EasyOCR check failed: {exc}"
+
+    checks.append(_check_item(
+        "easyocr",
+        "EasyOCR (brawler selection)",
+        easyocr_ok,
+        easyocr_detail,
+        "required",
+    ))
+
     gpu_ok = True
     gpu_detail = "GPU inference not checked"
     gpu_fix = None

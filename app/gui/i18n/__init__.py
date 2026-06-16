@@ -181,4 +181,10 @@ def _translate_preflight_detail(item_id: str, detail: str, ok: bool) -> str:
         return t("preflight.emulator.missing", emulator=emulator)
     if item_id == "adb" and detail.startswith("ADB device "):
         return t("preflight.adb.label", serial=detail.replace("ADB device ", "", 1))
+    if item_id == "easyocr":
+        if ok and detail.startswith("EasyOCR ready (torch "):
+            torch_version = detail.replace("EasyOCR ready (torch ", "", 1).rstrip(")")
+            return t("preflight.easyocr.detail_ok", torch=torch_version)
+        if not ok:
+            return t("preflight.easyocr.detail_fail", error=detail)
     return detail

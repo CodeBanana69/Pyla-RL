@@ -156,7 +156,9 @@
     "release_version": "Последний релиз: v{version}",
     "run_updater": "Запустить updater",
     "refresh_status": "Обновить",
-    "no_updater": "updater.exe не найден — используйте update.cmd или скачайте с GitHub"
+    "launcher_hint": "Запуск: {launcher}",
+    "no_launcher_hint": "Updater не найден в папке установки. Скачайте Pyla-RL с GitHub или запустите update.cmd.",
+    "no_updater": "Updater не найден — поместите updater.exe или update.cmd в папку установки"
   },
   "theme": {
     "light": "светлая",
@@ -553,6 +555,8 @@
     "updates_with_updater": "Открыты официальные релизы GitHub. Запустите updater.exe в этой папке для установки обновлений.",
     "updates_opened": "Открыты официальные релизы GitHub.",
     "updater_launched": "Updater запущен. Следуйте подсказкам в окне обновления.",
+    "updater_launched_cmd": "Запущен update.cmd. Следуйте подсказкам в консоли.",
+    "updater_launched_dev": "Запущен встроенный скрипт обновления.",
     "update_status_refreshed": "Статус обновления обновлён.",
     "reseller_report_opened": "Открыта официальная форма сообщения о перепродаже.",
     "icons_downloading": "Загрузка иконок бравлеров...",
@@ -609,6 +613,11 @@
     "gpu_inference": {
       "label": "GPU ONNX-инференс",
       "detail_ok": "Провайдер инференса: {provider}"
+    },
+    "easyocr": {
+      "label": "EasyOCR (выбор бойца)",
+      "detail_ok": "EasyOCR готов (torch {torch})",
+      "detail_fail": "EasyOCR отсутствует или повреждён — снова запустите setup.exe в папке проекта. {error}"
     },
     "fix": {
       "reconnect_adb": "Переподключить ADB",

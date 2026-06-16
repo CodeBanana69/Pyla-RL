@@ -132,14 +132,45 @@ class SetupBootstrapTests(unittest.TestCase):
 
     def test_setup_splits_easyocr_from_core_batch(self):
         source = Path("app/setup.py").read_text(encoding="utf-8")
+        easyocr_source = Path("app/tools/easyocr_runtime.py").read_text(encoding="utf-8")
 
         core_start = source.index("base_reqs = [")
         core_end = source.index("]", core_start)
         core_block = source[core_start:core_end]
         self.assertNotIn("easyocr", core_block)
         self.assertIn('"pandas>=2.0.0"', core_block)
-        self.assertIn('force_install(["easyocr"], no_deps=True)', source)
-        self.assertIn('"scikit-image"', source)
+        self.assertIn("install_easyocr_stack", source)
+        self.assertIn('"scipy"', easyocr_source)
+        self.assertIn('"PyYAML"', easyocr_source)
+
+    def test_setup_verifies_easyocr_reader(self):
+        source = Path("app/setup.py").read_text(encoding="utf-8")
+        self.assertIn("verify_easyocr_runtime", source)
+        self.assertIn("EasyOCR verified: Reader initialized (CPU)", source)
+
+    def test_post_update_setup_verifies_easyocr_runtime(self):
+        source = Path("app/tools/post_update_setup.py").read_text(encoding="utf-8")
+        self.assertIn("verify_easyocr_runtime", source)
+        self.assertNotIn('import skimage; import easyocr', source)
+
+    def test_post_update_needs_full_setup_checks_easyocr(self):
+        source = Path("app/tools/post_update_setup.py").read_text(encoding="utf-8")
+        self.assertIn("probe_easyocr_runtime", source)
+
+    def test_launcher_includes_easyocr_import_check(self):
+        source = Path("app/tools/launcher_bat.py").read_text(encoding="utf-8")
+        self.assertIn("import easyocr, scipy, skimage, torch", source)
+        launcher = Path("pyla-rl.bat").read_text(encoding="utf-8")
+        self.assertIn("import easyocr, scipy, skimage, torch", launcher)
+
+    def test_fix_gpu_runtime_uses_shared_easyocr_install(self):
+        source = Path("app/tools/fix_gpu_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("install_easyocr_stack", source)
+        self.assertIn("verify_easyocr_runtime", source)
+        base_start = source.index("BASE_REQUIREMENTS = [")
+        base_end = source.index("]", base_start)
+        base_block = source[base_start:base_end]
+        self.assertNotIn('"easyocr"', base_block)
 
 
 if __name__ == "__main__":

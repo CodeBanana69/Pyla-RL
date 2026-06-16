@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 RUN_BAT_NAME = "pyla-rl.bat"
-_RUNTIME_IMPORT_CHECK = "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers()"
+_RUNTIME_IMPORT_CHECK = (
+    "import cv2, pandas; import onnxruntime as ort; ort.get_available_providers(); "
+    "import easyocr, scipy, skimage, torch"
+)
 LEGACY_BAT_NAMES = (
     "Run Pyla-RL.bat",
     "Run PylaAi-XXZ.bat",
