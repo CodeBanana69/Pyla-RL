@@ -389,7 +389,7 @@ class LobbyAutomation:
     def _normalize_grid_label(self, raw_text):
         normalized = self.resolve_ocr_typos(self.normalize_ocr_name(raw_text))
         normalized = self._ocr_name_from_brawler_ref(normalized)
-        if len(normalized) <= 4:
+        if len(normalized) <= 8:
             fixed = normalized.translate(self._ocr_digit_fixes())
             fixed = self.resolve_ocr_typos(fixed)
             fixed = self._ocr_name_from_brawler_ref(fixed)
@@ -453,7 +453,7 @@ class LobbyAutomation:
             score = self.name_match_score(detected_name, target_key) + min(entry["confidence"], 0.99) * 0.05
             matches.append((score, detected_name, entry["box"], entry["text"]))
 
-        if not matches and len(target_key) <= 5:
+        if not matches and len(target_key) <= 6:
             for entry in entries:
                 raw_text = str(entry.get("text", "")).strip()
                 if not raw_text:

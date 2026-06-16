@@ -35,6 +35,21 @@ class GridNameMatchTests(unittest.TestCase):
         automation.known_brawler_names = {"nita", "barley", "colt"}
         self.assertFalse(automation._is_confident_grid_name_match("barley", "nita"))
 
+    def test_meeple_ocr_aliases_match(self):
+        import utils as utils_module
+
+        utils_module._brawler_name_aliases = None
+        automation = LobbyAutomation.__new__(LobbyAutomation)
+        automation.known_brawler_names = {"meeple", "melodie", "ollie"}
+        target = automation._brawler_target_key("meeple")
+        for raw in ("meepe1", "meepel", "meepei", "meepie", "m33ple"):
+            detected = automation._normalize_grid_label(raw)
+            self.assertEqual(detected, "meeple", msg=f"{raw!r} should normalize to meeple")
+            self.assertTrue(
+                automation._is_confident_grid_name_match(detected, target),
+                msg=f"{raw!r} should confidently match meeple",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
