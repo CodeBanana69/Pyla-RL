@@ -30,7 +30,7 @@ EASYOCR_REPAIR_HINT = (
 
 
 def _probe_script(*, smoke_test: bool) -> str:
-    smoke = "true" if smoke_test else "false"
+    smoke = "True" if smoke_test else "False"
     return (
         "import json, sys\n"
         f"smoke_test = {smoke}\n"

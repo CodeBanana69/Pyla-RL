@@ -35,7 +35,7 @@ class EasyOCRRuntimeTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["versions"]["torch"], "2.1.0")
         mock_run.assert_called_once()
-        self.assertIn("smoke_test = false", mock_run.call_args.args[0][-1])
+        self.assertIn("smoke_test = False", mock_run.call_args.args[0][-1])
 
     @patch("tools.easyocr_runtime.subprocess.run")
     def test_probe_easyocr_runtime_smoke_test_flag(self, mock_run):
@@ -45,7 +45,7 @@ class EasyOCRRuntimeTest(unittest.TestCase):
             stderr="",
         )
         probe_easyocr_runtime(["python"], smoke_test=True)
-        self.assertIn("smoke_test = true", mock_run.call_args.args[0][-1])
+        self.assertIn("smoke_test = True", mock_run.call_args.args[0][-1])
 
     @patch("tools.easyocr_runtime.probe_easyocr_runtime")
     def test_verify_easyocr_runtime_raises_on_failure(self, mock_probe):
