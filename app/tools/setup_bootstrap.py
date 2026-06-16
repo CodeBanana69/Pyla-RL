@@ -335,8 +335,6 @@ def main():
         return 1
 
     print(f"Using Python: {python_executable}")
-    venv_command, venv_executable = ensure_project_venv(app_bundle, python_command)
-    print(f"Project venv: {venv_executable}")
     progress_window = None
     if os.environ.get("PYLAAI_SETUP_GUI", "").strip().lower() in {"1", "yes", "true", "on"}:
         try:
@@ -351,56 +349,15 @@ def main():
         return 0
 
     install_vc_redist()
-    if progress_window:
-        progress_window.update("Upgrading pip and setuptools...")
-    run(venv_command + ["-m", "pip", "install", "setuptools>=70,<82", "wheel"])
-    run(venv_command + ["-m", "pip", "install", "--upgrade", "pip"])
-    run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"])
-    subprocess.run(venv_command + ["-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-python==4.8.0.76"])
+    from tools.post_update_setup import run_full_project_setup
 
-    env = os.environ.copy()
-    env["PYLAAI_SETUP_AUTO"] = "1"
-    if progress_window:
-        progress_window.update("Installing Pyla-RL dependencies and GPU runtime...")
-    run(venv_command + ["setup.py", "--pyla-install"], cwd=app_bundle, env=env)
-
-    if progress_window:
-        progress_window.update("Verifying EasyOCR runtime...")
-    try:
-        run(venv_command + ["-c", "import skimage; import easyocr"], cwd=app_bundle)
-    except SystemExit:
-        print("")
-        print("EasyOCR verification failed. Re-run setup or install missing packages with:")
-        print(f'  "{venv_executable}" -m pip install scikit-image ninja pyclipper python-bidi Shapely')
+    if not run_full_project_setup(
+        project_dir,
+        progress_callback=progress_window.update if progress_window else None,
+        interactive=True,
+        install_vc_redist=None,
+    ):
         return 1
-
-    from tools.hub_first_run import ensure_hub_first_run_wizard
-    from tools.launcher_bat import create_run_file
-    from tools.python_runtime import verify_runtime_imports, write_setup_status
-
-    try:
-        runtime_info = verify_runtime_imports(venv_command)
-    except RuntimeError as exc:
-        print("")
-        print(str(exc))
-        print("")
-        print("Setup did not finish cleanly. Try running:")
-        print(f'  "{venv_executable}" -m pip install pandas>=2.0.0')
-        print(f'  "{venv_executable}" -m pip install --force-reinstall --no-deps opencv-python==4.8.0.76')
-        print(f'  "{venv_executable}" tools\\fix_gpu_runtime.py auto')
-        print(f'  "{venv_executable}" tools\\check_runtime.py')
-        input("Press Enter to close...")
-        return 1
-
-    versions = runtime_info.get("versions") or {}
-    write_setup_status(
-        app_bundle,
-        python_executable=venv_executable,
-        cv2_version=str(versions.get("cv2", "")),
-    )
-    ensure_hub_first_run_wizard(app_bundle)
-    create_run_file(project_dir, python_executable=venv_executable)
 
     print("")
     print("Pyla-RL setup completed.")

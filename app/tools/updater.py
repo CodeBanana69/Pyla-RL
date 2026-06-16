@@ -48,12 +48,13 @@ ROOT_LAUNCHER_BINARIES = (
     "updater.exe",
 )
 
-ROOT_LAUNCHER_FILES = {
-    *ROOT_LAUNCHER_BINARIES,
+ROOT_LAUNCHER_FILES_ON_UPDATE = (
     "pyla-rl.bat",
     "readme.md",
     "README.md",
-}
+    "setup.cmd",
+    "update.cmd",
+)
 
 OBSOLETE_FILES = {
     "downgrader.exe",
@@ -158,22 +159,18 @@ def schedule_pending_launcher_finalize(project_dir: Path) -> bool:
 
 
 def copy_root_launcher_files(source_install: Path, project_install: Path) -> list[str]:
+    """Refresh text launchers from the update zip. Frozen exes stay on disk."""
     updated: list[str] = []
-    pending: list[str] = []
-    for name in ROOT_LAUNCHER_BINARIES:
+    for name in ROOT_LAUNCHER_FILES_ON_UPDATE:
         source = source_install / name
         if not source.is_file():
             continue
-        result = stage_launcher_update(project_install, name, source)
-        if result == "pending":
-            pending.append(name)
-            print(f"Staged {name} (will finish after this updater closes)")
-        else:
-            updated.append(name)
-            print(f"Updated {name}")
-    if pending and schedule_pending_launcher_finalize(project_install):
-        print("A short helper will install the new updater.exe after this window closes.")
-    return updated + pending
+        destination = project_install / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        updated.append(name)
+        print(f"Updated {name}")
+    return updated
 
 
 def wait_for_enter(prompt="Press Enter to close...") -> None:
@@ -663,6 +660,7 @@ def main() -> int:
         print("Use --list-versions to show recent main commits you can pass to --ref.")
         print("Use --force to reinstall even when this folder is already current.")
         print("Use --smoke-test to verify that updater.exe starts.")
+        print("Use --skip-setup to install files only without dependency repair.")
         return 0
 
     project_dir = app_dir()
@@ -732,14 +730,22 @@ def main() -> int:
     try:
         url, label = download_url_for_ref(selected_ref) if selected_ref else latest_download_url()
         install_from_zip(project_dir, url, label, marker_sha=latest_sha, selected_ref=selected_ref)
+        setup_result = None
+        if "--skip-setup" not in sys.argv:
+            from tools.post_update_setup import run_post_update_setup
+
+            setup_result = run_post_update_setup(project_dir)
         print("")
         if selected_ref:
             print(f"Version switch completed: {selected_ref}")
         else:
             print("Update completed.")
         print("Your cfg settings were kept, with new config keys added.")
-        print("setup.exe and updater.exe were updated when included in the downloaded package.")
-        print("Run setup.exe if the update added new dependencies.")
+        if setup_result is not None:
+            print(setup_result.message)
+            if not setup_result.ok:
+                wait_for_enter()
+                return 1
         wait_for_enter()
         return 0
     except Exception as exc:

@@ -69,6 +69,7 @@ class UpdaterTest(unittest.TestCase):
             )
             (project / "updater.exe").write_text("old updater", encoding="utf-8")
             (project / "setup.exe").write_text("old setup", encoding="utf-8")
+            (project / "pyla-rl.bat").write_text("old bat", encoding="utf-8")
             (project / "downgrader.exe").write_text("old downgrader", encoding="utf-8")
 
             (source / "app" / "cfg").mkdir(parents=True)
@@ -85,6 +86,7 @@ class UpdaterTest(unittest.TestCase):
             )
             (source / "updater.exe").write_text("new updater", encoding="utf-8")
             (source / "setup.exe").write_text("new setup", encoding="utf-8")
+            (source / "pyla-rl.bat").write_text("new bat", encoding="utf-8")
             (source / "downgrader.exe").write_text("new downgrader", encoding="utf-8")
             (source / "adb.exe").write_text("new adb", encoding="utf-8")
             (source / "app" / "cfg" / "telegram_config.local.toml").write_text('bot_token = "BAD"\n', encoding="utf-8")
@@ -112,8 +114,9 @@ class UpdaterTest(unittest.TestCase):
             self.assertIn('"old_only": true', custom_state)
             self.assertIn('"default": 2', custom_state)
             self.assertIn('"user": 1', custom_state)
-            self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "new updater")
-            self.assertEqual((project / "setup.exe").read_text(encoding="utf-8"), "new setup")
+            self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "old updater")
+            self.assertEqual((project / "setup.exe").read_text(encoding="utf-8"), "old setup")
+            self.assertEqual((project / "pyla-rl.bat").read_text(encoding="utf-8"), "new bat")
             self.assertFalse((project / "downgrader.exe").exists())
             self.assertFalse((project / "adb.exe").exists())
             self.assertFalse((project / "app" / "cfg" / "telegram_config.local.toml").exists())
@@ -225,6 +228,12 @@ class UpdaterTest(unittest.TestCase):
                 '"selected_ref": "abc123"',
                 (project / "app" / "cfg" / "update_info.json").read_text(encoding="utf-8"),
             )
+
+    def test_updater_runs_post_update_setup_and_documents_skip_flag(self):
+        source = Path("app/tools/updater.py").read_text(encoding="utf-8")
+        self.assertIn("run_post_update_setup", source)
+        self.assertIn("--skip-setup", source)
+        self.assertNotIn("Run setup.exe if the update added new dependencies.", source)
 
 
 if __name__ == "__main__":

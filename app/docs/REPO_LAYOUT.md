@@ -6,8 +6,9 @@ Quick map of where code and data live in Pyla-RL. Project overview: [README](../
 
 | Path | Purpose |
 |------|---------|
-| `setup.exe` | One-click Windows setup |
-| `updater.exe` | GitHub update installer |
+| `setup.exe` | Thin launcher for one-click Windows setup (runs `app/tools/setup_bootstrap.py`) |
+| `updater.exe` | Thin launcher for GitHub updates (runs `app/tools/updater.py`) |
+| `setup.cmd` / `update.cmd` | Script fallbacks if exes are unavailable |
 | `pyla-rl.bat` | Canonical launcher |
 | [`README.md`](../../README.md) | GitHub landing page |
 | [`app/`](../) | **Everything else** — code, cfg, tools, docs, assets |

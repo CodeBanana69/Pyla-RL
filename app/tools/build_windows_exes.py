@@ -13,8 +13,8 @@ BUILD_DIR = INSTALL_ROOT / "build" / "pyinstaller"
 DIST_DIR = INSTALL_ROOT / "dist" / "windows_exes"
 
 TARGETS: tuple[tuple[str, Path], ...] = (
-    ("setup.exe", BUNDLE / "tools" / "setup_bootstrap.py"),
-    ("updater.exe", BUNDLE / "tools" / "updater.py"),
+    ("setup.exe", BUNDLE / "tools" / "frozen_launcher_setup.py"),
+    ("updater.exe", BUNDLE / "tools" / "frozen_launcher_updater.py"),
 )
 
 
@@ -44,8 +44,6 @@ def build_exe(exe_name: str, script: Path) -> Path:
             str(BUILD_DIR),
             "--paths",
             str(BUNDLE),
-            "--paths",
-            str(INSTALL_ROOT),
             str(script),
         ]
     )

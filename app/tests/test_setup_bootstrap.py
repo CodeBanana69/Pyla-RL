@@ -4,11 +4,12 @@ from pathlib import Path
 
 class SetupBootstrapTests(unittest.TestCase):
     def test_setup_bootstrap_uses_modern_pyla_install_command(self):
-        source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
+        bootstrap = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
+        post_update = Path("app/tools/post_update_setup.py").read_text(encoding="utf-8")
 
-        self.assertIn('"--pyla-install"', source)
-        self.assertNotIn('["setup.py", "install"]', source)
-        self.assertNotIn('"install"]', source)
+        self.assertIn("run_full_project_setup", bootstrap)
+        self.assertIn('"--pyla-install"', post_update)
+        self.assertNotIn('["setup.py", "install"]', post_update)
 
     def test_setup_py_supports_direct_pyla_install_mode(self):
         source = Path("app/setup.py").read_text(encoding="utf-8")
@@ -62,7 +63,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertNotIn("create_run_file()", source)
 
     def test_setup_bootstrap_uses_shared_launcher_helper(self):
-        source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
+        source = Path("app/tools/post_update_setup.py").read_text(encoding="utf-8")
 
         self.assertIn("from tools.launcher_bat import create_run_file", source)
         self.assertIn("create_run_file(project_dir", source)
@@ -90,24 +91,24 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("PYLAAI_SETUP_AUTO", source)
 
     def test_setup_bootstrap_installs_into_project_venv(self):
-        source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
+        source = Path("app/tools/post_update_setup.py").read_text(encoding="utf-8")
 
         self.assertIn("ensure_project_venv", source)
         self.assertIn("verify_runtime_imports", source)
-        self.assertIn("bundle_dir / \"setup.py\"", source)
-        self.assertIn("cwd=bundle_dir", source)
-        self.assertIn("tools\\\\fix_gpu_runtime.py auto", source)
+        self.assertIn('["setup.py", "--pyla-install"]', source)
+        self.assertIn("cwd=app_bundle", source)
 
     def test_general_config_template_requires_first_run_wizard(self):
-        source = Path("cfg/general_config.toml").read_text(encoding="utf-8")
+        source = Path("app/gui/hub_state.py").read_text(encoding="utf-8")
 
-        self.assertIn('first_run_wizard = "yes"', source)
-        self.assertIn('license_accepted = "no"', source)
+        self.assertIn('setdefault("first_run_wizard", "yes")', source)
+        self.assertIn('setdefault("license_accepted", "no")', source)
 
-    def test_setup_bootstrap_prepares_hub_first_run_wizard(self):
+    def test_setup_bootstrap_delegates_to_post_update_setup(self):
         source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
 
-        self.assertIn("ensure_hub_first_run_wizard", source)
+        self.assertIn("from tools.post_update_setup import run_full_project_setup", source)
+        self.assertIn("run_full_project_setup(", source)
 
     def test_main_repairs_numpy_before_importing_cv2(self):
         source = Path("app/main.py").read_text(encoding="utf-8")
