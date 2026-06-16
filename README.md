@@ -5,7 +5,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white)](https://github.com/CodeBanana69/Pyla-RL)
 [![Focus](https://img.shields.io/badge/mode-Showdown%20(trio)-FF9F0A)](README.md#features)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/xUusk3fw4A)
-[![GitHub stars](https://img.shields.io/github/stars/CodeBanana69/Pyla-RL?style=social)](https://github.com/CodeBanana69/Pyla-RL)
+[![GitHub stars](https://badgen.net/github/stars/CodeBanana69/Pyla-RL?label=stars&icon=github)](https://github.com/CodeBanana69/Pyla-RL/stargazers)
 
 **Showdown-focused Brawl Stars bot for Windows** — LDPlayer and MuMu, **aimbot** (smart lead aim), **dodgebot** (combat strafe dodge), analog joystick movement, farm-plan queue, and remote control from Discord or Telegram.
 

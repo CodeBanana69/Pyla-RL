@@ -4,15 +4,61 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import json
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = ROOT / "docs" / "assets"
 MAX_WIDTH = 1280
 HUB_STARTUP_SECONDS = 4.0
+FARM_PLAN_STARTUP_SECONDS = 5.5
+
+SAMPLE_README_QUEUE = [
+    {
+        "brawler": "shelly",
+        "push_until": 1000,
+        "trophies": 248,
+        "type": "trophies",
+        "wins": 0,
+        "automatically_pick": True,
+        "selection_method": "named_brawler",
+        "win_streak": 0,
+    },
+    {
+        "brawler": "colt",
+        "push_until": 1000,
+        "trophies": 715,
+        "type": "trophies",
+        "wins": 0,
+        "automatically_pick": True,
+        "selection_method": "named_brawler",
+        "win_streak": 0,
+    },
+    {
+        "brawler": "nita",
+        "push_until": 1000,
+        "trophies": 903,
+        "type": "trophies",
+        "wins": 0,
+        "automatically_pick": True,
+        "selection_method": "named_brawler",
+        "win_streak": 0,
+    },
+    {
+        "brawler": "spike",
+        "push_until": 1250,
+        "trophies": 1089,
+        "type": "trophies",
+        "wins": 0,
+        "automatically_pick": True,
+        "selection_method": "named_brawler",
+        "win_streak": 0,
+    },
+]
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -150,6 +196,25 @@ def stop_process(process: subprocess.Popen | None) -> None:
         process.kill()
 
 
+@contextmanager
+def seeded_readme_queue():
+    """Temporarily write a demo farm plan for README screenshots."""
+    from gui.instance_config import get_queue_path
+
+    queue_path = get_queue_path()
+    backup = queue_path.read_text(encoding="utf-8") if queue_path.exists() else None
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text(json.dumps(SAMPLE_README_QUEUE, indent=2) + "\n", encoding="utf-8")
+    try:
+        yield queue_path
+    finally:
+        if backup is None:
+            if queue_path.exists():
+                queue_path.unlink()
+        else:
+            queue_path.write_text(backup, encoding="utf-8")
+
+
 def launch_control_window() -> subprocess.Popen:
     state_dir = ROOT / "logs"
     state_dir.mkdir(exist_ok=True)
@@ -168,14 +233,20 @@ def launch_control_window() -> subprocess.Popen:
     )
 
 
-def capture_hub_asset(output_name: str, initial_tab: str | None, wait_seconds: float, launch: bool) -> Path:
+def capture_hub_asset(
+    output_name: str,
+    initial_tab: str | None,
+    wait_seconds: float,
+    launch: bool,
+    startup_seconds: float = HUB_STARTUP_SECONDS,
+) -> Path:
     hub_process = None
     try:
         if launch:
             label = initial_tab or "Overview"
             print(f"Launching Pyla-RL Hub ({label})...")
             hub_process = launch_hub(initial_tab)
-            time.sleep(HUB_STARTUP_SECONDS)
+            time.sleep(startup_seconds)
         return capture_window_title("Pyla-RL Hub", output_name, wait_seconds=wait_seconds)
     finally:
         stop_process(hub_process)
@@ -227,7 +298,16 @@ def main() -> None:
             if target == "hub-overview":
                 saved.append(capture_hub_asset("hub-overview.png", None, args.wait, launch))
             elif target == "hub-farm-plan":
-                saved.append(capture_hub_asset("hub-farm-plan.png", "Farm Plan", args.wait, launch))
+                with seeded_readme_queue():
+                    saved.append(
+                        capture_hub_asset(
+                            "hub-farm-plan.png",
+                            "Farm Plan",
+                            args.wait,
+                            launch,
+                            startup_seconds=FARM_PLAN_STARTUP_SECONDS,
+                        )
+                    )
             elif target == "control-window":
                 saved.append(capture_control_asset(args.wait, launch))
     except Exception as exc:
