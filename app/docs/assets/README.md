@@ -6,6 +6,7 @@ Images used on the main [README](../../README.md) gallery.
 |------|--------|-----------------|
 | `hub-overview.png` | Hub **Overview** tab — pre-flight checks, header **update pill**, performance profile | Hub layout, Overview tab, or header chrome changes |
 | `hub-farm-plan.png` | Hub **Farm Plan** tab — queue builder and presets | Farm Plan UI changes |
+| `readme-sample-queue.json` | Demo farm plan used when capturing `hub-farm-plan.png` | Queue row layout changes |
 | `control-window.png` | **Pyla-RL Control** — status pill, pause/resume, IPS graph, session strip | Control window layout, chrome, or metrics strip changes |
 
 ## Capture
@@ -22,6 +23,6 @@ Options:
 - `--no-launch` — capture from already-open windows
 - `--wait 25` — seconds to wait for each window
 
-Farm Plan uses `gui.qml_hub --initial-tab "Farm Plan"` and temporarily seeds `data/latest_brawler_data.json` with demo brawlers for the screenshot.
+Farm Plan uses `gui.qml_hub --initial-tab "Farm Plan" --demo-queue docs/assets/readme-sample-queue.json`.
 
 Prerequisites for clean Hub shots: `license_accepted = "yes"` and `first_run_wizard = "no"` in local `cfg/general_config.toml` (do not commit local config).

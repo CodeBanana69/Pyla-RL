@@ -181,6 +181,7 @@ class HubStateStore:
             telegram_config_path="cfg/telegram_config.local.toml",
             brawl_stars_api_base_config_path="cfg/brawl_stars_api.toml",
             brawl_stars_api_config_path="cfg/brawl_stars_api.local.toml",
+            queue_path_override=None,
     ):
         self.bot_config_path = bot_config_path
         self.general_config_path = general_config_path
@@ -191,6 +192,11 @@ class HubStateStore:
         self.telegram_config_path = telegram_config_path
         self.brawl_stars_api_base_config_path = brawl_stars_api_base_config_path
         self.brawl_stars_api_config_path = brawl_stars_api_config_path
+        self._queue_path_override = (
+            Path(queue_path_override).resolve()
+            if queue_path_override
+            else None
+        )
         self.editing_instance_id = ""
         self.bot_config = load_toml_as_dict(bot_config_path)
         self.general_config = load_toml_as_dict(general_config_path)
@@ -561,6 +567,9 @@ class HubStateStore:
         return self.ui_state()
 
     def _active_queue_path(self):
+        if self._queue_path_override is not None:
+            return self._queue_path_override
+
         from gui.instance_config import get_default_instance_id, get_queue_path, is_multi_instance_enabled
 
         if is_multi_instance_enabled():

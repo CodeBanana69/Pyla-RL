@@ -76,6 +76,7 @@ class QmlHub:
             on_close_callback=None,
             settings_only=False,
             initial_tab="",
+            demo_queue_path="",
     ):
         os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window=false")
         ensure_pyside6_available()
@@ -1173,6 +1174,7 @@ class QmlHub:
         self.on_close_callback = on_close_callback
         self.settings_only = settings_only
         self.initial_tab = str(initial_tab or "").strip()
+        self.demo_queue_path = str(demo_queue_path or "").strip()
         self.started = False
 
         app = QGuiApplication.instance()
@@ -1187,7 +1189,9 @@ class QmlHub:
 
         from gui import brand
 
-        self._store = HubStateStore()
+        self._store = HubStateStore(
+            queue_path_override=self.demo_queue_path or None,
+        )
         self._multi_instance_service = None
 
         def _start_multi_instance_service():
@@ -1239,6 +1243,7 @@ class QmlHub:
         context.setContextProperty("latestVersion", self.latest_version_str or "")
         context.setContextProperty("correctZoom", self.correct_zoom)
         context.setContextProperty("initialTab", self.initial_tab)
+        context.setContextProperty("hubCaptureMode", bool(self.demo_queue_path))
         context.setContextProperty("hubBrand", {
             "productName": brand.PRODUCT_NAME,
             "freeNotice": brand.FREE_NOTICE,
@@ -1297,9 +1302,20 @@ def main():
         default="",
         help="Open directly on a Hub tab (e.g. 'Farm Plan'). Used by screenshot capture.",
     )
+    parser.add_argument(
+        "--demo-queue",
+        default="",
+        help="Load farm plan queue from a fixed JSON file (screenshot capture).",
+    )
     args = parser.parse_args()
     version = str(load_toml_as_dict("cfg/general_config.toml").get("pyla_version", "0.8.1"))
-    QmlHub(version, version, settings_only=args.settings_only, initial_tab=args.initial_tab)
+    QmlHub(
+        version,
+        version,
+        settings_only=args.settings_only,
+        initial_tab=args.initial_tab,
+        demo_queue_path=args.demo_queue,
+    )
 
 
 if __name__ == "__main__":

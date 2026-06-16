@@ -4,61 +4,17 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import json
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = ROOT / "docs" / "assets"
+DEMO_QUEUE_PATH = ASSETS_DIR / "readme-sample-queue.json"
 MAX_WIDTH = 1280
 HUB_STARTUP_SECONDS = 4.0
-FARM_PLAN_STARTUP_SECONDS = 5.5
-
-SAMPLE_README_QUEUE = [
-    {
-        "brawler": "shelly",
-        "push_until": 1000,
-        "trophies": 248,
-        "type": "trophies",
-        "wins": 0,
-        "automatically_pick": True,
-        "selection_method": "named_brawler",
-        "win_streak": 0,
-    },
-    {
-        "brawler": "colt",
-        "push_until": 1000,
-        "trophies": 715,
-        "type": "trophies",
-        "wins": 0,
-        "automatically_pick": True,
-        "selection_method": "named_brawler",
-        "win_streak": 0,
-    },
-    {
-        "brawler": "nita",
-        "push_until": 1000,
-        "trophies": 903,
-        "type": "trophies",
-        "wins": 0,
-        "automatically_pick": True,
-        "selection_method": "named_brawler",
-        "win_streak": 0,
-    },
-    {
-        "brawler": "spike",
-        "push_until": 1250,
-        "trophies": 1089,
-        "type": "trophies",
-        "wins": 0,
-        "automatically_pick": True,
-        "selection_method": "named_brawler",
-        "win_streak": 0,
-    },
-]
+FARM_PLAN_STARTUP_SECONDS = 6.0
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -117,7 +73,6 @@ def capture_hwnd(hwnd: int):
     mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
     bitmap = gdi32.CreateCompatibleBitmap(hwnd_dc, width, height)
     gdi32.SelectObject(mem_dc, bitmap)
-    # PW_RENDERFULLCONTENT helps with layered / custom chrome windows.
     if not user32.PrintWindow(hwnd, mem_dc, 2):
         user32.PrintWindow(hwnd, mem_dc, 0)
 
@@ -168,17 +123,22 @@ def capture_window_title(title_substring: str, output_name: str, wait_seconds: f
     if hwnd is None:
         raise RuntimeError(f"No visible window matching '{title_substring}' within {wait_seconds:.0f}s")
 
-    time.sleep(0.6)
+    time.sleep(0.8)
     image = capture_hwnd(hwnd)
     path = save_asset(image, output_name)
     print(f"Saved {path} ({image.width}x{image.height}) from hwnd={hwnd}")
     return path
 
 
-def launch_hub(initial_tab: str | None = None) -> subprocess.Popen:
+def launch_hub(initial_tab: str | None = None, demo_queue: Path | None = None) -> subprocess.Popen:
+    if demo_queue is not None and not demo_queue.is_file():
+        raise FileNotFoundError(f"Demo queue file not found: {demo_queue}")
+
     cmd = [sys.executable, "-m", "gui.qml_hub"]
     if initial_tab:
         cmd.extend(["--initial-tab", initial_tab])
+    if demo_queue is not None:
+        cmd.extend(["--demo-queue", str(demo_queue.resolve())])
     return subprocess.Popen(
         cmd,
         cwd=str(ROOT),
@@ -194,25 +154,6 @@ def stop_process(process: subprocess.Popen | None) -> None:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired:
         process.kill()
-
-
-@contextmanager
-def seeded_readme_queue():
-    """Temporarily write a demo farm plan for README screenshots."""
-    from gui.instance_config import get_queue_path
-
-    queue_path = get_queue_path()
-    backup = queue_path.read_text(encoding="utf-8") if queue_path.exists() else None
-    queue_path.parent.mkdir(parents=True, exist_ok=True)
-    queue_path.write_text(json.dumps(SAMPLE_README_QUEUE, indent=2) + "\n", encoding="utf-8")
-    try:
-        yield queue_path
-    finally:
-        if backup is None:
-            if queue_path.exists():
-                queue_path.unlink()
-        else:
-            queue_path.write_text(backup, encoding="utf-8")
 
 
 def launch_control_window() -> subprocess.Popen:
@@ -239,13 +180,15 @@ def capture_hub_asset(
     wait_seconds: float,
     launch: bool,
     startup_seconds: float = HUB_STARTUP_SECONDS,
+    demo_queue: Path | None = None,
 ) -> Path:
     hub_process = None
     try:
         if launch:
             label = initial_tab or "Overview"
-            print(f"Launching Pyla-RL Hub ({label})...")
-            hub_process = launch_hub(initial_tab)
+            queue_note = f", demo queue" if demo_queue else ""
+            print(f"Launching Pyla-RL Hub ({label}{queue_note})...")
+            hub_process = launch_hub(initial_tab, demo_queue=demo_queue)
             time.sleep(startup_seconds)
         return capture_window_title("Pyla-RL Hub", output_name, wait_seconds=wait_seconds)
     finally:
@@ -298,16 +241,16 @@ def main() -> None:
             if target == "hub-overview":
                 saved.append(capture_hub_asset("hub-overview.png", None, args.wait, launch))
             elif target == "hub-farm-plan":
-                with seeded_readme_queue():
-                    saved.append(
-                        capture_hub_asset(
-                            "hub-farm-plan.png",
-                            "Farm Plan",
-                            args.wait,
-                            launch,
-                            startup_seconds=FARM_PLAN_STARTUP_SECONDS,
-                        )
+                saved.append(
+                    capture_hub_asset(
+                        "hub-farm-plan.png",
+                        "Farm Plan",
+                        args.wait,
+                        launch,
+                        startup_seconds=FARM_PLAN_STARTUP_SECONDS,
+                        demo_queue=DEMO_QUEUE_PATH,
                     )
+                )
             elif target == "control-window":
                 saved.append(capture_control_asset(args.wait, launch))
     except Exception as exc:

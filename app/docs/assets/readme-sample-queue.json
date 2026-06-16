@@ -1,0 +1,42 @@
+[
+  {
+    "brawler": "shelly",
+    "push_until": 1000,
+    "trophies": 248,
+    "type": "trophies",
+    "wins": 0,
+    "automatically_pick": true,
+    "selection_method": "named_brawler",
+    "win_streak": 0
+  },
+  {
+    "brawler": "colt",
+    "push_until": 1000,
+    "trophies": 715,
+    "type": "trophies",
+    "wins": 0,
+    "automatically_pick": true,
+    "selection_method": "named_brawler",
+    "win_streak": 0
+  },
+  {
+    "brawler": "nita",
+    "push_until": 1000,
+    "trophies": 903,
+    "type": "trophies",
+    "wins": 0,
+    "automatically_pick": true,
+    "selection_method": "named_brawler",
+    "win_streak": 0
+  },
+  {
+    "brawler": "spike",
+    "push_until": 1250,
+    "trophies": 1089,
+    "type": "trophies",
+    "wins": 0,
+    "automatically_pick": true,
+    "selection_method": "named_brawler",
+    "win_streak": 0
+  }
+]

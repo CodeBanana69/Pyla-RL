@@ -620,6 +620,11 @@ ApplicationWindow {
         if (bootTab !== "") {
             activeTab = bootTab
         }
+        if (typeof hubCaptureMode !== "undefined" && hubCaptureMode) {
+            Qt.callLater(function() {
+                animationsEnabled = false
+            })
+        }
         runAction("ensure-brawler-icons")
         if (settingsOnly) {
             activeTab = "Farm Plan"
@@ -2064,9 +2069,25 @@ ApplicationWindow {
         id: farmPage
         anchors.fill: parent
 
+        function settleForCapture() {
+            farmPageBody.opacity = 1
+            farmPageShift.y = 0
+        }
+
         onVisibleChanged: {
-            if (visible) {
-                farmEnterAnim.restart()
+            if (!visible) {
+                return
+            }
+            if (typeof hubCaptureMode !== "undefined" && hubCaptureMode) {
+                settleForCapture()
+                return
+            }
+            farmEnterAnim.restart()
+        }
+
+        Component.onCompleted: {
+            if (visible && typeof hubCaptureMode !== "undefined" && hubCaptureMode) {
+                settleForCapture()
             }
         }
 
