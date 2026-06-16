@@ -22,4 +22,6 @@ Options:
 - `--no-launch` — capture from already-open windows
 - `--wait 25` — seconds to wait for each window
 
+Farm Plan uses `gui.qml_hub --initial-tab "Farm Plan"` so the correct tab is shown (mouse offsets are unreliable).
+
 Prerequisites for clean Hub shots: `license_accepted = "yes"` and `first_run_wizard = "no"` in local `cfg/general_config.toml` (do not commit local config).

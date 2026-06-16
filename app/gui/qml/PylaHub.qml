@@ -48,6 +48,7 @@ ApplicationWindow {
     readonly property int durSlow: animationsEnabled ? 320 : 0
     readonly property var trophyTargetPresets: ["250", "500", "750", "1000", "1250", "1500", "1750", "2000"]
     property string language: (hubState.language !== undefined) ? hubState.language : "en"
+    property string bootTab: (typeof initialTab !== "undefined" && initialTab) ? initialTab : ""
     readonly property var queueSortOptions: [
         { id: "cups_desc", label: root.t("sort.cups_desc") },
         { id: "cups_asc", label: root.t("sort.cups_asc") },
@@ -616,6 +617,9 @@ ApplicationWindow {
         applyTheme()
         reloadState()
         hubStateReady = true
+        if (bootTab !== "") {
+            activeTab = bootTab
+        }
         runAction("ensure-brawler-icons")
         if (settingsOnly) {
             activeTab = "Farm Plan"
@@ -4815,7 +4819,6 @@ ApplicationWindow {
                 width: parent.width
                 HubButton {
                     label: root.t("update.run_updater")
-                    visible: !!(hubState.updateStatus && hubState.updateStatus.hasUpdater)
                     onClicked: {
                         root.runAction("launch-updater")
                         updatePopover.close()
@@ -4826,14 +4829,6 @@ ApplicationWindow {
                     secondary: true
                     onClicked: {
                         root.runAction("refresh-update-status")
-                        updatePopover.close()
-                    }
-                }
-                HubButton {
-                    label: root.t("common.check_updates")
-                    secondary: true
-                    onClicked: {
-                        root.runAction("check-updates")
                         updatePopover.close()
                     }
                 }

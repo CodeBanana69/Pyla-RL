@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS_DIR = ROOT / "docs" / "assets"
 MAX_WIDTH = 1280
+HUB_STARTUP_SECONDS = 4.0
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
@@ -51,33 +52,6 @@ def find_windows(title_substring: str) -> list[tuple[int, str]]:
     user32.EnumWindows(enum_proc, 0)
     matches.sort(key=lambda item: len(item[1]))
     return matches
-
-
-def focus_and_click(hwnd: int, x_offset: int, y_offset: int) -> None:
-    rect = RECT()
-    user32.GetWindowRect(hwnd, ctypes.byref(rect))
-    x = rect.left + x_offset
-    y = rect.top + y_offset
-    user32.SetForegroundWindow(hwnd)
-    time.sleep(0.2)
-    user32.SetCursorPos(x, y)
-    time.sleep(0.05)
-    user32.mouse_event(0x0002, 0, 0, 0, 0)
-    user32.mouse_event(0x0004, 0, 0, 0, 0)
-    time.sleep(0.5)
-
-
-def click_hub_tab(hwnd: int, tab: str) -> None:
-    # Offsets tuned for the default hub window size (~820x560).
-    offsets = {
-        "overview": (120, 88),
-        "instances": (205, 88),
-        "farm-plan": (300, 88),
-    }
-    key = tab.lower().replace(" ", "-")
-    if key not in offsets:
-        raise ValueError(f"Unsupported hub tab: {tab}")
-    focus_and_click(hwnd, *offsets[key])
 
 
 def capture_hwnd(hwnd: int):
@@ -148,19 +122,32 @@ def capture_window_title(title_substring: str, output_name: str, wait_seconds: f
     if hwnd is None:
         raise RuntimeError(f"No visible window matching '{title_substring}' within {wait_seconds:.0f}s")
 
-    time.sleep(0.4)
+    time.sleep(0.6)
     image = capture_hwnd(hwnd)
     path = save_asset(image, output_name)
     print(f"Saved {path} ({image.width}x{image.height}) from hwnd={hwnd}")
     return path
 
 
-def launch_hub() -> subprocess.Popen:
+def launch_hub(initial_tab: str | None = None) -> subprocess.Popen:
+    cmd = [sys.executable, "-m", "gui.qml_hub"]
+    if initial_tab:
+        cmd.extend(["--initial-tab", initial_tab])
     return subprocess.Popen(
-        [sys.executable, "-m", "gui.qml_hub"],
+        cmd,
         cwd=str(ROOT),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
     )
+
+
+def stop_process(process: subprocess.Popen | None) -> None:
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        process.kill()
 
 
 def launch_control_window() -> subprocess.Popen:
@@ -169,7 +156,7 @@ def launch_control_window() -> subprocess.Popen:
     state_path = state_dir / "readme_capture_control.state"
     metrics_path = state_dir / "readme_capture_metrics.json"
     metrics_path.write_text(
-        '{"ips": 24.5, "feed_fps": 58.0, "history": [20,22,24,25], '
+        '{"ips": 24.5, "feed_fps": 58.0, "history": [20,22,24,25,26,24], '
         '"session": {"uptime_s": 3600, "state": "lobby", "brawler": "nita", '
         '"target": "1000", "trophies": 842, "session_wins": 3, "session_losses": 1, "notice": "Running"}}',
         encoding="utf-8",
@@ -181,49 +168,29 @@ def launch_control_window() -> subprocess.Popen:
     )
 
 
-def countdown(message: str, seconds: int) -> None:
-    print(message)
-    for remaining in range(seconds, 0, -1):
-        print(f"  Capturing in {remaining}s...", end="\r", flush=True)
-        time.sleep(1)
-    print(" " * 40, end="\r")
-
-
-def capture_target(target: str, wait_seconds: float, launch: bool) -> Path:
-    processes: list[subprocess.Popen] = []
+def capture_hub_asset(output_name: str, initial_tab: str | None, wait_seconds: float, launch: bool) -> Path:
+    hub_process = None
     try:
-        if target in {"hub-overview", "hub-farm-plan"} and launch:
-            print("Launching Pyla-RL Hub...")
-            processes.append(launch_hub())
-            time.sleep(3.0)
-
-        if target == "hub-overview":
-            return capture_window_title("Pyla-RL Hub", "hub-overview.png", wait_seconds=wait_seconds)
-
-        if target == "hub-farm-plan":
-            windows = find_windows("Pyla-RL Hub")
-            if windows:
-                click_hub_tab(windows[0][0], "farm-plan")
-            else:
-                countdown("Switch the Hub to the Farm Plan tab now.", seconds=8)
-            return capture_window_title("Pyla-RL Hub", "hub-farm-plan.png", wait_seconds=wait_seconds)
-
-        if target == "control-window":
-            if launch:
-                print("Launching Pyla-RL Control window...")
-                processes.append(launch_control_window())
-                time.sleep(2.0)
-            return capture_window_title("Pyla-RL Control", "control-window.png", wait_seconds=wait_seconds)
-
-        raise ValueError(f"Unknown target: {target}")
+        if launch:
+            label = initial_tab or "Overview"
+            print(f"Launching Pyla-RL Hub ({label})...")
+            hub_process = launch_hub(initial_tab)
+            time.sleep(HUB_STARTUP_SECONDS)
+        return capture_window_title("Pyla-RL Hub", output_name, wait_seconds=wait_seconds)
     finally:
-        for process in processes:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
+        stop_process(hub_process)
+
+
+def capture_control_asset(wait_seconds: float, launch: bool) -> Path:
+    control = None
+    try:
+        if launch:
+            print("Launching Pyla-RL Control window...")
+            control = launch_control_window()
+            time.sleep(2.5)
+        return capture_window_title("Pyla-RL Control", "control-window.png", wait_seconds=wait_seconds)
+    finally:
+        stop_process(control)
 
 
 def main() -> None:
@@ -255,51 +222,15 @@ def main() -> None:
     )
 
     saved: list[Path] = []
-    hub_process = None
     try:
-        if launch and any(item.startswith("hub-") for item in targets):
-            print("Launching Pyla-RL Hub...")
-            hub_process = launch_hub()
-            time.sleep(3.0)
-
-        for index, target in enumerate(targets):
-            if target.startswith("hub-"):
-                if target == "hub-farm-plan":
-                    windows = find_windows("Pyla-RL Hub")
-                    if windows:
-                        click_hub_tab(windows[0][0], "farm-plan")
-                    else:
-                        countdown("Switch the Hub to the Farm Plan tab now.", seconds=8)
-                saved.append(
-                    capture_window_title("Pyla-RL Hub", f"{target}.png", wait_seconds=args.wait)
-                )
+        for target in targets:
+            if target == "hub-overview":
+                saved.append(capture_hub_asset("hub-overview.png", None, args.wait, launch))
+            elif target == "hub-farm-plan":
+                saved.append(capture_hub_asset("hub-farm-plan.png", "Farm Plan", args.wait, launch))
             elif target == "control-window":
-                control = None
-                if launch:
-                    print("Launching Pyla-RL Control window...")
-                    control = launch_control_window()
-                    time.sleep(2.0)
-                try:
-                    saved.append(
-                        capture_window_title("Pyla-RL Control", "control-window.png", wait_seconds=args.wait)
-                    )
-                finally:
-                    if control and control.poll() is None:
-                        control.terminate()
-                        try:
-                            control.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            control.kill()
-
-        if hub_process and hub_process.poll() is None:
-            hub_process.terminate()
-            try:
-                hub_process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                hub_process.kill()
+                saved.append(capture_control_asset(args.wait, launch))
     except Exception as exc:
-        if hub_process and hub_process.poll() is None:
-            hub_process.terminate()
         raise SystemExit(str(exc)) from exc
 
     print("Captured:")

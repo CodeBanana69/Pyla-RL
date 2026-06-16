@@ -34,7 +34,7 @@ The Hub header shows an **update pill** next to the language toggle (EN/RU). It 
 
 - Installed version and local vs latest commit SHAs
 - **Run updater** (launches `updater.exe` when present)
-- **Refresh** and **GitHub releases**
+- **Refresh** status
 
 Use `update.exe` / `update.cmd` from the install folder if the pill reports an update is available.
 

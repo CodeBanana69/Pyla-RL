@@ -75,6 +75,7 @@ class QmlHub:
             correct_zoom=True,
             on_close_callback=None,
             settings_only=False,
+            initial_tab="",
     ):
         os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.window=false")
         ensure_pyside6_available()
@@ -1171,6 +1172,7 @@ class QmlHub:
         self.correct_zoom = correct_zoom
         self.on_close_callback = on_close_callback
         self.settings_only = settings_only
+        self.initial_tab = str(initial_tab or "").strip()
         self.started = False
 
         app = QGuiApplication.instance()
@@ -1236,6 +1238,7 @@ class QmlHub:
         context.setContextProperty("hubVersion", self.version_str)
         context.setContextProperty("latestVersion", self.latest_version_str or "")
         context.setContextProperty("correctZoom", self.correct_zoom)
+        context.setContextProperty("initialTab", self.initial_tab)
         context.setContextProperty("hubBrand", {
             "productName": brand.PRODUCT_NAME,
             "freeNotice": brand.FREE_NOTICE,
@@ -1289,9 +1292,14 @@ def main():
         action="store_true",
         help="Open settings without starting the bot (for use during an active session).",
     )
+    parser.add_argument(
+        "--initial-tab",
+        default="",
+        help="Open directly on a Hub tab (e.g. 'Farm Plan'). Used by screenshot capture.",
+    )
     args = parser.parse_args()
     version = str(load_toml_as_dict("cfg/general_config.toml").get("pyla_version", "0.8.1"))
-    QmlHub(version, version, settings_only=args.settings_only)
+    QmlHub(version, version, settings_only=args.settings_only, initial_tab=args.initial_tab)
 
 
 if __name__ == "__main__":
