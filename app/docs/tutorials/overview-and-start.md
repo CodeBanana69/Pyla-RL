@@ -28,6 +28,16 @@ Choose **Balanced**, **Low-end**, or other profiles on Overview. Restart the bot
 - **Single-instance:** press **START** on Overview after checks pass.
 - **Multi-instance:** enable mode on **Instances**, build per-instance farm plans, then **Start** each worker there (Overview START is disabled).
 
+## Updates
+
+The Hub header shows an **update pill** next to the language toggle (EN/RU). It compares your installed `main`-branch commit to GitHub and opens a popover with:
+
+- Installed version and local vs latest commit SHAs
+- **Run updater** (launches `updater.exe` when present)
+- **Refresh** and **GitHub releases**
+
+Use `update.exe` / `update.cmd` from the install folder if the pill reports an update is available.
+
 ## While running
 
-A small **Pyla-RL Control** window lets you pause and resume safely.
+The **Pyla-RL Control** window lets you pause and resume safely (**F8**). It shows a running/paused status pill, a full-width pause button, IPS sparkline, and a session strip (click to copy). Use **Open Hub** or the compact bar if you need the window out of the way.

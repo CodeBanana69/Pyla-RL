@@ -206,6 +206,12 @@ class HubStateStore:
         self._ensure_config_files()
         self._cached_static_meta = None
         self._cached_source_status = None
+        from gui.hub_update_status import default_update_status
+
+        self._update_status = default_update_status()
+
+    def set_update_status(self, status: dict):
+        self._update_status = dict(status or {})
 
     def invalidate_static_ui_cache(self):
         self._cached_static_meta = None
@@ -447,6 +453,7 @@ class HubStateStore:
             "queue": queue_state_items(load_queue(self._active_queue_path())),
             "multiInstance": self._multi_instance_state(),
             "meta": dict(self._static_ui_meta()),
+            "updateStatus": dict(self._update_status),
         })
         return state
 

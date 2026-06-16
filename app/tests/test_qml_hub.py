@@ -435,6 +435,18 @@ class QmlHubStateTests(unittest.TestCase):
         self.assertIn("saveInstanceProfile", qml)
         self.assertIn("deleteInstanceProfile", qml)
 
+    def test_qml_update_pill_and_actions(self):
+        qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
+        hub_py = Path("gui/qml_hub.py").read_text(encoding="utf-8")
+
+        self.assertIn("id: updatePill", qml)
+        self.assertIn("id: updatePopover", qml)
+        self.assertIn("launch-updater", qml)
+        self.assertIn("refresh-update-status", qml)
+        self.assertIn("updateStatusRefreshed", hub_py)
+        self.assertIn("refresh-update-status", hub_py)
+        self.assertIn("launch-updater", hub_py)
+
     def test_qml_anti_reseller_ui_contract(self):
         qml = Path("gui/qml/PylaHub.qml").read_text(encoding="utf-8")
 

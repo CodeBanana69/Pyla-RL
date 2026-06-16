@@ -18,14 +18,15 @@ ApplicationWindow {
     property string mode: hubBridge ? hubBridge.mode() : "showdown-trio"
     property string emulator: hubBridge ? hubBridge.emulator() : "ldplayer"
     property string activeTab: "Overview"
-    property var hubState: ({ settings: {}, discord: {}, telegram: {}, api: {}, timers: {}, history: { items: [], summary: {}, recent: [] }, queue: [], preflight: { ready: false, checks: [] } })
+    property var hubState: ({ settings: {}, discord: {}, telegram: {}, api: {}, timers: {}, history: { items: [], summary: {}, recent: [] }, queue: [], preflight: { ready: false, checks: [] }, updateStatus: { status: "unknown" } })
     property var preflightChecks: []
     property string statusText: ""
     property bool statusOk: true
     property string performanceProfile: "balanced"
     property string settingsFilter: ""
     property bool hubBusy: false
-    property bool showWizard: true
+    property bool hubStateReady: false
+    property bool showWizard: false
     property int wizardStep: 0
     property bool licenseTermsAccepted: false
     readonly property bool unofficialCopy: !!(hubState.meta && hubState.meta.sourceStatus && hubState.meta.sourceStatus.official === false)
@@ -73,6 +74,43 @@ ApplicationWindow {
             text = text.replace("{" + name + "}", replacements[name])
         }
         return text
+    }
+
+    function updateStatusValue() {
+        return (hubState.updateStatus && hubState.updateStatus.status) ? hubState.updateStatus.status : "unknown"
+    }
+
+    function updatePillLabel() {
+        var status = updateStatusValue()
+        if (status === "available") {
+            return t("update.pill_available")
+        }
+        if (status === "current") {
+            return t("update.pill_ok")
+        }
+        return t("update.pill_unknown")
+    }
+
+    function updatePillTooltip() {
+        var status = updateStatusValue()
+        if (status === "available") {
+            return t("update.tooltip_available")
+        }
+        if (status === "current") {
+            return t("update.tooltip_current")
+        }
+        return t("update.tooltip_unknown")
+    }
+
+    function updatePopoverHeadline() {
+        var status = updateStatusValue()
+        if (status === "available") {
+            return t("update.status_available")
+        }
+        if (status === "current") {
+            return t("update.status_current")
+        }
+        return t("update.status_unknown")
     }
 
     function tabKey(tab) {
@@ -535,19 +573,31 @@ ApplicationWindow {
         return items
     }
 
-    Component.onCompleted: {
-        applyTheme()
-        reloadState()
-        runAction("ensure-brawler-icons")
+    function syncWizardVisibility() {
         if (settingsOnly) {
             showWizard = false
-            activeTab = "Farm Plan"
+            return
+        }
+        if (!hubStateReady) {
+            showWizard = false
             return
         }
         const needsLicense = !(hubState.meta && hubState.meta.licenseAccepted)
         const needsWizard = !!(hubState.meta && hubState.meta.firstRunWizard)
         showWizard = needsLicense || needsWizard
         wizardStep = needsLicense ? 0 : 1
+    }
+
+    Component.onCompleted: {
+        applyTheme()
+        reloadState()
+        hubStateReady = true
+        runAction("ensure-brawler-icons")
+        if (settingsOnly) {
+            activeTab = "Farm Plan"
+            return
+        }
+        syncWizardVisibility()
         if (showWizard && wizardStep >= 1) {
             runAction("preflight-check")
         }
@@ -559,6 +609,9 @@ ApplicationWindow {
             reloadState()
             statusText = message
             statusOk = true
+        }
+        function onUpdateStatusRefreshed() {
+            reloadState()
         }
         function onStateChanged(nextMode, nextEmulator) {
             root.mode = nextMode
@@ -2584,6 +2637,52 @@ ApplicationWindow {
                         }
                     }
                     Rectangle {
+                        id: updatePill
+                        width: Math.max(updatePillRow.implicitWidth + 14, 36)
+                        height: 28
+                        radius: 8
+                        color: {
+                            var status = root.updateStatusValue()
+                            if (status === "available") {
+                                return updateMouse.containsMouse ? theme.accentSoft : theme.warnSoft
+                            }
+                            return updateMouse.containsMouse ? theme.hover : "transparent"
+                        }
+                        border.width: root.updateStatusValue() === "available" ? 1 : 0
+                        border.color: theme.accentBorder
+
+                        Row {
+                            id: updatePillRow
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Rectangle {
+                                visible: root.updateStatusValue() === "available"
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: theme.accent
+                            }
+                            Text {
+                                text: root.updatePillLabel()
+                                color: root.updateStatusValue() === "available" ? theme.accent : theme.muted
+                                font.pixelSize: 10
+                                font.weight: Font.Bold
+                            }
+                        }
+
+                        MouseArea {
+                            id: updateMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: updatePopover.open()
+                        }
+
+                        ToolTip.visible: updateMouse.containsMouse
+                        ToolTip.delay: 500
+                        ToolTip.text: root.updatePillTooltip()
+                    }
+                    Rectangle {
                         id: themeToggleButton
                         width: 28
                         height: 28
@@ -2637,17 +2736,8 @@ ApplicationWindow {
                     id: warningBanner
                     anchors.fill: parent
                     anchors.margins: 8
-                    visible: (latestVersion && latestVersion !== "" && latestVersion !== hubVersion) || correctZoom === false
-                    text: {
-                        var parts = []
-                        if (latestVersion && latestVersion !== "" && latestVersion !== hubVersion) {
-                            parts.push(root.t("common.update_available", { version: latestVersion }))
-                        }
-                        if (correctZoom === false) {
-                            parts.push(root.t("common.scaling_warning"))
-                        }
-                        return parts.join(" · ")
-                    }
+                    visible: correctZoom === false
+                    text: root.t("common.scaling_warning")
                     color: theme.accent
                     font.pixelSize: 11
                     wrapMode: Text.WordWrap
@@ -3381,7 +3471,7 @@ ApplicationWindow {
                             HubButton { label: root.t("common.report_reseller"); secondary: true; onClicked: root.runAction("report-reseller") }
                         }
                         RowLayout {
-                            visible: !root.licenseAccepted
+                            visible: root.hubStateReady && !root.licenseAccepted
                             spacing: 8
                             Layout.fillWidth: true
                             Rectangle {
@@ -4251,7 +4341,7 @@ ApplicationWindow {
 
     Rectangle {
         anchors.fill: parent
-        opacity: root.showWizard ? 1 : 0
+        opacity: (root.hubStateReady && root.showWizard) ? 1 : 0
         visible: opacity > 0.01
         color: theme.scrim
         z: 99
@@ -4266,7 +4356,7 @@ ApplicationWindow {
             border.width: 1
             border.color: theme.border
             implicitHeight: wizardColumn.implicitHeight + 32
-            scale: root.showWizard ? 1 : 0.94
+            scale: (root.hubStateReady && root.showWizard) ? 1 : 0.94
 
             Behavior on scale { NumberAnimation { duration: root.durMed; easing.type: Easing.OutCubic } }
 
@@ -4581,6 +4671,140 @@ ApplicationWindow {
         onAccepted: {
             if (selectedFile) {
                 root.runActionWithPayload("export-queue", { path: selectedFile.toString() })
+            }
+        }
+    }
+
+    Popup {
+        id: updatePopover
+        parent: Overlay.overlay
+        width: Math.max(updatePopoverColumn.implicitWidth + 24, 300)
+        height: Math.max(updatePopoverColumn.implicitHeight + 24, 120)
+        padding: 12
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        function repositionWithinOverlay() {
+            var overlay = Overlay.overlay
+            if (!overlay) {
+                return
+            }
+            var margin = 8
+            var belowPos = updatePill.mapToItem(overlay, 0, updatePill.height)
+            var abovePos = updatePill.mapToItem(overlay, 0, 0)
+            var buttonRightPos = updatePill.mapToItem(overlay, updatePill.width, 0)
+            var popupW = updatePopover.width
+            var popupH = updatePopover.height
+            var maxX = Math.max(margin, overlay.width - popupW - margin)
+            var maxY = Math.max(margin, overlay.height - popupH - margin)
+
+            var nextX = belowPos.x
+            if (nextX + popupW > overlay.width - margin) {
+                nextX = buttonRightPos.x - popupW
+            }
+            updatePopover.x = Math.max(margin, Math.min(nextX, maxX))
+
+            var nextY = belowPos.y + 4
+            if (nextY + popupH > overlay.height - margin) {
+                nextY = abovePos.y - popupH - 4
+            }
+            updatePopover.y = Math.max(margin, Math.min(nextY, maxY))
+        }
+
+        onOpened: repositionWithinOverlay()
+
+        background: Rectangle {
+            radius: 12
+            color: theme.panel3
+            border.width: 1
+            border.color: theme.borderSoft
+        }
+
+        Column {
+            id: updatePopoverColumn
+            spacing: 10
+            width: parent.availableWidth
+
+            Text {
+                text: root.updatePopoverHeadline()
+                color: theme.text
+                font.pixelSize: 14
+                font.weight: Font.Bold
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.currentVersion)
+                text: root.t("update.installed_version", { version: hubState.updateStatus.currentVersion })
+                color: theme.muted
+                font.pixelSize: 11
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.localSha)
+                text: root.t("update.local_commit", { sha: hubState.updateStatus.localSha })
+                color: theme.muted
+                font.pixelSize: 11
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.remoteSha)
+                text: root.t("update.latest_commit", { sha: hubState.updateStatus.remoteSha })
+                color: theme.muted
+                font.pixelSize: 11
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.updatedAt)
+                text: root.t("update.last_updated", { date: hubState.updateStatus.updatedAt })
+                color: theme.faint
+                font.pixelSize: 10
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                visible: !!(hubState.updateStatus && hubState.updateStatus.latestReleaseVersion)
+                text: root.t("update.release_version", { version: hubState.updateStatus.latestReleaseVersion })
+                color: theme.faint
+                font.pixelSize: 10
+            }
+
+            Flow {
+                spacing: 8
+                width: parent.width
+                HubButton {
+                    label: root.t("update.run_updater")
+                    visible: !!(hubState.updateStatus && hubState.updateStatus.hasUpdater)
+                    onClicked: {
+                        root.runAction("launch-updater")
+                        updatePopover.close()
+                    }
+                }
+                HubButton {
+                    label: root.t("update.refresh_status")
+                    secondary: true
+                    onClicked: {
+                        root.runAction("refresh-update-status")
+                        updatePopover.close()
+                    }
+                }
+                HubButton {
+                    label: root.t("common.check_updates")
+                    secondary: true
+                    onClicked: {
+                        root.runAction("check-updates")
+                        updatePopover.close()
+                    }
+                }
             }
         }
     }

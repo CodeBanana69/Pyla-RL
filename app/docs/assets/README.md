@@ -4,9 +4,9 @@ Images used on the main [README](../../README.md) gallery.
 
 | File | Shows | Re-capture when |
 |------|--------|-----------------|
-| `hub-overview.png` | Hub **Overview** tab — pre-flight checks, performance profile, game mode | Hub layout or Overview tab changes |
+| `hub-overview.png` | Hub **Overview** tab — pre-flight checks, header **update pill**, performance profile | Hub layout, Overview tab, or header chrome changes |
 | `hub-farm-plan.png` | Hub **Farm Plan** tab — queue builder and presets | Farm Plan UI changes |
-| `control-window.png` | **Pyla-RL Control** — pause/stop, IPS graph, session strip | Control window chrome or metrics strip changes |
+| `control-window.png` | **Pyla-RL Control** — status pill, pause/resume, IPS graph, session strip | Control window layout, chrome, or metrics strip changes |
 
 ## Capture
 

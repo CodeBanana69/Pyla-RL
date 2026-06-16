@@ -86,6 +86,7 @@ class QmlHub:
         class HubBridge(QObject):
             stateChanged = Signal(str, str)
             iconsUpdated = Signal(str)
+            updateStatusRefreshed = Signal()
             queueChanged = Signal()
             closeRequested = Signal()
             instancesUpdated = Signal()
@@ -130,6 +131,22 @@ class QmlHub:
                 self._instances_timer = QTimer()
                 self._instances_timer.setInterval(2000)
                 self._instances_timer.timeout.connect(self.instancesUpdated.emit)
+                self._schedule_update_status_refresh()
+
+            def _schedule_update_status_refresh(self):
+                import threading
+
+                def work():
+                    try:
+                        from gui.hub_update_status import check_update_status
+                        from utils import project_root
+
+                        self._store.set_update_status(check_update_status(project_root()))
+                        self.updateStatusRefreshed.emit()
+                    except Exception:
+                        pass
+
+                threading.Thread(target=work, daemon=True).start()
 
             def set_multi_instance_service(self, service):
                 self._multi_instance_service = service
@@ -992,6 +1009,24 @@ class QmlHub:
                     if updater_exe.exists():
                         return t("msg.updates_with_updater")
                     return t("msg.updates_opened")
+                if action == "refresh-update-status":
+                    from gui.hub_update_status import check_update_status
+                    from utils import project_root
+
+                    self._store.set_update_status(check_update_status(project_root()))
+                    return t("msg.update_status_refreshed")
+                if action == "launch-updater":
+                    from utils import project_root
+
+                    updater_exe = Path(project_root()) / "updater.exe"
+                    if updater_exe.is_file():
+                        subprocess.Popen(
+                            [str(updater_exe)],
+                            cwd=str(project_root()),
+                            close_fds=True,
+                        )
+                        return t("msg.updater_launched")
+                    return t("update.no_updater")
                 if action == "report-reseller":
                     import webbrowser
 

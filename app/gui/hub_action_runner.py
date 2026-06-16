@@ -17,6 +17,7 @@ BLOCKING_HUB_ACTIONS = frozenset({
     "import-queue",
     "calibrate-performance",
     "check-updates",
+    "refresh-update-status",
     "export-history",
     "refresh-history",
 })
@@ -32,6 +33,7 @@ PENDING_ACTION_MESSAGE_KEYS = {
     "import-queue": "msg.importing_farm_plan",
     "calibrate-performance": "msg.calibrating_performance",
     "check-updates": "msg.checking_updates",
+    "refresh-update-status": "msg.checking_updates",
     "export-history": "msg.exporting_history",
     "refresh-history": "msg.refreshing_history",
     "start-pyla": "msg.checking_preflight",

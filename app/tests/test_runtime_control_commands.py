@@ -32,6 +32,13 @@ class RuntimeControlCommandTests(unittest.TestCase):
         self.assertTrue(minimize_frameless_window(window))
         mock_show.assert_called_once_with(12345, 6)
 
+    def test_run_window_uses_control_i18n_strings(self):
+        source = Path("app/runtime_control.py").read_text(encoding="utf-8")
+        self.assertIn("from gui.i18n import t", source)
+        self.assertIn('t("control.running")', source)
+        self.assertIn('t("control.pause_bot")', source)
+        self.assertIn('t("control.footer_hotkey")', source)
+
 
 if __name__ == "__main__":
     unittest.main()

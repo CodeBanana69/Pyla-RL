@@ -22,7 +22,7 @@ Quick map of where code and data live in Pyla-RL. Project overview: [README](../
 | [`cfg/`](../cfg/) | Config templates and machine settings |
 | [`bin/`](../bin/) | Bundled `adb.exe` |
 | [`data/`](../data/) | Single-instance farm plan |
-| [`gui/`](../gui/) | Hub UI |
+| [`gui/`](../gui/) | Hub UI (`qml_hub.py`, `hub_update_status.py`, QML) |
 | [`tools/`](../tools/) | Setup helpers and dev scripts |
 | [`docs/`](.) | Tutorials, changelog, screenshots |
 | [`tests/`](../tests/) | Unit tests |

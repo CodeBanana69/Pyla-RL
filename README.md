@@ -25,7 +25,7 @@ Pyla-RL is **free and open source**. Do not pay for copies, repacks, or "premium
 | Hub — Overview | Hub — Farm Plan | Pyla-RL Control |
 |:---:|:---:|:---:|
 | ![Hub Overview](app/docs/assets/hub-overview.png) | ![Farm Plan](app/docs/assets/hub-farm-plan.png) | ![Control window](app/docs/assets/control-window.png) |
-| Pre-flight checks, performance profiles, game mode | Queue builder, Push All presets, import/export | Pause/resume (F8), IPS graph, session strip |
+| Pre-flight checks, **update pill**, performance profiles | Queue builder, Push All presets, import/export | Polished pause window — status pill, IPS graph, session strip |
 
 Enable **Debug Screen** in Hub settings for a live vision overlay (player, walls, fog, ranges) while the bot runs.
 
@@ -63,6 +63,8 @@ flowchart LR
 | Brawl Stars API | Trophy autofill when picking brawlers ([setup guide](app/docs/tutorials/brawl-stars-api.md)) |
 | Multi-instance | Parallel LDPlayer / MuMu bots ([guide](app/docs/tutorials/multi-instance.md)) |
 | Performance profiles | Balanced, low-end, quality, high-ips presets |
+| Update pill | Header pill checks `main`-branch freshness; popover shows commits and launches `updater.exe` |
+| EN/RU UI | Language toggle in the Hub header; pause window strings follow the same catalog |
 
 ### Remote control
 
@@ -70,7 +72,7 @@ flowchart LR
 |---|---|
 | Discord | `/pause`, `/start`, `/status`, `/screenshot`, `/queue`, `/push`, and more ([guide](app/docs/tutorials/discord-remote-control.md)) |
 | Telegram | `/pause`, `/resume`, `/status`, `/screenshot`, farm-plan commands ([guide](app/docs/tutorials/telegram.md)) |
-| Pause visibility | F8 pause; state shown in terminal, control window, and `/status` |
+| Pause visibility | F8 pause; polished **Pyla-RL Control** window with status pill, IPS graph, and session strip |
 
 ### Reliability
 
