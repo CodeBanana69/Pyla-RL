@@ -441,6 +441,8 @@ class QmlHubStateTests(unittest.TestCase):
 
         self.assertIn("id: updatePill", qml)
         self.assertIn("id: updatePopover", qml)
+        self.assertIn("updatePillStatus", qml)
+        self.assertIn("updatePillGlyph", qml)
         self.assertIn("launch-updater", qml)
         self.assertIn("refresh-update-status", qml)
         self.assertIn("updateStatusRefreshed", hub_py)

@@ -76,12 +76,16 @@ ApplicationWindow {
         return text
     }
 
+    readonly property string updatePillStatus: (hubState.updateStatus && hubState.updateStatus.status)
+        ? hubState.updateStatus.status
+        : "unknown"
+
     function updateStatusValue() {
-        return (hubState.updateStatus && hubState.updateStatus.status) ? hubState.updateStatus.status : "unknown"
+        return updatePillStatus
     }
 
     function updatePillLabel() {
-        var status = updateStatusValue()
+        var status = updatePillStatus
         if (status === "available") {
             return t("update.pill_available")
         }
@@ -89,6 +93,26 @@ ApplicationWindow {
             return t("update.pill_ok")
         }
         return t("update.pill_unknown")
+    }
+
+    function updatePillGlyph() {
+        if (updatePillStatus === "available") {
+            return "\u2B06"
+        }
+        if (updatePillStatus === "current") {
+            return "\u2713"
+        }
+        return "\u21BB"
+    }
+
+    function updatePillDotColor() {
+        if (updatePillStatus === "current") {
+            return theme.ok
+        }
+        if (updatePillStatus === "available") {
+            return theme.accent
+        }
+        return theme.muted
     }
 
     function updatePillTooltip() {
@@ -2638,35 +2662,43 @@ ApplicationWindow {
                     }
                     Rectangle {
                         id: updatePill
-                        width: Math.max(updatePillRow.implicitWidth + 14, 36)
+                        z: 2
+                        width: Math.max(updatePillRow.implicitWidth + 16, 62)
                         height: 28
                         radius: 8
                         color: {
-                            var status = root.updateStatusValue()
-                            if (status === "available") {
+                            if (root.updatePillStatus === "available") {
                                 return updateMouse.containsMouse ? theme.accentSoft : theme.warnSoft
                             }
-                            return updateMouse.containsMouse ? theme.hover : "transparent"
+                            if (updateMouse.containsMouse) {
+                                return theme.hover
+                            }
+                            return theme.panel2
                         }
-                        border.width: root.updateStatusValue() === "available" ? 1 : 0
-                        border.color: theme.accentBorder
+                        border.width: 1
+                        border.color: root.updatePillStatus === "available" ? theme.accentBorder : theme.borderSoft
 
                         Row {
                             id: updatePillRow
                             anchors.centerIn: parent
                             spacing: 5
                             Rectangle {
-                                visible: root.updateStatusValue() === "available"
                                 width: 6
                                 height: 6
                                 radius: 3
-                                color: theme.accent
+                                color: root.updatePillDotColor()
+                            }
+                            Text {
+                                text: root.updatePillGlyph()
+                                color: root.updatePillStatus === "available" ? theme.accent : theme.muted
+                                font.pixelSize: 11
+                                font.weight: Font.Bold
                             }
                             Text {
                                 text: root.updatePillLabel()
-                                color: root.updateStatusValue() === "available" ? theme.accent : theme.muted
+                                color: root.updatePillStatus === "available" ? theme.accent : theme.text
                                 font.pixelSize: 10
-                                font.weight: Font.Bold
+                                font.weight: Font.DemiBold
                             }
                         }
 

@@ -141,7 +141,7 @@
   "update": {
     "pill_ok": "OK",
     "pill_available": "Обновить",
-    "pill_unknown": "?",
+    "pill_unknown": "Проверить",
     "tooltip_current": "Установлена последняя версия main",
     "tooltip_available": "Доступна новая версия main",
     "tooltip_unknown": "Не удалось проверить обновления",

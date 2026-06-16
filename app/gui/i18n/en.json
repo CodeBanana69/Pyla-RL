@@ -141,7 +141,7 @@
   "update": {
     "pill_ok": "OK",
     "pill_available": "Update",
-    "pill_unknown": "?",
+    "pill_unknown": "Check",
     "tooltip_current": "You are on the latest main version",
     "tooltip_available": "A newer main version is available",
     "tooltip_unknown": "Could not check for updates",

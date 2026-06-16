@@ -141,10 +141,15 @@ class QmlHub:
                         from gui.hub_update_status import check_update_status
                         from utils import project_root
 
-                        self._store.set_update_status(check_update_status(project_root()))
-                        self.updateStatusRefreshed.emit()
+                        status = check_update_status(project_root())
                     except Exception:
-                        pass
+                        return
+
+                    def apply():
+                        self._store.set_update_status(status)
+                        self.updateStatusRefreshed.emit()
+
+                    QTimer.singleShot(0, apply)
 
                 threading.Thread(target=work, daemon=True).start()
 
