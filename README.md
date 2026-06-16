@@ -25,7 +25,7 @@ Pyla-RL is **free and open source**. Do not pay for copies, repacks, or "premium
 | Hub — Overview | Hub — Farm Plan | Pyla-RL Control |
 |:---:|:---:|:---:|
 | ![Hub Overview](app/docs/assets/hub-overview.png) | ![Farm Plan](app/docs/assets/hub-farm-plan.png?v=20260613) | ![Control window](app/docs/assets/control-window.png) |
-| Pre-flight checks, **update pill**, performance profiles | Queue builder, Push All presets, import/export | Polished pause window — status pill, IPS graph, session strip |
+| Pre-flight checks, updater button, performance profiles | Queue builder, Push All presets, import/export | Pause window, status pill, IPS graph, session strip |
 
 Enable **Debug Screen** in Hub settings for a live vision overlay (player, walls, fog, ranges) while the bot runs.
 
