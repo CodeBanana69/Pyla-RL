@@ -757,6 +757,18 @@ def pyla_main(data):
             if self.should_pause() and not self.should_stop():
                 self.wait_while_paused()
 
+        def _maybe_check_idle(self, frame):
+            if not self.Time_management.idle_check():
+                return
+            action = self.lobby_automator.check_for_idle(frame)
+            if action == "restart":
+                self.lobby_automator.reset_idle_recovery()
+                self.restart_brawl_stars()
+            elif action == "clicked":
+                import runtime_log
+
+                runtime_log.log_info("recovery", "Idle disconnect detected; pressed Reload.")
+
         def manage_time_tasks(self, frame):
             if self.Time_management.state_check():
                 screenshot_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -798,8 +810,6 @@ def pyla_main(data):
                 for key, value in self.Play.time_since_detections.items():
                     if now - value > self.no_detections_action_threshold:
                         self.restart_brawl_stars()
-            if self.Time_management.idle_check():
-                self.lobby_automator.check_for_idle(frame)
             now = time.time()
             if self.webhook_ping_every_minutes and now - self.time_since_last_webhook_ping >= self.webhook_ping_every_minutes * 60:
                 notify_user("regular_minutes_ping", self.window_controller.screenshot(), self.Stage_manager)
@@ -1257,6 +1267,7 @@ def pyla_main(data):
                     continue
 
                 self.record_feed_fps()
+                self._maybe_check_idle(frame)
                 frame_id = self.window_controller.get_latest_frame_id()
                 if frame_id == self.last_processed_frame_id:
                     if self.should_replay_duplicate_frame(last_ft):
