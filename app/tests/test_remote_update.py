@@ -71,10 +71,68 @@ class RemoteUpdateTests(unittest.TestCase):
         self.assertIn("--force", command)
 
     def test_telegram_update_args_parse_ref_and_force(self):
-        ref, force = TelegramControlServer._parse_update_args(["previous", "force"])
+        ref, reinstall, immediate = TelegramControlServer._parse_update_args(["previous", "force"])
 
         self.assertEqual(ref, "previous")
-        self.assertTrue(force)
+        self.assertFalse(reinstall)
+        self.assertTrue(immediate)
+
+    def test_telegram_update_args_parse_reinstall_separately(self):
+        ref, reinstall, immediate = TelegramControlServer._parse_update_args(["latest", "reinstall"])
+
+        self.assertEqual(ref, "latest")
+        self.assertTrue(reinstall)
+        self.assertFalse(immediate)
+
+    def test_update_lock_rejects_second_active_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "remote_update.lock"
+            with patch("tools.remote_update.update_lock_path", return_value=lock_path):
+                first_ok, _first = remote_update.acquire_update_lock(ref="latest")
+                second_ok, second = remote_update.acquire_update_lock(ref="previous")
+
+                self.assertTrue(first_ok)
+                self.assertFalse(second_ok)
+                self.assertEqual(second["ref"], "latest")
+
+    def test_release_update_lock_removes_lock_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "remote_update.lock"
+            with patch("tools.remote_update.update_lock_path", return_value=lock_path):
+                remote_update.acquire_update_lock(ref="latest")
+                remote_update.release_update_lock()
+
+                self.assertFalse(lock_path.exists())
+
+    def test_format_version_info_includes_version_and_commit(self):
+        text = remote_update.format_version_info(
+            {
+                "version": "0.9.0",
+                "commit": "abcdef123456",
+                "commitSource": "git",
+                "python": "3.11.9",
+            }
+        )
+
+        self.assertIn("0.9.0", text)
+        self.assertIn("abcdef12", text)
+        self.assertIn("3.11.9", text)
+
+    def test_format_update_status_available(self):
+        text = remote_update.format_update_status(
+            {
+                "status": "available",
+                "currentVersion": "0.9.0",
+                "latestReleaseVersion": "1.0.0",
+                "localSha": "oldsha",
+                "remoteSha": "newsha",
+                "updaterLauncher": "tools.updater",
+            }
+        )
+
+        self.assertIn("Update available", text)
+        self.assertIn("oldsha", text)
+        self.assertIn("newsha", text)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ starts the bot again in a non-interactive resume mode.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from pathlib import Path
 
 STOP_REQUESTED = "stop_requested"
 DEFAULT_GRACE_TIMEOUT_SECONDS = 120.0
+UPDATE_LOCK_STALE_SECONDS = 6 * 60 * 60
 
 
 def install_root() -> Path:
@@ -38,6 +40,10 @@ def remote_update_log_path() -> Path:
     return logs_dir() / "remote_update.log"
 
 
+def update_lock_path() -> Path:
+    return logs_dir() / "remote_update.lock"
+
+
 def log(message: str) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {message}"
@@ -46,6 +52,115 @@ def log(message: str) -> None:
             handle.write(line + "\n")
     except OSError:
         pass
+
+
+def _timestamp() -> float:
+    return time.time()
+
+
+def _lock_payload(status: str, *, ref: str = "latest", force: bool = False, immediate: bool = False) -> dict:
+    now = _timestamp()
+    return {
+        "pid": os.getpid(),
+        "status": str(status or "running"),
+        "ref": str(ref or "latest"),
+        "force": bool(force),
+        "immediate": bool(immediate),
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def read_update_lock(path: str | Path | None = None) -> dict:
+    lock_path = Path(path) if path else update_lock_path()
+    try:
+        data = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _lock_pid(info: dict) -> int:
+    try:
+        return int(info.get("pid") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _lock_age_seconds(info: dict) -> float:
+    try:
+        updated_at = float(info.get("updated_at") or info.get("created_at") or 0)
+    except (TypeError, ValueError):
+        return UPDATE_LOCK_STALE_SECONDS + 1
+    if updated_at <= 0:
+        return UPDATE_LOCK_STALE_SECONDS + 1
+    return max(0.0, _timestamp() - updated_at)
+
+
+def update_lock_is_active(info: dict | None = None) -> bool:
+    info = info if info is not None else read_update_lock()
+    if not info:
+        return False
+    pid = _lock_pid(info)
+    if pid and process_is_alive(pid):
+        return True
+    return _lock_age_seconds(info) < 10.0
+
+
+def describe_update_lock(info: dict | None = None) -> str:
+    info = info if info is not None else read_update_lock()
+    if not info:
+        return "No remote update is running."
+    status = str(info.get("status") or "running")
+    ref = str(info.get("ref") or "latest")
+    pid = _lock_pid(info)
+    age = int(_lock_age_seconds(info))
+    return f"Remote update is already {status} for {ref} (pid {pid or 'unknown'}, {age}s ago)."
+
+
+def write_update_lock(status: str, *, ref: str = "latest", force: bool = False, immediate: bool = False) -> dict:
+    payload = _lock_payload(status, ref=ref, force=force, immediate=immediate)
+    path = update_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return payload
+
+
+def acquire_update_lock(
+    *,
+    status: str = "pending",
+    ref: str = "latest",
+    force: bool = False,
+    immediate: bool = False,
+) -> tuple[bool, dict]:
+    path = update_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _lock_payload(status, ref=ref, force=force, immediate=immediate)
+    for _attempt in range(2):
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, json.dumps(payload, indent=2).encode("utf-8"))
+            finally:
+                os.close(fd)
+            return True, payload
+        except FileExistsError:
+            existing = read_update_lock(path)
+            if update_lock_is_active(existing):
+                return False, existing
+            try:
+                path.unlink()
+            except OSError:
+                return False, existing
+    return False, read_update_lock(path)
+
+
+def release_update_lock(path: str | Path | None = None) -> None:
+    lock_path = Path(path) if path else update_lock_path()
+    try:
+        lock_path.unlink(missing_ok=True)
+    except OSError as exc:
+        log(f"Could not remove update lock {lock_path}: {exc}")
 
 
 def _python_env() -> dict[str, str]:
@@ -244,6 +359,7 @@ def spawn_remote_update(
 
 
 def run_remote_update(args: argparse.Namespace) -> int:
+    write_update_lock("running", ref=args.ref, force=args.force, immediate=True)
     log(
         "Remote update requested "
         f"mode={args.mode} instance={args.instance or '-'} pid={args.pid} ref={args.ref}"
@@ -268,9 +384,104 @@ def run_remote_update(args: argparse.Namespace) -> int:
             restart_bot(args.mode, args.instance)
         except Exception as exc:
             log(f"Restart failed: {exc}")
+            release_update_lock()
             return 1
 
+    release_update_lock()
     return update_exit
+
+
+def build_version_info() -> dict:
+    info = {
+        "version": "",
+        "commit": "",
+        "commitSource": "",
+        "builtAt": "",
+        "repoUrl": "",
+        "python": sys.version.split()[0],
+    }
+    try:
+        from utils import load_toml_as_dict, resolve_project_path
+
+        general = load_toml_as_dict(resolve_project_path("cfg/general_config.toml"))
+        info["version"] = str(general.get("pyla_version", "") or "")
+    except Exception:
+        pass
+    try:
+        from gui.official_source import read_build_info
+
+        build_info = read_build_info()
+        info["builtAt"] = str(build_info.get("built_at") or "")
+        info["repoUrl"] = str(build_info.get("repo_url") or "")
+        if build_info.get("commit"):
+            info["commit"] = str(build_info.get("commit") or "")
+            info["commitSource"] = "build_info"
+    except Exception:
+        pass
+    try:
+        from gui.hub_update_status import read_effective_local_sha
+
+        sha, source = read_effective_local_sha(install_root())
+        if sha:
+            info["commit"] = str(sha)
+            info["commitSource"] = str(source or info.get("commitSource") or "")
+    except Exception:
+        pass
+    return info
+
+
+def short_sha(value: str) -> str:
+    value = str(value or "").strip()
+    return value[:8] if len(value) > 8 else value
+
+
+def format_version_info(info: dict | None = None) -> str:
+    info = dict(info or build_version_info())
+    version = info.get("version") or "unknown"
+    commit = short_sha(str(info.get("commit") or "")) or "unknown"
+    source = str(info.get("commitSource") or "unknown")
+    python = str(info.get("python") or sys.version.split()[0])
+    lines = [
+        f"Pyla-RL version: {version}",
+        f"Commit: {commit} ({source})",
+        f"Python: {python}",
+    ]
+    if info.get("builtAt"):
+        lines.append(f"Built at: {info['builtAt']}")
+    if info.get("repoUrl"):
+        lines.append(f"Source: {info['repoUrl']}")
+    return "\n".join(lines)
+
+
+def build_update_status() -> dict:
+    from gui.hub_update_status import check_update_status, resolve_install_dir
+
+    return check_update_status(resolve_install_dir())
+
+
+def format_update_status(status: dict | None = None) -> str:
+    status = dict(status or build_update_status())
+    state = str(status.get("status") or "unknown")
+    current_version = str(status.get("currentVersion") or "unknown")
+    latest_version = str(status.get("latestReleaseVersion") or "")
+    local_sha = str(status.get("localSha") or "unknown")
+    remote_sha = str(status.get("remoteSha") or "unknown")
+    launcher = str(status.get("updaterLauncher") or "not found")
+    if state == "available":
+        headline = "Update available."
+    elif state == "current":
+        headline = "Pyla-RL is up to date."
+    else:
+        headline = "Update status is unknown."
+    lines = [
+        headline,
+        f"Current: {current_version} ({local_sha})",
+        f"Latest: {latest_version or 'unknown'} ({remote_sha})",
+        f"Updater: {launcher}",
+    ]
+    if status.get("updatedAt"):
+        lines.append(f"Last updated: {status['updatedAt']}")
+    return "\n".join(lines)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

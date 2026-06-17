@@ -452,6 +452,7 @@ def pyla_main(data):
             self.active_lobby_brawler = ""
             self.active_match_brawler = ""
             self.pending_lobby_brawler_pick = False
+            self.pending_remote_update = None
             time_thresholds = load_toml_as_dict("cfg/time_tresholds.toml")
             self.check_if_brawl_stars_crashed_timer = float(
                 time_thresholds.get("check_if_brawl_stars_crashed", 60)
@@ -533,6 +534,8 @@ def pyla_main(data):
                 stop_all_callback=self.discord_stop_all,
                 pause_menu_callback=self.control_window.show,
                 self_update_callback=self.remote_self_update,
+                version_callback=self.remote_version,
+                check_update_callback=self.remote_check_update,
             )
             self.discord_control = DiscordControlServer(self.control_window.state_path, **callbacks)
             self.telegram_control = TelegramControlServer(self.control_window.state_path, **callbacks)
@@ -917,12 +920,17 @@ def pyla_main(data):
                     from gui.remote_formatting import format_queue_lines
 
                     payload = {"ok": True, "result": format_queue_lines(load_queue())}
+                elif action == "version":
+                    payload = {"ok": True, "result": self.remote_version()}
+                elif action == "check_update":
+                    payload = {"ok": True, "result": self.remote_check_update()}
                 elif action == "update":
                     payload = {
                         "ok": True,
                         "result": self.remote_self_update(
                             args.get("ref", "latest"),
-                            force=args.get("force", False),
+                            force=args.get("reinstall", False),
+                            immediate=args.get("immediate", args.get("force", False)),
                         ),
                     }
                 else:
@@ -944,12 +952,23 @@ def pyla_main(data):
             self.stop_event.set()
             return "Pyla-RL is stopping."
 
-        def remote_self_update(self, ref="latest", force=False):
-            from tools.remote_update import spawn_remote_update
+        @staticmethod
+        def _truthy(value):
+            return str(value).strip().lower() in {"1", "true", "yes", "on", "force", "now", "reinstall"}
+
+        def remote_version(self):
+            from tools.remote_update import format_version_info
+
+            return format_version_info()
+
+        def remote_check_update(self):
+            from tools.remote_update import format_update_status
+
+            return format_update_status()
+
+        def _prepare_remote_update_state(self):
             from utils import save_brawler_data
 
-            ref = str(ref or "latest").strip() or "latest"
-            force_enabled = str(force).strip().lower() in {"1", "true", "yes", "on", "force"}
             if self.Stage_manager.brawlers_pick_data:
                 save_brawler_data(self.Stage_manager.brawlers_pick_data)
             if self.instance_id:
@@ -960,6 +979,12 @@ def pyla_main(data):
                 except Exception as exc:
                     runtime_log.log_warn("update", f"Could not persist worker session before update: {exc}")
 
+        def _start_remote_update(self, ref="latest", force=False):
+            from tools.remote_update import spawn_remote_update
+
+            ref = str(ref or "latest").strip() or "latest"
+            force_enabled = self._truthy(force)
+            self._prepare_remote_update_state()
             process = spawn_remote_update(
                 mode="instance" if self.instance_id else "single",
                 instance_id=self.instance_id or "",
@@ -969,10 +994,66 @@ def pyla_main(data):
                 pid=os.getpid(),
             )
             force_text = " with force reinstall" if force_enabled else ""
+            self.pending_remote_update = None
             return (
                 f"Remote update started for {ref}{force_text}. "
                 f"Pyla-RL will stop, update, and restart automatically. Helper pid: {process.pid}."
             )
+
+        def remote_self_update(self, ref="latest", force=False, immediate=False):
+            from tools.remote_update import acquire_update_lock, describe_update_lock, release_update_lock
+
+            ref = str(ref or "latest").strip() or "latest"
+            force_enabled = self._truthy(force)
+            immediate_enabled = self._truthy(immediate)
+            if immediate_enabled and self.pending_remote_update:
+                release_update_lock()
+                self.pending_remote_update = None
+
+            locked, info = acquire_update_lock(
+                status="starting" if immediate_enabled else "pending",
+                ref=ref,
+                force=force_enabled,
+                immediate=immediate_enabled,
+            )
+            if not locked:
+                return describe_update_lock(info)
+
+            state = str(self.get_latest_state() or "unknown")
+            if not immediate_enabled and state != "lobby":
+                self.pending_remote_update = {
+                    "ref": ref,
+                    "force": force_enabled,
+                    "created_at": time.time(),
+                }
+                return (
+                    f"Remote update scheduled for {ref}. Current state is {format_state_label(state)}; "
+                    "Pyla-RL will update automatically when it returns to lobby. "
+                    "Use /update force to update immediately."
+                )
+
+            try:
+                return self._start_remote_update(ref, force_enabled)
+            except Exception:
+                release_update_lock()
+                raise
+
+        def _maybe_start_pending_remote_update(self):
+            pending = self.pending_remote_update
+            if not pending or self.get_latest_state() != "lobby":
+                return
+            ref = str(pending.get("ref") or "latest")
+            force = bool(pending.get("force"))
+            runtime_log.log_info("update", f"Starting scheduled remote update for {ref} from lobby.")
+            try:
+                message = self._start_remote_update(ref, force)
+                runtime_log.log_info("update", message)
+            except Exception as exc:
+                from tools.remote_update import release_update_lock
+
+                release_update_lock()
+                self.pending_remote_update = None
+                runtime_log.log_warn("update", f"Scheduled remote update failed to start: {exc}")
 
         def _apply_remote_queue_change(self, new_queue, message):
             from gui.remote_formatting import format_command_result, format_queue_lines
@@ -1223,6 +1304,7 @@ def pyla_main(data):
                         persist_worker_session(self)
 
                 self.update_runtime_control_notice()
+                self._maybe_start_pending_remote_update()
 
                 if self.get_latest_state() == "lobby":
                     if self.should_pause():
