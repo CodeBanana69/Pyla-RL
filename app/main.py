@@ -125,11 +125,18 @@ def configure_terminal_output():
     import runtime_log
     from logger_setup import setup_logging_if_enabled
     from support_reporter import install, set_terminal_log_path
+    from tools.runtime_maintenance import format_report, run_startup_maintenance
 
     runtime_log.configure()
+    maintenance_report = run_startup_maintenance(_INSTALL_ROOT)
     log_path = setup_logging_if_enabled()
     set_terminal_log_path(log_path)
     install()
+    maintenance_summary = format_report(maintenance_report)
+    if maintenance_summary:
+        runtime_log.log_info("maintenance", f"Startup cleanup: {maintenance_summary}.")
+    for warning in maintenance_report.get("warnings", [])[:3]:
+        runtime_log.log_warn("maintenance", warning)
     if platform.architecture()[0] != "64bit":
         runtime_log.log_warn("startup", "Pyla-RL is running on 32-bit Python.")
     return log_path

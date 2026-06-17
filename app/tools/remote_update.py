@@ -379,6 +379,16 @@ def run_remote_update(args: argparse.Namespace) -> int:
     except Exception as exc:
         log(f"Updater failed before completion: {exc}")
 
+    try:
+        from tools.runtime_maintenance import format_report, run_startup_maintenance
+
+        report = run_startup_maintenance(install_root())
+        summary = format_report(report)
+        if summary:
+            log(f"Post-update cleanup: {summary}.")
+    except Exception as exc:
+        log(f"Post-update cleanup skipped: {exc}")
+
     if not args.no_restart:
         try:
             restart_bot(args.mode, args.instance)
