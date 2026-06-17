@@ -532,6 +532,7 @@ def pyla_main(data):
                 set_target_callback=self.remote_set_target,
                 stop_all_callback=self.discord_stop_all,
                 pause_menu_callback=self.control_window.show,
+                self_update_callback=self.remote_self_update,
             )
             self.discord_control = DiscordControlServer(self.control_window.state_path, **callbacks)
             self.telegram_control = TelegramControlServer(self.control_window.state_path, **callbacks)
@@ -916,6 +917,14 @@ def pyla_main(data):
                     from gui.remote_formatting import format_queue_lines
 
                     payload = {"ok": True, "result": format_queue_lines(load_queue())}
+                elif action == "update":
+                    payload = {
+                        "ok": True,
+                        "result": self.remote_self_update(
+                            args.get("ref", "latest"),
+                            force=args.get("force", False),
+                        ),
+                    }
                 else:
                     payload = {"ok": False, "error": f"Unknown remote action '{action}'."}
                 write_remote_reply(reply_path, payload)
@@ -934,6 +943,36 @@ def pyla_main(data):
             request_stop(self.control_window.state_path)
             self.stop_event.set()
             return "Pyla-RL is stopping."
+
+        def remote_self_update(self, ref="latest", force=False):
+            from tools.remote_update import spawn_remote_update
+            from utils import save_brawler_data
+
+            ref = str(ref or "latest").strip() or "latest"
+            force_enabled = str(force).strip().lower() in {"1", "true", "yes", "on", "force"}
+            if self.Stage_manager.brawlers_pick_data:
+                save_brawler_data(self.Stage_manager.brawlers_pick_data)
+            if self.instance_id:
+                try:
+                    from gui.session_state import persist_worker_session
+
+                    persist_worker_session(self)
+                except Exception as exc:
+                    runtime_log.log_warn("update", f"Could not persist worker session before update: {exc}")
+
+            process = spawn_remote_update(
+                mode="instance" if self.instance_id else "single",
+                instance_id=self.instance_id or "",
+                state_path=self.control_window.state_path,
+                ref=ref,
+                force=force_enabled,
+                pid=os.getpid(),
+            )
+            force_text = " with force reinstall" if force_enabled else ""
+            return (
+                f"Remote update started for {ref}{force_text}. "
+                f"Pyla-RL will stop, update, and restart automatically. Helper pid: {process.pid}."
+            )
 
         def _apply_remote_queue_change(self, new_queue, message):
             from gui.remote_formatting import format_command_result, format_queue_lines
@@ -1319,6 +1358,27 @@ def run_instance_worker(instance_id: str):
     pyla_main(queue)
 
 
+def run_resume():
+    import runtime_log
+    from gui.brawler_queue import load_queue
+    from gui.brand import FREE_NOTICE, OFFICIAL_GITHUB
+
+    log_path = configure_terminal_output()
+    runtime_log.log_info("startup", FREE_NOTICE)
+    runtime_log.log_info("startup", f"Official source: {OFFICIAL_GITHUB}")
+    runtime_log.log_info("startup", f"Pyla-RL v{pyla_version}")
+    if log_path:
+        runtime_log.log_info("startup", f"Terminal log: {log_path}")
+    queue = load_queue()
+    if not queue:
+        runtime_log.log_warn(
+            "startup",
+            "Remote resume could not start because the saved farm plan is empty. Open the Hub and create a farm plan.",
+        )
+        return
+    pyla_main(queue)
+
+
 def run_app():
     import runtime_log
     from gui.brand import FREE_NOTICE, OFFICIAL_GITHUB
@@ -1374,10 +1434,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Pyla-RL")
     parser.add_argument("--instance", default="", help="Run as a multi-instance worker for the given instance id.")
+    parser.add_argument("--resume", action="store_true", help="Resume the saved farm plan without opening the Hub.")
     args = parser.parse_args()
     try:
         if str(args.instance or "").strip():
             run_instance_worker(str(args.instance).strip())
+        elif args.resume:
+            run_resume()
         else:
             run_app()
     except Exception as exc:

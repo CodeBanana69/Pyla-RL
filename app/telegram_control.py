@@ -58,6 +58,7 @@ class TelegramControlServer:
             set_target_callback: Callable[[int], Any] | None = None,
             stop_all_callback: Callable[[], Any] | None = None,
             pause_menu_callback: Callable[[], Any] | None = None,
+            self_update_callback: Callable[[str, bool], Any] | None = None,
             command_router: Any | None = None,
     ):
         self.state_path = Path(state_path)
@@ -76,6 +77,7 @@ class TelegramControlServer:
         self.set_target_callback = set_target_callback
         self.stop_all_callback = stop_all_callback
         self.pause_menu_callback = pause_menu_callback
+        self.self_update_callback = self_update_callback
         self.command_router = command_router
         self.router_mode = command_router is not None
         self.thread: threading.Thread | None = None
@@ -117,7 +119,7 @@ class TelegramControlServer:
         self.stop_event = asyncio.Event()
         print(
             "Telegram control started: /help /status /stats /pause /resume /quit /push /skip /remove /target /queue "
-            "/pause_menu /screenshot /restart_game /restart_scrcpy /restart_emulator /back /press"
+            "/pause_menu /screenshot /restart_game /restart_scrcpy /restart_emulator /update /back /press"
         )
         while not self.stop_event.is_set():
             settings = self.settings_loader()
@@ -250,6 +252,20 @@ class TelegramControlServer:
         if command == "/restart_emulator":
             await self._run_named_action(chat_id, token, self.restart_emulator_callback, "Emulator restart")
             return
+        if command == "/update":
+            selected_ref, force = self._parse_update_args(parts[1:])
+            if self.command_router:
+                ok, message = await run_callback(
+                    self.command_router.dispatch_remote_action,
+                    instance,
+                    "update",
+                    {"ref": selected_ref, "force": force},
+                )
+            else:
+                ok, message = await run_callback(self.self_update_callback, selected_ref, force)
+            title = "Update started" if ok else "Update failed"
+            await async_send_message(chat_id, f"<b>{title}</b>\n{message}", token=token)
+            return
         if command == "/back":
             ok, message = await run_callback(self.back_callback)
             await async_send_message(chat_id, "Pressed Back." if ok else message, token=token)
@@ -344,6 +360,20 @@ class TelegramControlServer:
         state = read_state(self.state_path)
         details = self.status_provider() if self.status_provider else {}
         return format_telegram_status(state, details)
+
+    @staticmethod
+    def _parse_update_args(args: list[str]) -> tuple[str, bool]:
+        selected_ref = "latest"
+        force = False
+        for arg in args:
+            value = str(arg or "").strip()
+            if not value:
+                continue
+            if value.lower() in {"force", "--force"}:
+                force = True
+                continue
+            selected_ref = value
+        return selected_ref, force
 
     async def _send_screenshot(self, chat_id: int | str, token: str) -> None:
         if self.screenshot_provider is None:

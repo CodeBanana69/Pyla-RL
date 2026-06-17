@@ -239,7 +239,7 @@ def format_telegram_help() -> str:
     sections = [
         ("Control", "/status, /stats, /pause, /resume, /quit, /pause_menu"),
         ("Farm Plan", "/push, /skip, /remove, /target, /queue"),
-        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator"),
+        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator, /update"),
         ("Other", "/screenshot, /back, /press"),
     ]
     lines = ["<b>Pyla-RL Telegram commands</b>"]
