@@ -148,7 +148,8 @@ def build_help_embed() -> discord.Embed:
     sections = [
         ("Control", "/start, /pause, /stop_all, /status, /stats"),
         ("Farm Plan", "/push, /skip, /remove, /target, /queue"),
-        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator"),
+        ("Recovery", "/restart_game, /restart_scrcpy, /restart_emulator, /update"),
+        ("Info", "/version, /check_update"),
         ("Other", "/screenshot, /press, /back, /pause_menu"),
     ]
     for name, commands in sections:
@@ -258,6 +259,9 @@ class DiscordControlServer:
             set_target_callback: Callable[[int], Any] | None = None,
             stop_all_callback: Callable[[], Any] | None = None,
             pause_menu_callback: Callable[[], Any] | None = None,
+            self_update_callback: Callable[[str, bool, bool], Any] | None = None,
+            version_callback: Callable[[], Any] | None = None,
+            check_update_callback: Callable[[], Any] | None = None,
             command_router: Any | None = None,
     ):
         self.state_path = Path(state_path)
@@ -276,6 +280,9 @@ class DiscordControlServer:
         self.set_target_callback = set_target_callback
         self.stop_all_callback = stop_all_callback
         self.pause_menu_callback = pause_menu_callback
+        self.self_update_callback = self_update_callback
+        self.version_callback = version_callback
+        self.check_update_callback = check_update_callback
         self.command_router = command_router
         self.router_mode = command_router is not None
         self.thread: threading.Thread | None = None
@@ -728,6 +735,70 @@ class DiscordControlServer:
                 await _followup_embed(interaction, build_simple_embed("Pause Menu", "Pause menu reopened."))
             else:
                 await _followup_embed(interaction, build_error_embed(f"Could not reopen pause menu: {message}"))
+
+        @tree.command(name="version", description="Show the running Pyla-RL version and build commit.")
+        @app_commands.describe(instance="Target instance when multi-instance mode is enabled")
+        @app_commands.autocomplete(instance=instance_autocomplete)
+        async def version_command(interaction: discord.Interaction, instance: str | None = None) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            if self.command_router and instance:
+                ok, message = await _route_remote_action(instance, "version")
+            else:
+                ok, message = await run_callback(self.version_callback)
+            if ok:
+                await _followup_embed(interaction, build_simple_embed("Pyla-RL Version", callback_result_message(message)))
+            else:
+                await _followup_embed(interaction, build_error_embed(str(message)))
+
+        @tree.command(name="check_update", description="Check whether a newer Pyla-RL update is available.")
+        @app_commands.describe(instance="Target instance when multi-instance mode is enabled")
+        @app_commands.autocomplete(instance=instance_autocomplete)
+        async def check_update_command(interaction: discord.Interaction, instance: str | None = None) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            if self.command_router and instance:
+                ok, message = await _route_remote_action(instance, "check_update")
+            else:
+                ok, message = await run_callback(self.check_update_callback)
+            if ok:
+                await _followup_embed(interaction, build_simple_embed("Update Status", callback_result_message(message)))
+            else:
+                await _followup_embed(interaction, build_error_embed(str(message)))
+
+        @tree.command(name="update", description="Update Pyla-RL and restart automatically.")
+        @app_commands.describe(
+            ref="Version to install: latest, previous, commit SHA, tag, or branch",
+            force="Update immediately instead of waiting for the next lobby",
+            reinstall="Reinstall even if this folder is already current",
+            instance="Target instance when multi-instance mode is enabled",
+        )
+        @app_commands.autocomplete(instance=instance_autocomplete)
+        async def update_command(
+                interaction: discord.Interaction,
+                ref: str | None = None,
+                force: bool = False,
+                reinstall: bool = False,
+                instance: str | None = None,
+        ) -> None:
+            if not await _guard(interaction):
+                return
+            await _ack(interaction)
+            selected_ref = str(ref or "latest").strip() or "latest"
+            if self.command_router:
+                ok, message = await _route_remote_action(
+                    instance,
+                    "update",
+                    {"ref": selected_ref, "immediate": bool(force), "reinstall": bool(reinstall)},
+                )
+            else:
+                ok, message = await run_callback(self.self_update_callback, selected_ref, bool(reinstall), bool(force))
+            if ok:
+                await _followup_embed(interaction, build_simple_embed("Update Started", callback_result_message(message)))
+            else:
+                await _followup_embed(interaction, build_error_embed(str(message)))
 
         @tree.command(name="help", description="List available Pyla-RL remote commands.")
         async def help_command(interaction: discord.Interaction) -> None:
