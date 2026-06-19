@@ -8,6 +8,8 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
+from subprocess_text import run_text, check_output_text
+
 
 TARGET_PYTHON_VERSION = "3.11.9"
 PYTHON_MAJOR_MINOR = "3.11"
@@ -68,7 +70,7 @@ def verify_windows_signature(path, label, *, required=True):
         return True
     path_literal = _powershell_literal(str(path))
     try:
-        result = subprocess.run(
+        result = run_text(
             [
                 "powershell",
                 "-NoProfile",
@@ -81,7 +83,6 @@ def verify_windows_signature(path, label, *, required=True):
                     "Write-Host ('Signature status: ' + $sig.Status); exit 1"
                 ),
             ],
-            text=True,
             capture_output=True,
             timeout=20,
         )
@@ -109,7 +110,7 @@ def download_with_urllib(url, destination, timeout=45, insecure=False):
 def download_with_powershell(url, destination):
     url_literal = _powershell_literal(url)
     dest_literal = _powershell_literal(str(destination))
-    result = subprocess.run(
+    result = run_text(
         [
             "powershell",
             "-NoProfile",
@@ -121,7 +122,6 @@ def download_with_powershell(url, destination):
                 f"Invoke-WebRequest -Uri {url_literal} -OutFile {dest_literal} -UseBasicParsing"
             ),
         ],
-        text=True,
         capture_output=True,
         timeout=120,
     )
@@ -184,7 +184,7 @@ def download_file(url, destination, label, *, required=True, require_signature=T
 
 def python_info(command):
     try:
-        output = subprocess.check_output(
+        output = check_output_text(
             command + [
                 "-c",
                 "import platform,sys; "
@@ -193,7 +193,6 @@ def python_info(command):
                 "print(platform.architecture()[0])",
             ],
             stderr=subprocess.DEVNULL,
-            text=True,
         ).strip().splitlines()
     except Exception:
         return None
@@ -208,10 +207,9 @@ def python_info(command):
 
 def _venv_pip_usable(venv_python: Path) -> bool:
     try:
-        result = subprocess.run(
+        result = run_text(
             [str(venv_python), "-m", "pip", "--version"],
             capture_output=True,
-            text=True,
             timeout=30,
         )
         return result.returncode == 0

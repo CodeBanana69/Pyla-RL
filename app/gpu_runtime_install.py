@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from subprocess_text import run_text
+
 from gpu_support import (
     auto_candidate_variants,
     primary_vendor,
@@ -32,10 +34,9 @@ def project_root() -> Path:
 
 def _numpy_major_version(python=None) -> int | None:
     python = python or sys.executable
-    completed = subprocess.run(
+    completed = run_text(
         [python, "-c", "import numpy; print(numpy.__version__)"],
         capture_output=True,
-        text=True,
         check=False,
     )
     if completed.returncode != 0:
@@ -66,10 +67,9 @@ def repair_numpy(python=None, *, verbose=True, reinstall_opencv=True) -> bool:
         print(f"Repairing NumPy ({label} -> 1.x) for OpenCV 4.8 compatibility...")
 
     def _pip_no_deps(*packages: str) -> None:
-        completed = subprocess.run(
+        completed = run_text(
             [python, "-m", "pip", "install", "--force-reinstall", "--no-deps", *packages],
             capture_output=True,
-            text=True,
             check=False,
         )
         if completed.returncode != 0:
@@ -121,10 +121,9 @@ def _pip_install_torch_cuda(compute_cap=0.0, python=None, *, force_reinstall=Fal
 
 def _onnx_package_installed(package: str, python=None) -> bool:
     python = python or sys.executable
-    completed = subprocess.run(
+    completed = run_text(
         [python, "-m", "pip", "show", package],
         capture_output=True,
-        text=True,
         check=False,
     )
     return completed.returncode == 0
@@ -241,11 +240,10 @@ print({BENCHMARK_MARKER!r} + json.dumps({{
     "ips": {int(runs)} / elapsed,
 }}))
 """
-    completed = subprocess.run(
+    completed = run_text(
         [python, "-c", code],
         cwd=str(root),
         capture_output=True,
-        text=True,
         timeout=timeout,
     )
     if completed.stdout.strip():

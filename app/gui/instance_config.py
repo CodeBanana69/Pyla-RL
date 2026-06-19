@@ -23,6 +23,7 @@ from utils import (
     resolve_project_path,
     save_dict_as_toml,
 )
+from subprocess_text import run_text
 
 
 INSTANCES_CONFIG_PATH = "cfg/instances.toml"
@@ -245,10 +246,9 @@ def list_ldplayer_instances(general: dict[str, Any] | None = None) -> list[dict[
     if not console:
         return []
     try:
-        completed = subprocess.run(
+        completed = run_text(
             [console, "list2"],
             capture_output=True,
-            text=True,
             timeout=10,
             check=False,
         )
@@ -280,10 +280,9 @@ def list_mumu_instances(general: dict[str, Any] | None = None) -> list[dict[str,
     if not manager:
         return []
     try:
-        completed = subprocess.run(
+        completed = run_text(
             [manager, "info", "--vmindex", "all"],
             capture_output=True,
-            text=True,
             timeout=10,
             check=False,
         )

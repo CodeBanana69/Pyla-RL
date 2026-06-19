@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+
+from subprocess_text import run_text, check_output_text
 import sys
 import time
 from pathlib import Path
@@ -25,10 +27,9 @@ def project_dir() -> Path:
 def python_version_info(python_command: list[str] | str) -> tuple[int, int, int] | None:
     if isinstance(python_command, str):
         python_command = [python_command]
-    completed = subprocess.run(
+    completed = run_text(
         python_command + ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
         capture_output=True,
-        text=True,
         check=False,
     )
     if completed.returncode != 0:
@@ -122,10 +123,9 @@ def probe_cv2(python_command: list[str]) -> dict:
         "    print(json.dumps({'ok': False, 'executable': sys.executable, 'error': str(exc)}))\n"
     )
     try:
-        output = subprocess.check_output(
+        output = check_output_text(
             python_command + ["-c", script],
             stderr=subprocess.STDOUT,
-            text=True,
         ).strip()
         return json.loads(output.splitlines()[-1])
     except Exception as exc:
@@ -163,10 +163,9 @@ def probe_runtime_imports(python_command: list[str]) -> dict:
         "}))\n"
     )
     try:
-        output = subprocess.check_output(
+        output = check_output_text(
             python_command + ["-c", script],
             stderr=subprocess.STDOUT,
-            text=True,
         ).strip()
         return json.loads(output.splitlines()[-1])
     except Exception as exc:

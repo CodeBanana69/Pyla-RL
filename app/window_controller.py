@@ -7,6 +7,8 @@ import math
 import os
 import re
 import subprocess
+
+from subprocess_text import run_text
 import threading
 import time
 import cv2
@@ -406,10 +408,9 @@ def get_running_mumu_profiles(config=None):
     if not manager_path:
         return []
     try:
-        completed = subprocess.run(
+        completed = run_text(
             [manager_path, "info", "--vmindex", "all"],
             capture_output=True,
-            text=True,
             timeout=10,
         )
         if completed.returncode != 0:
@@ -437,10 +438,9 @@ def get_mumu_profiles(config=None):
     if not manager_path:
         return []
     try:
-        completed = subprocess.run(
+        completed = run_text(
             [manager_path, "info", "--vmindex", "all"],
             capture_output=True,
-            text=True,
             timeout=10,
         )
         if completed.returncode != 0:
@@ -814,7 +814,7 @@ class WindowController:
         )
         try:
             if wait and isinstance(command, list):
-                completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                completed = run_text(command, capture_output=True, timeout=30)
                 stdout = completed.stdout.strip()
                 stderr = completed.stderr.strip()
                 if stdout:

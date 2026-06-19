@@ -14,6 +14,7 @@ from gui.instance_config import (
     port_for_profile_index,
 )
 from utils import load_toml_as_dict
+from subprocess_text import run_text
 
 
 def run_preflight_fix(action: str, *, emulator: str | None = None, port: int | None = None) -> tuple[bool, str]:
@@ -57,10 +58,9 @@ def _fix_gpu_runtime() -> tuple[bool, str]:
     variant = recommended_setup_onnx_variant(primary_vendor())
     script = str(Path(__file__).resolve().parents[1] / "tools" / "fix_gpu_runtime.py")
     python_command = _runtime_python_command()
-    completed = subprocess.run(
+    completed = run_text(
         python_command + [script, variant],
         capture_output=True,
-        text=True,
         timeout=600,
         check=False,
     )
@@ -76,10 +76,9 @@ def _start_emulator(emulator: str, port: int) -> tuple[bool, str]:
         manager = _mumu_manager_path()
         if not manager:
             return False, "MuMu manager not found."
-        completed = subprocess.run(
+        completed = run_text(
             [manager, "control", "--vmindex", str(index), "launch"],
             capture_output=True,
-            text=True,
             timeout=30,
             check=False,
         )
@@ -89,10 +88,9 @@ def _start_emulator(emulator: str, port: int) -> tuple[bool, str]:
     console = _ldplayer_console_path()
     if not console:
         return False, "LDPlayer console not found."
-    completed = subprocess.run(
+    completed = run_text(
         [console, "launch", "--index", str(index)],
         capture_output=True,
-        text=True,
         timeout=30,
         check=False,
     )

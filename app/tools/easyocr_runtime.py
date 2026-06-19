@@ -6,6 +6,8 @@ import json
 import subprocess
 from typing import Sequence
 
+from subprocess_text import run_text
+
 EASYOCR_MANUAL_DEPS = [
     "scipy",
     "PyYAML",
@@ -76,10 +78,9 @@ def probe_easyocr_runtime(
         python_command = [python_command]
     timeout = SMOKE_TEST_TIMEOUT if smoke_test else FAST_PROBE_TIMEOUT
     try:
-        completed = subprocess.run(
+        completed = run_text(
             python_command + ["-c", _probe_script(smoke_test=smoke_test)],
             capture_output=True,
-            text=True,
             timeout=timeout,
             check=False,
         )

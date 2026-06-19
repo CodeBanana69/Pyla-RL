@@ -16,6 +16,7 @@ EMULATOR_PORTS = {
 SUPPORTED_EMULATORS = tuple(EMULATOR_PORTS.keys())
 ADB_SERVER_PORT = 5037
 
+from subprocess_text import run_text
 from utils import resolve_project_path
 
 LOCAL_ADB_EXE = Path(resolve_project_path("bin/adb.exe"))
@@ -74,10 +75,9 @@ def _run_adb(args: list[str], serial: str | None = None, timeout: int = 8) -> tu
         command.extend(["-s", serial])
     command.extend(args)
     try:
-        result = subprocess.run(
+        result = run_text(
             command,
             capture_output=True,
-            text=True,
             timeout=timeout,
             check=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -359,10 +359,9 @@ def detect_emulator_process(emulator: str) -> tuple[bool, str]:
     if not shutil.which("tasklist"):
         return False, "tasklist unavailable"
     try:
-        result = subprocess.run(
+        result = run_text(
             ["tasklist"],
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,

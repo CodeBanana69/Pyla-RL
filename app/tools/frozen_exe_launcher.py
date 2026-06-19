@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from subprocess_text import run_text, check_output_text
+
 PYTHON_MAJOR_MINOR = "3.11"
 SETUP_SCRIPT = Path("tools") / "setup_bootstrap.py"
 UPDATER_SCRIPT = Path("tools") / "updater.py"
@@ -22,7 +24,7 @@ def bundle_dir_from_install(install_root: Path) -> Path:
 
 def _python_info(command: list[str]) -> str | None:
     try:
-        output = subprocess.check_output(
+        output = check_output_text(
             command
             + [
                 "-c",
@@ -32,7 +34,6 @@ def _python_info(command: list[str]) -> str | None:
                 "print(platform.architecture()[0])",
             ],
             stderr=subprocess.DEVNULL,
-            text=True,
             timeout=30,
         ).strip().splitlines()
     except Exception:

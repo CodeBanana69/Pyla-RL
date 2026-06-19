@@ -16,6 +16,7 @@ from tools.updater import (
     read_local_update_sha,
     write_local_update_info,
 )
+from subprocess_text import run_text
 
 
 def resolve_install_dir() -> Path:
@@ -58,11 +59,10 @@ def read_git_head_sha(install_dir: Path) -> str | None:
     if not (install_dir / ".git").exists():
         return None
     try:
-        result = subprocess.run(
+        result = run_text(
             ["git", "rev-parse", "HEAD"],
             cwd=str(install_dir),
             capture_output=True,
-            text=True,
             timeout=3,
             check=False,
         )

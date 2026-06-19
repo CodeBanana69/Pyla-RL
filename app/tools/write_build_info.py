@@ -9,15 +9,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from gui.brand import OFFICIAL_GITHUB
+from subprocess_text import run_text
 
 
 def _git_value(args):
     try:
-        result = subprocess.run(
+        result = run_text(
             ["git", *args],
             cwd=ROOT,
             capture_output=True,
-            text=True,
             timeout=5,
             check=False,
         )

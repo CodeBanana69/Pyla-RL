@@ -15,6 +15,7 @@ from tools.setup_bootstrap import (
 )
 from tools.easyocr_runtime import EASYOCR_REPAIR_HINT, probe_easyocr_runtime, verify_easyocr_runtime
 from tools.python_runtime import probe_runtime_imports, verify_runtime_imports, write_setup_status
+from subprocess_text import run_text
 
 
 @dataclass
@@ -30,10 +31,9 @@ def bundle_dir(project_dir: Path) -> Path:
 
 def _probe_pyside6(python_command: list[str]) -> bool:
     try:
-        result = subprocess.run(
+        result = run_text(
             python_command + ["-c", "import PySide6"],
             capture_output=True,
-            text=True,
             timeout=60,
         )
         return result.returncode == 0

@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from subprocess_text import run_text
+
 BUNDLE = Path(__file__).resolve().parents[1]
 INSTALL_ROOT = BUNDLE.parent
 BUILD_DIR = INSTALL_ROOT / "build" / "pyinstaller"
@@ -69,11 +71,10 @@ def install_to_project_root(built: Path, exe_name: str) -> Path:
 
 
 def smoke_test(exe_path: Path, expected_text: str) -> None:
-    result = subprocess.run(
+    result = run_text(
         [str(exe_path), "--smoke-test"],
         cwd=str(INSTALL_ROOT),
         capture_output=True,
-        text=True,
         timeout=120,
         check=False,
     )

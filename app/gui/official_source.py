@@ -5,6 +5,7 @@ from pathlib import Path
 
 from gui.brand import OFFICIAL_GITHUB
 from utils import resolve_project_path
+from subprocess_text import run_text
 
 BUILD_INFO_PATH = Path(resolve_project_path("cfg/build_info.json"))
 ALLOWED_GIT_REMOTES = ("CodeBanana69/Pyla-RL",)
@@ -37,10 +38,9 @@ def _build_info_matches_official(build_info):
 
 def detect_git_remote():
     try:
-        result = subprocess.run(
+        result = run_text(
             ["git", "remote", "get-url", "origin"],
             capture_output=True,
-            text=True,
             timeout=3,
             check=False,
         )
@@ -53,10 +53,9 @@ def detect_git_remote():
 
 def detect_git_commit():
     try:
-        result = subprocess.run(
+        result = run_text(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
-            text=True,
             timeout=3,
             check=False,
         )

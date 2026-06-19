@@ -38,6 +38,7 @@ def _wmic_video_controllers():
         output = subprocess.check_output(
             ["wmic", "path", "win32_VideoController", "get", "name"],
             encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
         )
     except Exception:
@@ -64,6 +65,7 @@ def _cim_video_controllers():
                 "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }",
             ],
             encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
             timeout=20,
         )
@@ -110,6 +112,7 @@ def detect_graphics_cards():
         output = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader,nounits"],
             encoding="utf-8",
+            errors="replace",
             stderr=subprocess.DEVNULL,
         ).strip()
         for line in output.splitlines():
@@ -166,6 +169,7 @@ def get_gpu_data():
             output = subprocess.check_output(
                 ["nvidia-smi", "--query-gpu=name,compute_cap", "--format=csv,noheader,nounits"],
                 encoding="utf-8",
+                errors="replace",
                 stderr=subprocess.DEVNULL,
             ).strip()
             nvidia_name, compute_cap = output.split(", ")
