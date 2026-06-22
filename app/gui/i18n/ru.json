@@ -158,7 +158,7 @@
     "refresh_status": "Обновить",
     "launcher_hint": "Запуск: {launcher}",
     "no_launcher_hint": "Updater не найден в папке установки. Скачайте Pyla-RL с GitHub или запустите update.cmd.",
-    "no_updater": "Updater не найден — поместите updater.exe или update.cmd в папку установки"
+    "no_updater": "Updater не найден — поместите update.cmd в папку установки"
   },
   "theme": {
     "light": "светлая",
@@ -552,7 +552,7 @@
     "wizard_reopened": "Мастер настройки открыт снова.",
     "wizard_reset": "Мастер настройки появится при следующем запуске. Открываем сейчас.",
     "license_accepted": "Лицензия принята. Pyla-RL бесплатен и не подлежит продаже.",
-    "updates_with_updater": "Открыты официальные релизы GitHub. Запустите updater.exe в этой папке для установки обновлений.",
+    "updates_with_updater": "Открыты официальные релизы GitHub. Запустите update.cmd в этой папке для установки обновлений.",
     "updates_opened": "Открыты официальные релизы GitHub.",
     "updater_launched": "Updater запущен. Следуйте подсказкам в окне обновления.",
     "updater_launched_cmd": "Запущен update.cmd. Следуйте подсказкам в консоли.",
@@ -617,7 +617,7 @@
     "easyocr": {
       "label": "EasyOCR (выбор бойца)",
       "detail_ok": "EasyOCR готов (torch {torch})",
-      "detail_fail": "EasyOCR отсутствует или повреждён — снова запустите setup.exe в папке проекта. {error}"
+      "detail_fail": "EasyOCR отсутствует или повреждён — снова запустите setup.cmd в папке проекта. {error}"
     },
     "fix": {
       "reconnect_adb": "Переподключить ADB",
@@ -630,7 +630,7 @@
   "tutorial": {
     "getting-started": {
       "title": "Начало работы",
-      "summary": "1. Запустите setup.exe в папке проекта.\n2. Запустите pyla-rl.bat (или python app/main.py).\n3. Установите разрешение эмулятора 1920×1080.\n4. Откройте Brawl Stars в эмуляторе перед СТАРТ."
+      "summary": "1. Запустите setup.cmd в папке проекта.\n2. Запустите pyla-rl.bat (или python app/main.py).\n3. Установите разрешение эмулятора 1920×1080.\n4. Откройте Brawl Stars в эмуляторе перед СТАРТ."
     },
     "overview": {
       "title": "Обзор и СТАРТ",

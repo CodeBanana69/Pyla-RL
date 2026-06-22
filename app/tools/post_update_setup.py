@@ -76,7 +76,7 @@ def run_full_project_setup(
     python_command, python_executable = find_python()
     if not python_command:
         message = (
-            "Python 3.11 64-bit was not found. Run setup.exe once to install Python, "
+            "Python 3.11 64-bit was not found. Run setup.cmd once to install Python, "
             "then run: py -3.11-64 app\\setup.py --pyla-install"
         )
         print(message)
@@ -182,6 +182,6 @@ def run_post_update_setup(project_dir: Path) -> PostUpdateSetupResult:
         ok=False,
         message=(
             "Update files were installed, but dependency setup failed. "
-            "Run setup.exe or: py -3.11-64 app\\setup.py --pyla-install"
+            "Run setup.cmd or: py -3.11-64 app\\setup.py --pyla-install"
         ),
     )

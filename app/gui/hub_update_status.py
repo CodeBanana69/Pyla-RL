@@ -87,16 +87,6 @@ def read_effective_local_sha(install_dir: Path) -> tuple[str | None, str]:
 
 def resolve_updater_launcher(install_dir: Path | None = None) -> dict | None:
     root = Path(install_dir) if install_dir else resolve_install_dir()
-    exe = root / "updater.exe"
-    if exe.is_file():
-        return {
-            "kind": "exe",
-            "label": "updater.exe",
-            "path": str(exe),
-            "cwd": str(root),
-            "argv": [str(exe)],
-        }
-
     cmd_script = root / "update.cmd"
     if cmd_script.is_file():
         return {
@@ -140,11 +130,9 @@ def launch_updater(install_dir: Path | None = None) -> tuple[bool, str]:
     )
 
     kind = launcher["kind"]
-    if kind == "cmd":
-        return True, t("msg.updater_launched_cmd")
     if kind == "python":
         return True, t("msg.updater_launched_dev")
-    return True, t("msg.updater_launched")
+    return True, t("msg.updater_launched_cmd")
 
 
 def default_update_status() -> dict:

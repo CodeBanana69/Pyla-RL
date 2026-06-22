@@ -166,7 +166,7 @@ def variant_status_labels(variant):
 
 
 def setup_candidate_variants(cards=None):
-    """Runtime install order for unattended setup.exe."""
+    """Runtime install order for unattended setup.cmd / auto install."""
     vendor = primary_vendor(cards)
     if vendor == "nvidia":
         return ["cuda", "directml", "cpu"]

@@ -304,7 +304,7 @@ def _run_preflight_checks(correct_zoom=True, emulator=None, port=None, persist_p
             else:
                 easyocr_detail = str(probe.get("error") or "EasyOCR imports failed")
         else:
-            easyocr_detail = "Project Python not found — run setup.exe first"
+            easyocr_detail = "Project Python not found — run setup.cmd first"
     except Exception as exc:
         easyocr_detail = f"EasyOCR check failed: {exc}"
 

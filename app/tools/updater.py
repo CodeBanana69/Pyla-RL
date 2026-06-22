@@ -43,125 +43,23 @@ SKIPPED_FILES = {
     "support_reporting.local.toml",
 }
 
-ROOT_LAUNCHER_BINARIES = (
-    "setup.exe",
-    "updater.exe",
-)
-
-ROOT_LAUNCHER_FILES_ON_UPDATE = (
-    "pyla-rl.bat",
-    "readme.md",
-    "README.md",
-    "setup.cmd",
-    "update.cmd",
-)
-
 OBSOLETE_FILES = {
     "downgrader.exe",
+    "setup.exe",
+    "updater.exe",
 }
-
-PENDING_LAUNCHER_SUFFIX = ".new"
-FINISH_UPDATE_SCRIPT = "_pyla_finish_update.cmd"
-
-
-def running_executable_path() -> Path | None:
-    if not getattr(sys, "frozen", False):
-        return None
-    try:
-        return Path(sys.executable).resolve()
-    except OSError:
-        return None
-
-
-def pending_launcher_path(destination: Path) -> Path:
-    return destination.with_name(destination.name + PENDING_LAUNCHER_SUFFIX)
-
-
-def is_running_executable(path: Path) -> bool:
-    running = running_executable_path()
-    if running is None:
-        return False
-    try:
-        return path.resolve() == running
-    except OSError:
-        return False
-
-
-def apply_pending_launcher_updates(project_dir: Path) -> list[str]:
-    installed: list[str] = []
-    for name in ROOT_LAUNCHER_BINARIES:
-        destination = project_dir / name
-        pending = pending_launcher_path(destination)
-        if not pending.is_file():
-            continue
-        try:
-            if destination.exists():
-                backup = destination.with_suffix(destination.suffix + ".old")
-                backup.unlink(missing_ok=True)
-                try:
-                    destination.replace(backup)
-                except OSError:
-                    destination.unlink(missing_ok=True)
-            pending.replace(destination)
-            installed.append(name)
-            print(f"Installed pending update for {name}")
-        except OSError as exc:
-            print(f"Could not install pending update for {name}: {exc}")
-    return installed
-
-
-def stage_launcher_update(project_dir: Path, name: str, source: Path) -> str:
-    destination = project_dir / name
-    if is_running_executable(destination):
-        shutil.copy2(source, pending_launcher_path(destination))
-        return "pending"
-    backup = destination.with_suffix(destination.suffix + ".old")
-    backup.unlink(missing_ok=True)
-    if destination.exists():
-        try:
-            destination.replace(backup)
-        except OSError:
-            pass
-    shutil.copy2(source, destination)
-    return "installed"
-
-
-def schedule_pending_launcher_finalize(project_dir: Path) -> bool:
-    updater_exe = project_dir / "updater.exe"
-    pending = pending_launcher_path(updater_exe)
-    if not pending.is_file() or os.name != "nt":
-        return False
-
-    batch_path = project_dir / FINISH_UPDATE_SCRIPT
-    batch_path.write_text(
-        "\n".join(
-            [
-                "@echo off",
-                "ping 127.0.0.1 -n 2 >nul",
-                f'del /f /q "{updater_exe}" 2>nul',
-                f'move /y "{pending}" "{updater_exe}"',
-                f'del /f /q "{batch_path}" 2>nul',
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    if hasattr(subprocess, "CREATE_NO_WINDOW"):
-        creationflags |= subprocess.CREATE_NO_WINDOW
-    subprocess.Popen(
-        ["cmd", "/c", str(batch_path)],
-        cwd=str(project_dir),
-        creationflags=creationflags,
-        close_fds=True,
-    )
-    return True
 
 
 def copy_root_launcher_files(source_install: Path, project_install: Path) -> list[str]:
-    """Refresh text launchers from the update zip. Frozen exes stay on disk."""
+    """Refresh root launchers from the update zip."""
     updated: list[str] = []
-    for name in ROOT_LAUNCHER_FILES_ON_UPDATE:
+    for name in (
+        "pyla-rl.bat",
+        "readme.md",
+        "README.md",
+        "setup.cmd",
+        "update.cmd",
+    ):
         source = source_install / name
         if not source.is_file():
             continue
@@ -214,8 +112,6 @@ BUNDLE_DIR_NAMES = (
 
 
 def install_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 
@@ -655,11 +551,11 @@ def main() -> int:
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Pyla-RL updater")
         print("Downloads a GitHub update and keeps your cfg settings.")
-        print("Run updater.exe, then choose 1 for newest or 0 for previous.")
+        print("Run update.cmd, then choose 1 for newest or 0 for previous.")
         print("Use --ref <commit/tag/branch> to install or downgrade to a specific version.")
         print("Use --list-versions to show recent main commits you can pass to --ref.")
         print("Use --force to reinstall even when this folder is already current.")
-        print("Use --smoke-test to verify that updater.exe starts.")
+        print("Use --smoke-test to verify that update.cmd starts.")
         print("Use --skip-setup to install files only without dependency repair.")
         return 0
 
@@ -670,11 +566,11 @@ def main() -> int:
     print(f"Project folder: {project_dir}")
 
     if not is_valid_install(project_dir):
-        print("updater.exe must be inside the Pyla-RL install folder next to app/main.py and app/cfg/.")
+        print("update.cmd must be inside the Pyla-RL install folder next to app/main.py and app/cfg/.")
         wait_for_enter()
         return 1
 
-    apply_pending_launcher_updates(project_dir)
+    remove_obsolete_files(project_dir)
 
     if "--smoke-test" in sys.argv:
         print("Smoke test passed. Updater can see the Pyla-RL project folder.")

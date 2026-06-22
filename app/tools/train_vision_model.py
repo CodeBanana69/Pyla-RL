@@ -27,7 +27,7 @@ def main():
     try:
         from ultralytics import YOLO
     except ImportError as exc:
-        raise SystemExit("Missing ultralytics. Run setup.exe or python setup.py install first.") from exc
+        raise SystemExit("Missing ultralytics. Run setup.cmd or python setup.py install first.") from exc
 
     batch = int(args.batch) if str(args.batch).lstrip("-").isdigit() else args.batch
     model = YOLO(args.base)

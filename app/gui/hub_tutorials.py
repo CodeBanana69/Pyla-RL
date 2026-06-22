@@ -29,7 +29,7 @@ TUTORIAL_TOPICS: list[dict[str, str]] = [
         "getting-started",
         "Getting Started",
         "Help",
-        "1. Run setup.exe in the project folder.\n"
+        "1. Run setup.cmd in the project folder.\n"
         "2. Launch pyla-rl.bat (or python app/main.py).\n"
         "3. Set emulator resolution to 1920x1080.\n"
         "4. Open Brawl Stars in the emulator before START.",

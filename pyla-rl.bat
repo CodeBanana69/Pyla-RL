@@ -63,7 +63,7 @@ if not errorlevel 1 (
 )
 
 echo Could not find a 64-bit Python 3.11 install.
-echo Run setup.exe in this folder first, then try again.
+echo Run setup.cmd in this folder first, then try again.
 echo.
 pause
 exit /b 1
@@ -80,8 +80,8 @@ echo.
 if errorlevel 1 (
     echo Dependencies are not installed for this Python.
     echo.
-    if exist "setup.exe" (
-        echo Run setup.exe in this folder again, then launch pyla-rl.bat.
+    if exist "setup.cmd" (
+        echo Run setup.cmd in this folder again, then launch pyla-rl.bat.
     ) else (
         echo Run: %PY% app\setup.py --pyla-install
     )

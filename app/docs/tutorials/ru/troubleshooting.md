@@ -10,7 +10,7 @@
 ## Низкий IPS
 
 1. Выполните `python tools/performance_check.py`.
-2. Если провайдер — CPU, снова запустите `setup.exe` или установите `cpu_or_gpu = "directml"` в `cfg/general_config.toml`.
+2. Если провайдер — CPU, снова запустите `setup.cmd` или установите `cpu_or_gpu = "directml"` в `cfg/general_config.toml`.
 3. Установите эмулятор на 1920×1080, 60 FPS, отключите эко-режимы и низкий FPS.
 4. ~60 IPS — норма при `scrcpy_max_fps = 60`.
 

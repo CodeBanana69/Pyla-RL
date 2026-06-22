@@ -24,7 +24,7 @@ FAST_PROBE_TIMEOUT = 60
 SMOKE_TEST_TIMEOUT = 180
 
 EASYOCR_REPAIR_HINT = (
-    "Re-run setup.exe in the project folder, or install missing packages with:\n"
+    "Re-run setup.cmd in the project folder, or install missing packages with:\n"
     f'  pip install torch torchvision --index-url {TORCH_CPU_INDEX}\n'
     f"  pip install --force-reinstall --no-deps easyocr\n"
     f"  pip install {' '.join(EASYOCR_MANUAL_DEPS)}"

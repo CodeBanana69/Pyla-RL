@@ -63,7 +63,7 @@ def ensure_pyside6_available():
         ])
         return
     raise ModuleNotFoundError(
-        "No module named 'PySide6'. Run setup.exe or `py -3.11-64 -m pip install PySide6>=6.7.0`."
+        "No module named 'PySide6'. Run setup.cmd or `py -3.11-64 -m pip install PySide6>=6.7.0`."
     )
 
 
@@ -1011,8 +1011,7 @@ class QmlHub:
                     from gui.brand import OFFICIAL_GITHUB
 
                     webbrowser.open(f"{OFFICIAL_GITHUB}/releases")
-                    updater_exe = Path("updater.exe")
-                    if updater_exe.exists():
+                    if Path("update.cmd").exists():
                         return t("msg.updates_with_updater")
                     return t("msg.updates_opened")
                 if action == "refresh-update-status":

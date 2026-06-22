@@ -10,7 +10,7 @@
 ## Low IPS
 
 1. Run `python tools/performance_check.py`.
-2. If provider is CPU, rerun `setup.exe` or set `cpu_or_gpu = "directml"` in `cfg/general_config.toml`.
+2. If provider is CPU, rerun `setup.cmd` or set `cpu_or_gpu = "directml"` in `cfg/general_config.toml`.
 3. Set emulator to 1920x1080, 60 FPS, disable eco/low-FPS modes.
 4. ~60 IPS is normal when `scrcpy_max_fps = 60`.
 

@@ -52,7 +52,7 @@ def unsupported_python_message(python_command: list[str] | str) -> str:
     executable = python_command if isinstance(python_command, str) else " ".join(python_command)
     return (
         f"Pyla-RL requires Python 3.11 64-bit (current: {label} via {executable}). "
-        "Run setup.exe, use pyla-rl.bat, or rerun with: py -3.11-64 tools\\fix_gpu_runtime.py auto"
+        "Run setup.cmd, use pyla-rl.bat, or rerun with: py -3.11-64 tools\\fix_gpu_runtime.py auto"
     )
 
 

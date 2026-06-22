@@ -12,7 +12,7 @@ Back to the main [README](../README.md) for install links, badges, and feature o
 
 ## Setup and running
 
-- [Getting Started](tutorials/getting-started.md) — setup.exe, pyla-rl.bat, emulator basics
+- [Getting Started](tutorials/getting-started.md) — setup.cmd, pyla-rl.bat, emulator basics
 - [Overview and START](tutorials/overview-and-start.md) — pre-flight checks, modes, performance profiles
 
 ## Farm plans and instances

@@ -53,7 +53,7 @@ class EasyOCRRuntimeTest(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             verify_easyocr_runtime(["python"])
         self.assertIn("scipy: missing", str(ctx.exception))
-        self.assertIn("setup.exe", EASYOCR_REPAIR_HINT)
+        self.assertIn("setup.cmd", EASYOCR_REPAIR_HINT)
 
     @patch("tools.easyocr_runtime.subprocess.check_call")
     def test_install_easyocr_stack_sequence(self, mock_check_call):

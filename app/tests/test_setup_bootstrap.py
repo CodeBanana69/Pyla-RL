@@ -79,7 +79,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("onnxruntime", source)
         self.assertIn("get_available_providers", source)
         self.assertIn("pyla_python.txt", source)
-        self.assertIn("setup.exe", source)
+        self.assertIn("setup.cmd", source)
         self.assertIn("fix_gpu_runtime.py auto", source)
         self.assertIn("legacy_path.unlink()", source)
 
@@ -120,7 +120,7 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("PYLAAI_NUMPY_REPAIR", source)
         self.assertIn("ModuleNotFoundError", source)
         launcher = Path("pyla-rl.bat").read_text(encoding="utf-8")
-        self.assertIn("setup.exe", launcher)
+        self.assertIn("setup.cmd", launcher)
         self.assertIn("onnxruntime", launcher)
 
     def test_setup_verifies_onnxruntime_before_completion(self):
@@ -185,12 +185,6 @@ class SetupBootstrapTests(unittest.TestCase):
         self.assertIn("from tools.dependency_repair import repair_all_conflicts", source)
         self.assertIn("verify_pip_health", source)
         self.assertIn("Installing EasyOCR stack (after GPU runtime)", source)
-
-    def test_frozen_launcher_pauses_on_setup_failure(self):
-        source = Path("app/tools/frozen_exe_launcher.py").read_text(encoding="utf-8")
-
-        self.assertIn("Press Enter to close", source)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,7 +8,7 @@
 ![Обзор Pyla-RL Hub](../assets/hub-overview.png)
 
 1. Скачайте или клонируйте Pyla-RL с [GitHub](https://github.com/CodeBanana69/Pyla-RL) (см. бейджи и ссылки в [основном README](../../README.md)).
-2. Запустите `setup.exe` в папке проекта.
+2. Запустите `setup.cmd` в папке проекта.
 3. Дождитесь установки Python 3.11 и зависимостей.
 
 ## Запуск

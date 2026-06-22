@@ -234,7 +234,7 @@ def describe_directml_adapter(device_id=None, cards=None):
 
 
 def recommended_setup_onnx_variant(target=None, cards=None):
-    """Pick the ONNX runtime variant for unattended setup.exe / auto install."""
+    """Pick the ONNX runtime variant for unattended setup.cmd / auto install."""
     cards = cards if cards is not None else detect_graphics_cards()
     target_key = str(target or primary_vendor(cards) or "cpu").strip().lower()
     if target_key == "nvidia":

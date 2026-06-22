@@ -26,7 +26,7 @@ def main():
     print("PylaAi-XXZ performance profile")
     print(f"Python: {platform.python_version()} {platform.architecture()[0]}")
     if platform.architecture()[0] != "64bit":
-        print("WARNING: 32-bit Python is not supported. Run setup.exe to install Python 3.11 64-bit.")
+        print("WARNING: 32-bit Python is not supported. Run setup.cmd to install Python 3.11 64-bit.")
 
     print(get_performance_profile_summary(args.profile))
     result = apply_performance_profile(args.profile, save=not args.dry_run)

@@ -21,8 +21,6 @@ VC_REDIST_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 
 
 def install_dir():
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 
@@ -58,11 +56,11 @@ def run(command, cwd=None, env=None):
 
 def ensure_supported_windows():
     if platform.system() != "Windows":
-        print("This setup.exe is for Windows only.")
+        print("This setup helper is for Windows only.")
         input("Press Enter to close...")
         return False
     if platform.machine().lower() not in ("amd64", "x86_64"):
-        print("This setup.exe requires 64-bit Windows.")
+        print("This setup helper requires 64-bit Windows.")
         input("Press Enter to close...")
         return False
     return True
@@ -334,7 +332,7 @@ def _main_impl():
     setup_py = app_bundle / "setup.py"
     main_py = app_bundle / "main.py"
     if not setup_py.exists() or not main_py.exists():
-        print("setup.exe must be placed in the Pyla-RL project folder next to app/setup.py and app/main.py.")
+        print("setup.cmd must be placed in the Pyla-RL project folder next to app/setup.py and app/main.py.")
         input("Press Enter to close...")
         return 1
 

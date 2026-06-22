@@ -158,7 +158,7 @@
     "refresh_status": "Refresh",
     "launcher_hint": "Launcher: {launcher}",
     "no_launcher_hint": "No updater found in the install folder. Download Pyla-RL from GitHub or run update.cmd.",
-    "no_updater": "No updater found — place updater.exe or update.cmd in the install folder"
+    "no_updater": "No updater found — place update.cmd in the install folder"
   },
   "theme": {
     "light": "light",
@@ -552,7 +552,7 @@
     "wizard_reopened": "Setup wizard reopened.",
     "wizard_reset": "Setup wizard will show again on next launch. Opening it now.",
     "license_accepted": "License accepted. Pyla-RL is free and must not be sold.",
-    "updates_with_updater": "Opened official GitHub releases. Run updater.exe in this folder to install updates.",
+    "updates_with_updater": "Opened official GitHub releases. Run update.cmd in this folder to install updates.",
     "updates_opened": "Opened official GitHub releases.",
     "updater_launched": "Updater started. Follow the prompts in the updater window.",
     "updater_launched_cmd": "Started update.cmd. Follow the prompts in the console window.",
@@ -617,7 +617,7 @@
     "easyocr": {
       "label": "EasyOCR (brawler selection)",
       "detail_ok": "EasyOCR ready (torch {torch})",
-      "detail_fail": "EasyOCR is missing or broken — re-run setup.exe in the project folder. {error}"
+      "detail_fail": "EasyOCR is missing or broken — re-run setup.cmd in the project folder. {error}"
     },
     "fix": {
       "reconnect_adb": "Reconnect ADB",
@@ -630,7 +630,7 @@
   "tutorial": {
     "getting-started": {
       "title": "Getting Started",
-      "summary": "1. Run setup.exe in the project folder.\n2. Launch pyla-rl.bat (or python app/main.py).\n3. Set emulator resolution to 1920x1080.\n4. Open Brawl Stars in the emulator before START."
+      "summary": "1. Run setup.cmd in the project folder.\n2. Launch pyla-rl.bat (or python app/main.py).\n3. Set emulator resolution to 1920x1080.\n4. Open Brawl Stars in the emulator before START."
     },
     "overview": {
       "title": "Overview and START",

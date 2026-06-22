@@ -190,8 +190,6 @@ def cleanup_update_artifacts(
     root = Path(install_root)
     update_artifacts = (
         root / "_pyla_finish_update.cmd",
-        root / "updater.exe.new",
-        root / "setup.exe.new",
     )
     for path in update_artifacts:
         if path.is_file() and _age_seconds(path) >= stale_update_seconds:
@@ -199,6 +197,8 @@ def cleanup_update_artifacts(
     backup_artifacts = (
         root / "updater.exe.old",
         root / "setup.exe.old",
+        root / "updater.exe.new",
+        root / "setup.exe.new",
     )
     for path in backup_artifacts:
         if path.is_file() and _age_seconds(path) >= stale_backup_seconds:

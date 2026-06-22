@@ -33,7 +33,7 @@ Choose **Balanced**, **Low-end**, or other profiles on Overview. Restart the bot
 The Hub header shows an **update pill** next to the language toggle (EN/RU). It compares your installed `main`-branch commit to GitHub and opens a popover with:
 
 - Installed version and local vs latest commit SHAs
-- **Run updater** (launches `updater.exe` when present)
+- **Run updater** (launches `update.cmd` when present)
 - **Refresh** status
 
 Use `update.exe` / `update.cmd` from the install folder if the pill reports an update is available.

@@ -63,7 +63,7 @@ flowchart LR
 | Brawl Stars API | Trophy autofill when picking brawlers ([setup guide](app/docs/tutorials/brawl-stars-api.md)) |
 | Multi-instance | Parallel LDPlayer / MuMu bots ([guide](app/docs/tutorials/multi-instance.md)) |
 | Performance profiles | Balanced, low-end, quality, high-ips presets |
-| Update pill | Header pill checks `main`-branch freshness; popover shows commits and launches `updater.exe` |
+| Update pill | Header pill checks `main`-branch freshness; popover shows commits and launches `update.cmd` |
 | EN/RU UI | Language toggle in the Hub header; pause window strings follow the same catalog |
 
 ### Remote control
@@ -85,7 +85,7 @@ flowchart LR
 
 ## Quick start
 
-1. Run **`setup.exe`** in the project folder (installs Python 3.11 and dependencies).
+1. Run **`setup.cmd`** in the project folder (installs Python 3.11 and dependencies).
 2. Start **LDPlayer** or **MuMu**, open Brawl Stars, set **1920×1080**.
 3. Launch **`pyla-rl.bat`** → Hub **Overview** → pick emulator → **Run Checks**.
 4. Build a farm plan on **Farm Plan** (or use the legacy picker) → **START**.

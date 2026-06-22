@@ -120,7 +120,7 @@ def main():
     print("Tip: if bot_ips is low but detector-only speed is fine, the emulator feed is the bottleneck (check scrcpy frame FPS below).")
 
     if platform.architecture()[0] != "64bit":
-        print("WARNING: Python is not 64-bit. Re-run setup.exe to install Python 3.11 64-bit.")
+        print("WARNING: Python is not 64-bit. Re-run setup.cmd to install Python 3.11 64-bit.")
     if detector.device == "CPUExecutionProvider":
         print("WARNING: ONNX is running on CPU.")
         print("- Stable GPU fix: py -3.11-64 tools\\fix_gpu_runtime.py directml")

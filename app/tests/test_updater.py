@@ -4,7 +4,6 @@ from pathlib import Path
 
 from core.toml_merge import merge_toml_text, repair_unquoted_windows_paths
 from tools.updater import (
-    apply_pending_launcher_updates,
     backup_preserved_files,
     copy_root_launcher_files,
     copy_update_files,
@@ -12,7 +11,6 @@ from tools.updater import (
     latest_download_url,
     MAIN_BRANCH_ZIP,
     newest_ref,
-    pending_launcher_path,
     previous_ref,
     read_local_update_sha,
     remove_obsolete_files,
@@ -70,6 +68,8 @@ class UpdaterTest(unittest.TestCase):
             (project / "updater.exe").write_text("old updater", encoding="utf-8")
             (project / "setup.exe").write_text("old setup", encoding="utf-8")
             (project / "pyla-rl.bat").write_text("old bat", encoding="utf-8")
+            (project / "setup.cmd").write_text("old setup cmd", encoding="utf-8")
+            (project / "update.cmd").write_text("old update cmd", encoding="utf-8")
             (project / "downgrader.exe").write_text("old downgrader", encoding="utf-8")
 
             (source / "app" / "cfg").mkdir(parents=True)
@@ -84,9 +84,9 @@ class UpdaterTest(unittest.TestCase):
                 '{"matches": 0, "new_only": true, "nested": {"default": 2}}',
                 encoding="utf-8",
             )
-            (source / "updater.exe").write_text("new updater", encoding="utf-8")
-            (source / "setup.exe").write_text("new setup", encoding="utf-8")
             (source / "pyla-rl.bat").write_text("new bat", encoding="utf-8")
+            (source / "setup.cmd").write_text("new setup cmd", encoding="utf-8")
+            (source / "update.cmd").write_text("new update cmd", encoding="utf-8")
             (source / "downgrader.exe").write_text("new downgrader", encoding="utf-8")
             (source / "adb.exe").write_text("new adb", encoding="utf-8")
             (source / "app" / "cfg" / "telegram_config.local.toml").write_text('bot_token = "BAD"\n', encoding="utf-8")
@@ -114,9 +114,11 @@ class UpdaterTest(unittest.TestCase):
             self.assertIn('"old_only": true', custom_state)
             self.assertIn('"default": 2', custom_state)
             self.assertIn('"user": 1', custom_state)
-            self.assertEqual((project / "updater.exe").read_text(encoding="utf-8"), "old updater")
-            self.assertEqual((project / "setup.exe").read_text(encoding="utf-8"), "old setup")
+            self.assertFalse((project / "updater.exe").exists())
+            self.assertFalse((project / "setup.exe").exists())
             self.assertEqual((project / "pyla-rl.bat").read_text(encoding="utf-8"), "new bat")
+            self.assertEqual((project / "setup.cmd").read_text(encoding="utf-8"), "new setup cmd")
+            self.assertEqual((project / "update.cmd").read_text(encoding="utf-8"), "new update cmd")
             self.assertFalse((project / "downgrader.exe").exists())
             self.assertFalse((project / "adb.exe").exists())
             self.assertFalse((project / "app" / "cfg" / "telegram_config.local.toml").exists())
@@ -125,16 +127,14 @@ class UpdaterTest(unittest.TestCase):
             self.assertEqual((project / "app" / "main.py").read_text(encoding="utf-8"), "new")
             self.assertEqual((project / "app" / "new_file.py").read_text(encoding="utf-8"), "added")
 
-    def test_apply_pending_launcher_updates_installs_new_exe(self):
+    def test_remove_obsolete_files_deletes_legacy_exes(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            destination = project / "updater.exe"
-            destination.write_text("old updater", encoding="utf-8")
-            pending_launcher_path(destination).write_text("new updater", encoding="utf-8")
-            installed = apply_pending_launcher_updates(project)
-            self.assertEqual(installed, ["updater.exe"])
-            self.assertEqual(destination.read_text(encoding="utf-8"), "new updater")
-            self.assertFalse(pending_launcher_path(destination).exists())
+            (project / "setup.exe").write_text("legacy", encoding="utf-8")
+            (project / "updater.exe").write_text("legacy", encoding="utf-8")
+            remove_obsolete_files(project)
+            self.assertFalse((project / "setup.exe").exists())
+            self.assertFalse((project / "updater.exe").exists())
 
     def test_toml_merge_keeps_user_values_and_adds_new_defaults(self):
         merged = merge_toml_text(

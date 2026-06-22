@@ -69,10 +69,10 @@ class HubUpdateStatusTest(unittest.TestCase):
                 status = check_update_status(project)
             self.assertEqual(status["status"], "unknown")
 
-    def test_check_update_status_detects_updater_exe_at_install_root(self):
+    def test_check_update_status_detects_update_cmd_at_install_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            (project / "updater.exe").write_text("stub", encoding="utf-8")
+            (project / "update.cmd").write_text("@echo off", encoding="utf-8")
             with patch("gui.hub_update_status.latest_main_sha", return_value="abc"), patch(
                 "gui.hub_update_status.read_effective_local_sha",
                 return_value=("abc", "marker"),
@@ -82,15 +82,14 @@ class HubUpdateStatusTest(unittest.TestCase):
             ):
                 status = check_update_status(project)
             self.assertTrue(status["hasUpdater"])
-            self.assertEqual(status["updaterLauncher"], "updater.exe")
+            self.assertEqual(status["updaterLauncher"], "update.cmd")
 
-    def test_resolve_updater_launcher_prefers_exe_over_cmd(self):
+    def test_resolve_updater_launcher_uses_update_cmd(self):
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp)
-            (project / "updater.exe").write_text("exe", encoding="utf-8")
             (project / "update.cmd").write_text("@echo off", encoding="utf-8")
             launcher = resolve_updater_launcher(project)
-            self.assertEqual(launcher["kind"], "exe")
+            self.assertEqual(launcher["kind"], "cmd")
 
     def test_resolve_updater_launcher_falls_back_to_update_cmd(self):
         with tempfile.TemporaryDirectory() as tmp:
