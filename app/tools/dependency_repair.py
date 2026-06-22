@@ -18,9 +18,10 @@ SCRCPY_CLIENT_URL = (
 
 # pip check warnings we intentionally accept after --no-deps installs.
 _PIP_CHECK_ALLOWLIST = (
-    re.compile(r"easyocr .* requires opencv-python-headless", re.I),
-    re.compile(r"scrcpy-client .* requires adbutils<2", re.I),
-    re.compile(r"scrcpy-client .* requires adbutils.*but you have adbutils 2", re.I),
+    # Allow easyocr having a conflict involving opencv-python-headless
+    re.compile(r"\beasyocr\b.*\bopencv-python-headless\b", re.I),
+    # Allow scrcpy-client having a conflict involving adbutils
+    re.compile(r"\bscrcpy-client\b.*\badbutils\b", re.I),
 )
 
 

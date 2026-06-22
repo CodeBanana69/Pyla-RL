@@ -37,6 +37,19 @@ class DependencyRepairTests(unittest.TestCase):
         self.assertEqual(issues, [])
 
     @patch("tools.dependency_repair.run_text")
+    def test_verify_pip_health_allows_known_scrcpy_has_requirement_warning(self, mock_run_text):
+        mock_run_text.return_value.returncode = 1
+        mock_run_text.return_value.stdout = (
+            "scrcpy-client 0.4.7 has requirement adbutils<2.0.0,>=1.0.8, but you have adbutils 2.12.0.\n"
+        )
+        mock_run_text.return_value.stderr = ""
+
+        ok, issues = verify_pip_health(["python"])
+
+        self.assertTrue(ok)
+        self.assertEqual(issues, [])
+
+    @patch("tools.dependency_repair.run_text")
     def test_verify_pip_health_fails_on_unknown_conflict(self, mock_run_text):
         mock_run_text.return_value.returncode = 1
         mock_run_text.return_value.stdout = "somepackage 1.0 requires missing-dep, which is not installed.\n"
