@@ -167,10 +167,29 @@ class SetupBootstrapTests(unittest.TestCase):
         source = Path("app/tools/fix_gpu_runtime.py").read_text(encoding="utf-8")
         self.assertIn("install_easyocr_stack", source)
         self.assertIn("verify_easyocr_runtime", source)
+        self.assertIn("repair_all_conflicts", source)
         base_start = source.index("BASE_REQUIREMENTS = [")
         base_end = source.index("]", base_start)
         base_block = source[base_start:base_end]
         self.assertNotIn('"easyocr"', base_block)
+
+    def test_setup_bootstrap_pauses_on_setup_failure(self):
+        source = Path("app/tools/setup_bootstrap.py").read_text(encoding="utf-8")
+
+        self.assertIn("pause_before_exit", source)
+        self.assertIn("Setup did not finish cleanly", source)
+
+    def test_setup_uses_dependency_repair(self):
+        source = Path("app/setup.py").read_text(encoding="utf-8")
+
+        self.assertIn("from tools.dependency_repair import repair_all_conflicts", source)
+        self.assertIn("verify_pip_health", source)
+        self.assertIn("Installing EasyOCR stack (after GPU runtime)", source)
+
+    def test_frozen_launcher_pauses_on_setup_failure(self):
+        source = Path("app/tools/frozen_exe_launcher.py").read_text(encoding="utf-8")
+
+        self.assertIn("Press Enter to close", source)
 
 
 if __name__ == "__main__":

@@ -120,7 +120,10 @@ def delegate_to_script(bundle: Path, install_root: Path, script_relative: Path) 
 def launch_setup() -> int:
     install_root = install_root_from_frozen_exe()
     bundle = bundle_dir_from_install(install_root)
-    return delegate_to_script(bundle, install_root, SETUP_SCRIPT)
+    code = delegate_to_script(bundle, install_root, SETUP_SCRIPT)
+    if code != 0 and os.environ.get("PYLAAI_SETUP_NO_PAUSE", "").strip().lower() not in ("1", "true", "yes"):
+        input("Press Enter to close...")
+    return code
 
 
 def launch_updater() -> int:

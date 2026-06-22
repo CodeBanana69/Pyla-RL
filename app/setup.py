@@ -90,12 +90,10 @@ def setup_pyla():
     # OpenCV 4.8 wheels crash with NumPy 2.x (_ARRAY_API / multiarray errors).
     repair_numpy(verbose=True)
 
+    from tools.dependency_repair import repair_all_conflicts, verify_pip_health
+
     # installing some must have dependencies
     print("Installing Core Dependencies...")
-    subprocess.run(
-        [sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
-        check=False,
-    )
     base_reqs = [
         "numpy<2.0.0",
         "customtkinter>=5.2.0", "toml>=0.10.2", "Pillow>=10.0.0", "discord.py>=2.3.2",
@@ -103,9 +101,7 @@ def setup_pyla():
         "google-play-scraper", "pyautogui>=0.9.54", "packaging>=23.0", "PySide6>=6.7.0",
     ]
     force_install(base_reqs)
-    from tools.easyocr_runtime import install_easyocr_stack
-
-    install_easyocr_stack([sys.executable])
+    repair_all_conflicts(repair_numpy=False)
 
     target, ver, name = get_gpu_data()
     status_pytorch, status_accel = "CPU Edition", "N/A"
@@ -182,13 +178,22 @@ def setup_pyla():
     if onnx_variant:
         save_gpu_runtime_config(onnx_variant, cards)
 
+    from tools.easyocr_runtime import install_easyocr_stack, verify_easyocr_runtime
+
+    print("\nInstalling EasyOCR stack (after GPU runtime)...")
+    install_easyocr_stack([sys.executable])
+    repair_all_conflicts(repair_numpy=False)
+
     # some conflict fixes
     print("\n Finalizing and Repairing Conflicts...")
-    repair_numpy(verbose=False)
-    force_install(["adbutils==2.12.0", "av==12.3.0"])
-    force_install(["https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip"], no_deps=True)
-    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    force_install(["opencv-python==4.8.0.76"], no_deps=True)
+    repair_all_conflicts(verbose=True)
+    ok, pip_issues = verify_pip_health([sys.executable])
+    if not ok:
+        print("\nERROR: pip dependency check failed after setup:")
+        for issue in pip_issues:
+            print(f"  - {issue}")
+        print("\nTry: python app\\tools\\fix_gpu_runtime.py auto")
+        sys.exit(1)
     try:
         from visual_debug_window import OPENCV_REPAIR_CMD, opencv_highgui_available, visual_debug_backend_name
 
@@ -203,14 +208,15 @@ def setup_pyla():
         print(f"WARNING: Could not verify visual debug backend: {exc}")
 
     import cv2
+    from cuda_runtime_paths import add_cuda_dll_directories
+
+    add_cuda_dll_directories()
     import onnxruntime as ort
     import pandas as pd
 
     print(f"OpenCV verified: {cv2.__version__} ({sys.executable})")
     print(f"Pandas verified: {pd.__version__} ({sys.executable})")
     print(f"ONNX Runtime verified: {ort.__version__} providers={ort.get_available_providers()}")
-    from tools.easyocr_runtime import verify_easyocr_runtime
-
     verify_easyocr_runtime([sys.executable])
     print(f"EasyOCR verified: Reader initialized (CPU) ({sys.executable})")
     # the setup completes

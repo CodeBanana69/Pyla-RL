@@ -14,6 +14,7 @@ from tools.setup_bootstrap import (
     _venv_pip_usable,
 )
 from tools.easyocr_runtime import EASYOCR_REPAIR_HINT, probe_easyocr_runtime, verify_easyocr_runtime
+from tools.dependency_repair import repair_all_conflicts, verify_pip_health
 from tools.python_runtime import probe_runtime_imports, verify_runtime_imports, write_setup_status
 from subprocess_text import run_text
 
@@ -93,8 +94,7 @@ def run_full_project_setup(
     run(venv_command + ["-m", "pip", "install", "setuptools>=70,<82", "wheel"])
     run(venv_command + ["-m", "pip", "install", "--upgrade", "pip"])
     run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"])
-    subprocess.run(venv_command + ["-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    run(venv_command + ["-m", "pip", "install", "--force-reinstall", "--no-deps", "opencv-python==4.8.0.76"])
+    repair_all_conflicts(venv_command, verbose=False, repair_numpy=False)
 
     env = os.environ.copy()
     env["PYLAAI_SETUP_AUTO"] = "1"
@@ -111,6 +111,20 @@ def run_full_project_setup(
         print(str(exc))
         print("")
         print(EASYOCR_REPAIR_HINT)
+        if interactive:
+            input("Press Enter to close...")
+        return False
+
+    ok, pip_issues = verify_pip_health(venv_command)
+    if not ok:
+        print("")
+        print("ERROR: pip dependency check failed after setup:")
+        for issue in pip_issues:
+            print(f"  - {issue}")
+        print("")
+        print(f'  "{venv_executable}" tools\\fix_gpu_runtime.py auto')
+        if interactive:
+            input("Press Enter to close...")
         return False
 
     from tools.hub_first_run import ensure_hub_first_run_wizard

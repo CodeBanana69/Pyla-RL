@@ -80,11 +80,9 @@ def repair_numpy(python=None, *, verbose=True, reinstall_opencv=True) -> bool:
 
     _pip_no_deps(NUMPY_PIN)
     if reinstall_opencv:
-        subprocess.run(
-            [python, "-m", "pip", "uninstall", "-y", "opencv-python-headless"],
-            check=False,
-        )
-        _pip_no_deps(OPENCV_PIN)
+        from tools.dependency_repair import repair_opencv_conflicts
+
+        repair_opencv_conflicts(python, verbose=False)
     return True
 
 
@@ -103,11 +101,16 @@ def _uninstall_torch(python=None):
     subprocess.run([python, "-m", "pip", "uninstall", "-y", "torch", "torchvision"], check=False)
 
 
-NVIDIA_CUDA_DLL_PACKAGES = [
-    "nvidia-cublas-cu12",
-    "nvidia-cudnn-cu12",
-    "nvidia-cuda-runtime-cu12",
-]
+def nvidia_cuda_dll_packages(cuda_major: int = 12) -> list[str]:
+    suffix = f"cu{cuda_major}"
+    return [
+        f"nvidia-cublas-{suffix}",
+        f"nvidia-cudnn-{suffix}",
+        f"nvidia-cuda-runtime-{suffix}",
+    ]
+
+
+NVIDIA_CUDA_DLL_PACKAGES = nvidia_cuda_dll_packages(12)
 
 
 def _pip_install_torch_cuda(compute_cap=0.0, python=None, *, force_reinstall=False):
@@ -197,14 +200,29 @@ def verify_cuda_dlls(verbose=False):
     return has_cuda_dependency_dlls()
 
 
+def repair_cuda_dll_wheels(python=None, verbose=False):
+    """Install cu12 or cu13 NVIDIA wheels until CUDA DLLs verify."""
+    python = python or sys.executable
+    ok, missing = verify_cuda_dlls(verbose=verbose)
+    if ok:
+        return True, missing
+
+    for cuda_major in (12, 13):
+        packages = nvidia_cuda_dll_packages(cuda_major)
+        print(f"Installing NVIDIA CUDA dependency wheels ({', '.join(packages)})...")
+        pip_run(packages, python=python, upgrade=True)
+        ok, missing = verify_cuda_dlls(verbose=verbose)
+        if ok:
+            return True, missing
+    return False, missing
+
+
 def repair_cuda_torch(compute_cap=0.0, python=None, verbose=False):
     _uninstall_torch(python=python)
     _pip_install_torch_cuda(compute_cap, python=python, force_reinstall=True)
     ok, missing = verify_cuda_dlls(verbose=verbose)
     if not ok:
-        print("Installing NVIDIA CUDA dependency wheels for cuDNN/cuBLAS...")
-        pip_run(NVIDIA_CUDA_DLL_PACKAGES, python=python, upgrade=True)
-        ok, missing = verify_cuda_dlls(verbose=verbose)
+        ok, missing = repair_cuda_dll_wheels(python=python, verbose=verbose)
     return ok, missing
 
 

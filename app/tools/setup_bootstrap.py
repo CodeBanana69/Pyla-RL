@@ -33,6 +33,13 @@ def bundle_dir():
 app_dir = install_dir
 
 
+def pause_before_exit(code: int = 0) -> int:
+    if os.environ.get("PYLAAI_SETUP_NO_PAUSE", "").strip().lower() in ("1", "true", "yes"):
+        return code
+    input("Press Enter to close...")
+    return code
+
+
 def run(command, cwd=None, env=None):
     print("> " + " ".join(str(part) for part in command))
     try:
@@ -310,6 +317,15 @@ def install_vc_redist():
 
 
 def main():
+    try:
+        return _main_impl()
+    except Exception as exc:
+        print("")
+        print(f"Setup failed unexpectedly: {exc}")
+        return pause_before_exit(1)
+
+
+def _main_impl():
     if not ensure_supported_windows():
         return 1
 
@@ -355,7 +371,12 @@ def main():
         interactive=True,
         install_vc_redist=None,
     ):
-        return 1
+        print("")
+        print("Setup did not finish cleanly. See errors above.")
+        if progress_window:
+            progress_window.update("Setup failed.")
+            progress_window.close()
+        return pause_before_exit(1)
 
     print("")
     print("Pyla-RL setup completed.")
@@ -363,8 +384,7 @@ def main():
     if progress_window:
         progress_window.update("Setup completed.")
         progress_window.close()
-    input("Press Enter to close...")
-    return 0
+    return pause_before_exit(0)
 
 
 if __name__ == "__main__":

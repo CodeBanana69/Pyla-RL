@@ -26,20 +26,35 @@ class GpuRuntimeInstallTests(unittest.TestCase):
         args = torch_cuda_install_args(8.9)
         self.assertEqual(args[-1], "https://download.pytorch.org/whl/cu124")
 
-    @patch("gpu_runtime_install.subprocess.run")
-    @patch("gpu_runtime_install.subprocess.check_call")
-    def test_repair_numpy_reinstalls_when_major_version_is_two(self, mock_check_call, mock_run):
+    @patch("tools.dependency_repair.repair_opencv_conflicts")
+    @patch("gpu_runtime_install.run_text")
+    def test_repair_numpy_reinstalls_when_major_version_is_two(
+        self,
+        mock_run_text,
+        _mock_repair_opencv,
+    ):
         from gpu_runtime_install import repair_numpy
 
-        version_result = mock_run.return_value
-        version_result.returncode = 0
-        version_result.stdout = "2.4.4\n"
+        def _side_effect(command, **kwargs):
+            result = mock_run_text.return_value
+            if command[-1].startswith("import numpy"):
+                result.returncode = 0
+                result.stdout = "2.4.4\n"
+            else:
+                result.returncode = 0
+                result.stdout = ""
+            return result
 
-        repaired = repair_numpy(python="python", verbose=False)
+        mock_run_text.side_effect = _side_effect
+
+        with patch("tools.python_runtime.is_supported_python", return_value=True):
+            repaired = repair_numpy(python="python", verbose=False)
 
         self.assertTrue(repaired)
-        mock_check_call.assert_any_call(
+        mock_run_text.assert_any_call(
             ["python", "-m", "pip", "install", "--force-reinstall", "--no-deps", "numpy<2.0.0"],
+            capture_output=True,
+            check=False,
         )
 
 

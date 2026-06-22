@@ -37,6 +37,22 @@ class CudaRuntimePathTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(missing, ["cudnn64_9.dll"])
 
+    def test_accepts_cublas_cu13_dll(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cublas_bin = root / "nvidia" / "cublas" / "bin"
+            cudnn_bin = root / "nvidia" / "cudnn" / "bin"
+            cublas_bin.mkdir(parents=True)
+            cudnn_bin.mkdir(parents=True)
+            (cublas_bin / "cublasLt64_13.dll").write_text("")
+            (cudnn_bin / "cudnn64_9.dll").write_text("")
+
+            with patch.object(cuda_runtime_paths, "_site_package_roots", return_value=[root]):
+                ok, missing = cuda_runtime_paths.has_cuda_dependency_dlls()
+                self.assertTrue(ok)
+                self.assertEqual(missing, [])
+                self.assertEqual(cuda_runtime_paths.detected_cublas_dll_name(), "cublasLt64_13.dll")
+
 
 if __name__ == "__main__":
     unittest.main()

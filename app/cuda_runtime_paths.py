@@ -7,6 +7,9 @@ from pathlib import Path
 _CUDA_DLL_DIR_HANDLES = []
 _CUDA_DLL_PATHS_ADDED = False
 
+CUBLAS_DLL_NAMES = ("cublasLt64_12.dll", "cublasLt64_13.dll")
+CUDNN_DLL_NAME = "cudnn64_9.dll"
+
 
 def _site_package_roots():
     roots = []
@@ -66,6 +69,30 @@ def find_cuda_dll_directories():
     return result
 
 
+def _find_dll(name: str) -> Path | None:
+    for directory in find_cuda_dll_directories():
+        candidate = directory / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def detected_cublas_dll_name() -> str | None:
+    for name in CUBLAS_DLL_NAMES:
+        if _find_dll(name) is not None:
+            return name
+    return None
+
+
+def required_cuda_major_version() -> int:
+    detected = detected_cublas_dll_name()
+    if detected == "cublasLt64_13.dll":
+        return 13
+    if detected == "cublasLt64_12.dll":
+        return 12
+    return 12
+
+
 def add_cuda_dll_directories(verbose=False):
     global _CUDA_DLL_PATHS_ADDED
     if _CUDA_DLL_PATHS_ADDED:
@@ -101,10 +128,14 @@ def add_cuda_dll_directories(verbose=False):
 
 
 def has_cuda_dependency_dlls():
-    names = {"cublasLt64_12.dll", "cudnn64_9.dll"}
-    found = set()
-    for path in find_cuda_dll_directories():
-        for name in names:
-            if (path / name).exists():
-                found.add(name)
-    return names.issubset(found), sorted(names - found)
+    found_cublas = detected_cublas_dll_name()
+    found_cudnn = _find_dll(CUDNN_DLL_NAME) is not None
+    if found_cublas and found_cudnn:
+        return True, []
+
+    missing = []
+    if not found_cublas:
+        missing.append("cublasLt64_12.dll or cublasLt64_13.dll")
+    if not found_cudnn:
+        missing.append(CUDNN_DLL_NAME)
+    return False, missing

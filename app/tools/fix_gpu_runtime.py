@@ -11,10 +11,10 @@ from gpu_runtime_install import (
     auto_install_gpu_runtime,
     install_and_verify_variant,
     install_variant,
-    OPENCV_PIN,
     repair_numpy,
     verify_cuda_dlls,
 )
+from tools.dependency_repair import repair_all_conflicts, verify_pip_health
 from gpu_support import (
     apply_gpu_config,
     auto_candidate_variants as gpu_auto_candidate_variants,
@@ -53,20 +53,18 @@ def install_base_requirements():
     run([sys.executable, "-m", "pip", "install", "--upgrade", "pip", "wheel"])
     run([sys.executable, "-m", "pip", "install", "setuptools>=70,<82"])
     run([sys.executable, "-m", "pip", "install", "--upgrade", *BASE_REQUIREMENTS])
-    subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "opencv-python-headless"], check=False)
-    run([sys.executable, "-m", "pip", "install", "--force-reinstall", OPENCV_PIN])
-    run([
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "https://github.com/leng-yue/py-scrcpy-client/archive/refs/tags/v0.5.0.zip",
-        "--no-deps",
-    ])
+    repair_all_conflicts(verbose=True)
     from tools.easyocr_runtime import install_easyocr_stack, verify_easyocr_runtime
 
     install_easyocr_stack([sys.executable])
+    repair_all_conflicts(repair_numpy=False)
     verify_easyocr_runtime([sys.executable])
+    ok, pip_issues = verify_pip_health([sys.executable])
+    if not ok:
+        print("\nERROR: pip dependency check failed:")
+        for issue in pip_issues:
+            print(f"  - {issue}")
+        raise RuntimeError("pip dependency check failed after base requirements install")
 
 
 def detect_graphics_cards():
