@@ -1,4 +1,4 @@
-﻿from difflib import SequenceMatcher
+from difflib import SequenceMatcher
 import time
 
 import cv2
@@ -979,6 +979,15 @@ class LobbyAutomation:
             return True
         if normalize_brawler_name(detected_name) == normalize_brawler_name(target_name):
             return True
+
+        # Do not match distinct known brawlers to avoid confusion (e.g. mandy/sandy, colt/bolt)
+        brawlers_info = load_brawlers_info()
+        canonical_detected = resolve_brawler_name_alias(normalize_brawler_name(detected_name))
+        canonical_target = resolve_brawler_name_alias(normalize_brawler_name(target_name))
+        if canonical_detected in brawlers_info and canonical_target in brawlers_info:
+            if canonical_detected != canonical_target:
+                return False
+
         if len(target_name) <= 2 or len(detected_name) <= 2:
             return False
         shorter, longer = (

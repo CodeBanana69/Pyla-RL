@@ -43,6 +43,13 @@ class PushAll1kSelectionTest(unittest.TestCase):
 
         self.assertEqual(brawler, "larry & lawrie")
 
+    def test_ocr_match_rejects_distinct_known_brawlers(self):
+        brawler = SelectBrawler._match_brawler_from_ocr_texts(["sandy"], ["mandy", "colt", "meg"])
+        self.assertIsNone(brawler)
+
+        brawler = SelectBrawler._match_brawler_from_ocr_texts(["colt"], ["bolt", "mandy", "meg"])
+        self.assertIsNone(brawler)
+
     def test_selected_game_brawler_moves_to_front_and_flags_update(self):
         data = [
             {"brawler": "meg", "automatically_pick": False, "trophies": 0},

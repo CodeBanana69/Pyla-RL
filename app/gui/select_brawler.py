@@ -1,4 +1,4 @@
-﻿import json
+import json
 import time
 import tkinter as tk
 from difflib import SequenceMatcher
@@ -22,6 +22,7 @@ from utils import (
     resolve_brawler_name_alias,
     save_brawler_icon,
     get_dpi_scale,
+    load_brawlers_info,
 )
 from tkinter import filedialog
 
@@ -700,6 +701,13 @@ class SelectBrawler:
                 normalized_brawler = resolve_brawler_name_alias(normalized_brawler)
                 if normalized_text == normalized_brawler:
                     return brawler
+                
+                # Do not match distinct known brawlers to avoid confusion (e.g. mandy/sandy, colt/bolt)
+                brawlers_info = load_brawlers_info()
+                if normalized_text in brawlers_info and normalized_brawler in brawlers_info:
+                    if normalized_text != normalized_brawler:
+                        continue
+
                 if normalized_brawler in normalized_text or normalized_text in normalized_brawler:
                     score = min(len(normalized_text), len(normalized_brawler)) / max(
                         len(normalized_text), len(normalized_brawler)

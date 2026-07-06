@@ -50,6 +50,13 @@ class GridNameMatchTests(unittest.TestCase):
                 msg=f"{raw!r} should confidently match meeple",
             )
 
+    def test_mandy_sandy_colt_bolt_mismatches(self):
+        # Verify they do not match due to the distinct known brawler check
+        self.assertFalse(LobbyAutomation.names_match("mandy", "sandy"))
+        self.assertFalse(LobbyAutomation.names_match("sandy", "mandy"))
+        self.assertFalse(LobbyAutomation.names_match("colt", "bolt"))
+        self.assertFalse(LobbyAutomation.names_match("bolt", "colt"))
+
 
 if __name__ == "__main__":
     unittest.main()

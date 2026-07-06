@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 import io
 import math
 import os
@@ -711,15 +711,24 @@ def find_template_center(main_img, template, threshold=0.8):
         return False
 
 
+_brawlers_info_cache = None
+
+
 def load_brawlers_info():
+    global _brawlers_info_cache
+    if _brawlers_info_cache is not None:
+        return _brawlers_info_cache
     resolved_path = resolve_project_path(brawlers_info_file_path)
     if os.path.exists(resolved_path):
         with open(resolved_path, 'r') as f:
-            return json.load(f)
+            _brawlers_info_cache = json.load(f)
+            return _brawlers_info_cache
     else:
         return {}
 
 def update_brawlers_info(brawlers_info):
+    global _brawlers_info_cache
+    _brawlers_info_cache = brawlers_info
     resolved_path = resolve_project_path(brawlers_info_file_path)
     with open(resolved_path, 'w') as f:
         json.dump(brawlers_info, f, indent=4)
