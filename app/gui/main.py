@@ -84,12 +84,11 @@ class App:
             if queue:
                 self.brawler_data = queue
             else:
-                selector = self.select_brawler(self.set_data, self.brawlers)
-                if hasattr(selector, "close_app"):
-                    try:
-                        selector.close_app()
-                    except Exception:
-                        pass
+                print(
+                    "No farm plan configured. Add at least one brawler or build Push All "
+                    "in the Hub before pressing Start."
+                )
+                return
             if self.brawler_data:
                 utils.save_brawler_data(self.brawler_data)
                 time.sleep(0.05)
